@@ -13,7 +13,8 @@ public struct Snapshot: Codable, Sendable {
     public var processes: [ProcessSample]
 }
 
-public final class Sampler {
+/// Not thread-safe; the app confines it to one serial queue.
+public final class Sampler: @unchecked Sendable {
     public let cpu = CPUSampler()
     let memory = MemorySampler()
     let disk = DiskSampler()

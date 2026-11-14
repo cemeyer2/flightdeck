@@ -24,6 +24,12 @@ Startup Apps · Users · Services (launchd) · Power & Freq · Connections · In
 
 Six themes: Light, Dark, Green, Amber, Blue, Mono.
 
+**Live Dock icon:** right-click the Dock icon (or use Monitor › Dock Icon, or Settings) to pick a mode:
+CPU History (scrolling graph), CPU Cores (one VFD column per core, coloured by P/E), System Gauges (CPU, memory
+and temperature), or the static App Icon. It follows the current theme and shows a red tally light while the
+Flight Recorder is recording. The static `AppIcon.icns` is rendered by the same code at build time
+(`Meterline --render-iconset <dir>`); `--render-dock-previews <dir>` writes every mode × theme as a PNG.
+
 ## Measurement principles
 
 - **No invented zeros.** Every value is `Measured<T>`, either `.value` or `.unavailable(reason)`. Unmeasured

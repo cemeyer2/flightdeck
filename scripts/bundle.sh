@@ -8,6 +8,10 @@ BIN="$(swift build -c release $ARCHS --show-bin-path)/Meterline"
 APP="build/Meterline.app"
 rm -rf "$APP"; mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/Meterline"
+# static app icon rendered by the app's own Dock tile renderer
+ICONSET="$(mktemp -d)/Meterline.iconset"
+"$BIN" --render-iconset "$ICONSET"
+iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -16,6 +20,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleDisplayName</key><string>Meterline</string>
   <key>CFBundleIdentifier</key><string>app.meterline.Meterline</string>
   <key>CFBundleExecutable</key><string>Meterline</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>1.0</string>
   <key>CFBundleVersion</key><string>1</string>

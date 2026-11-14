@@ -60,13 +60,17 @@ final class Engine: ObservableObject {
     private func ingest(_ s: Snapshot) {
         inFlight = false
         if recording { recorded.append(MeterCore.Trace.trimmed(s)) }
+        DockIconController.shared.ingest(s, recording: recording)
         guard mode == .live else { return }
         current = s
         var light = s; light.processes = Array(s.processes.sorted { $0.cpu > $1.cpu }.prefix(12))
         frames.removeFirst(); frames.append(light)
     }
 
-    private func pushGap() { if mode == .live { frames.removeFirst(); frames.append(nil) } }
+    private func pushGap() {
+        DockIconController.shared.gap()
+        if mode == .live { frames.removeFirst(); frames.append(nil) }
+    }
 
     func sampleNow() { let p = paused; paused = false; tick(); paused = p }
 
