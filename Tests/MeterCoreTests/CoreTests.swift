@@ -97,8 +97,12 @@ final class ProcessNetworkTests: XCTestCase {
         let s = ProcessNetworkSampler()
         XCTAssertNil(s.sample(), "first snapshot must be unavailable, not zero")
         let exp = expectation(description: "download")
-        let url = URL(string: "https://www.apple.com/")!
-        let task = URLSession.shared.dataTask(with: url) { _, _, _ in exp.fulfill() }
+        // uncached session + unique URL: a cached response would never touch the network
+        let cfg = URLSessionConfiguration.ephemeral
+        cfg.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData; cfg.urlCache = nil
+        let session = URLSession(configuration: cfg)
+        let url = URL(string: "https://www.apple.com/?ml=\(UUID().uuidString)")!
+        let task = session.dataTask(with: url) { _, _, _ in exp.fulfill() }
         task.resume()
         wait(for: [exp], timeout: 20)
         guard let net = s.sample() else { return XCTFail("nettop unavailable") }
