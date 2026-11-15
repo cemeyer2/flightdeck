@@ -99,6 +99,7 @@ struct NetworkPerf: View {
                                       GraphTrace(name: "out", values: e.series { $0.network.outBps.value }, color: p.accent2)],
                              minHeadroom: 65_536, format: Fmt.rate).frame(height: 220)
             }
+            AppNetworkPanel()
             Panel(title: "Interfaces") {
                 let ifs = (n?.interfaces ?? []).filter { $0.totalIn + $0.totalOut > 0 || !$0.addresses.isEmpty }
                 Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 6) {

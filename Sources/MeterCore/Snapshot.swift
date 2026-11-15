@@ -21,12 +21,20 @@ public final class Sampler: @unchecked Sendable {
     let network = NetworkSampler()
     let power = PowerSampler()
     public let processes = ProcessSampler()
+    let processNetwork = ProcessNetworkSampler()
     public init() {}
 
     public func sample() -> Snapshot {
-        Snapshot(time: Date(), cpu: cpu.sample(), memory: memory.sample(), disk: disk.sample(),
-                 network: network.sample(), power: power.sample(), gpu: SystemInfo.gpuUtilization(),
-                 processes: processes.sample())
+        var procs = processes.sample()
+        if let net = processNetwork.sample() {
+            for i in procs.indices {
+                procs[i].network = net[procs[i].pid] ?? ProcessNetwork(inBps: 0, outBps: 0, totalIn: 0, totalOut: 0, connections: 0)
+            }
+            processNetwork.retain(pids: Set(procs.map(\.pid)))
+        }
+        return Snapshot(time: Date(), cpu: cpu.sample(), memory: memory.sample(), disk: disk.sample(),
+                        network: network.sample(), power: power.sample(), gpu: SystemInfo.gpuUtilization(),
+                        processes: procs)
     }
 }
 
@@ -46,7 +54,11 @@ public struct Trace: Codable, Sendable {
     /// Recorded frames keep only the top processes to bound file size.
     public static func trimmed(_ s: Snapshot, keep: Int = 60) -> Snapshot {
         var c = s
-        c.processes = Array(s.processes.sorted { $0.cpu + Double($0.memory) / 1e10 > $1.cpu + Double($1.memory) / 1e10 }.prefix(keep))
+        let byLoad = s.processes.sorted { $0.cpu + Double($0.memory) / 1e10 > $1.cpu + Double($1.memory) / 1e10 }.prefix(keep * 2 / 3)
+        func net(_ p: ProcessSample) -> Double { (p.network?.inBps ?? 0) + (p.network?.outBps ?? 0) }
+        let byNet = s.processes.filter { net($0) > 0 }.sorted { net($0) > net($1) }.prefix(keep / 3)
+        var seen = Set<ProcessIdentity>()
+        c.processes = (Array(byLoad) + Array(byNet)).filter { seen.insert($0.identity).inserted }
         return c
     }
 

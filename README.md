@@ -15,7 +15,7 @@ Requires macOS 14+, Xcode 16+ toolchain.
 
 ## Views
 
-Summary · Performance (CPU per core with P/E colouring, overall/logical/cluster modes; Memory; Disk; Network;
+Summary · Performance (CPU per core with P/E colouring, overall/logical/cluster modes; Memory; Disk; Network with per-app traffic;
 Energy; Thermals; GPU) · Processes (live tree, sort/filter, Quit/Force Quit/Suspend/Resume) · System Info ·
 Startup Apps · Users · Services (launchd) · Power & Freq · Connections · Installed Apps · Disk Space · Benchmarks
 
@@ -42,8 +42,11 @@ Flight Recorder is recording. The static `AppIcon.icns` is rendered by the same 
 
 ## Known limits
 
-- Per-process network bytes and live CPU clock frequency need private or root-only interfaces, so they aren't
-  shown. Power & Freq shows the DVFS frequency tables instead.
+- Per-process network traffic comes from `/usr/bin/nettop`. Only that Apple binary holds the private
+  network-statistics entitlement, so Meterline runs it once per sample (about 18 ms CPU) and diffs per-connection
+  counters. A connection that opens and closes between two samples isn't counted. Against a 5 MB curl download
+  the count came out at 5.01 MB (the extra is TLS overhead).
+- Live CPU clock frequency needs private IOReport access, so it isn't shown. Power & Freq shows the DVFS tables instead.
 - Connections lists only your own processes' sockets, since `lsof` runs without root.
 - Thermal sensors refresh every 4 s, because reading all HID sensors costs about 70 ms.
 

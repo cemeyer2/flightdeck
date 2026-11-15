@@ -85,6 +85,7 @@ struct TopProcessesCard: View {
                 row("CPU", procs.max { $0.cpu < $1.cpu }.map { ($0.name, Fmt.pct($0.cpu)) })
                 row("Memory", procs.max { $0.memory < $1.memory }.map { ($0.name, Fmt.bytes($0.memory)) })
                 row("Energy", procs.filter { $0.energyWatts != nil }.max { ($0.energyWatts ?? 0) < ($1.energyWatts ?? 0) }.map { ($0.name, String(format: "%.2f W", $0.energyWatts ?? 0)) })
+                row("Network", procs.filter { $0.network != nil }.max { ($0.network!.inBps + $0.network!.outBps) < ($1.network!.inBps + $1.network!.outBps) }.map { ($0.name, Fmt.rate($0.network!.inBps + $0.network!.outBps)) })
                 row("Disk", procs.max { $0.diskReadBps + $0.diskWriteBps < $1.diskReadBps + $1.diskWriteBps }.map { ($0.name, Fmt.rate($0.diskReadBps + $0.diskWriteBps)) })
                 row("Wakeups", procs.max { $0.wakeups < $1.wakeups }.map { ($0.name, String(format: "%.0f/s", $0.wakeups)) })
             }
@@ -117,6 +118,10 @@ struct DiagnosisBanner: View {
         if let r = s.disk.readBps.value, let w = s.disk.writeBps.value, r + w > 200e6 {
             let d = s.processes.max { $0.diskReadBps + $0.diskWriteBps < $1.diskReadBps + $1.diskWriteBps }
             out.append(("internaldrive", "Heavy disk I/O (\(Fmt.rate(r + w)))" + (d.map { " — mostly \($0.name)." } ?? ".")))
+        }
+        if let i = s.network.inBps.value, let o = s.network.outBps.value, i + o > 5e6,
+           let n = s.processes.filter({ $0.network != nil }).max(by: { ($0.network!.inBps + $0.network!.outBps) < ($1.network!.inBps + $1.network!.outBps) }) {
+            out.append(("network", "Heavy network traffic (\(Fmt.rate(i + o))) — mostly \(n.name)."))
         }
         if let w = top?.wakeups, w > 500, let top { out.append(("alarm", String(format: "%@ wakes the CPU %.0f times/s.", top.name, w))) }
         if out.isEmpty { out.append(("checkmark.seal", "Nothing is holding this Mac back right now.")) }

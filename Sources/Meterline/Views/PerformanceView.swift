@@ -23,6 +23,11 @@ struct PerformanceView: View {
                 }.padding([.horizontal, .bottom], 16)
             }
         }
+        .onAppear {   // automation hook: -perfTab Network
+            if let t = UserDefaults.standard.string(forKey: "perfTab").flatMap(PerfTab.init(rawValue:)) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { tab = t }
+            }
+        }
     }
 }
 

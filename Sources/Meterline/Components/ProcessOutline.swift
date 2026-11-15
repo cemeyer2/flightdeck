@@ -9,13 +9,14 @@ final class ProcItem: NSObject {
 }
 
 enum ProcColumn: String, CaseIterable, Equatable {
-    case name = "Name", pid = "PID", cpu = "CPU %", memory = "Memory", disk = "Disk", energy = "Energy", wakeups = "Wakeups", threads = "Threads", user = "User"
-    var width: CGFloat { switch self { case .name: 260; case .user: 90; case .cpu, .memory, .disk: 90; default: 66 } }
+    case name = "Name", pid = "PID", cpu = "CPU %", memory = "Memory", disk = "Disk", netIn = "Net In", netOut = "Net Out", energy = "Energy", wakeups = "Wakeups", threads = "Threads", user = "User"
+    var width: CGFloat { switch self { case .name: 240; case .user: 90; case .cpu, .memory, .disk, .netIn, .netOut: 84; default: 62 } }
     var numeric: Bool { self != .name && self != .user }
     func key(_ s: ProcessSample) -> Double {
         switch self {
         case .pid: Double(s.pid); case .cpu: s.cpu; case .memory: Double(s.memory)
         case .disk: s.diskReadBps + s.diskWriteBps; case .energy: s.energyWatts ?? -1
+        case .netIn: s.network?.inBps ?? -1; case .netOut: s.network?.outBps ?? -1
         case .wakeups: s.wakeups; case .threads: Double(s.threads); default: 0
         }
     }
@@ -26,6 +27,8 @@ enum ProcColumn: String, CaseIterable, Equatable {
         case .cpu: s.restricted ? "—" : String(format: "%.1f", s.cpu)
         case .memory: s.restricted ? "—" : Fmt.bytes(s.memory)
         case .disk: s.restricted ? "—" : (s.diskReadBps + s.diskWriteBps > 0 ? Fmt.rate(s.diskReadBps + s.diskWriteBps) : "0")
+        case .netIn: s.network.map { $0.inBps > 0 ? Fmt.rate($0.inBps) : "0" } ?? "—"
+        case .netOut: s.network.map { $0.outBps > 0 ? Fmt.rate($0.outBps) : "0" } ?? "—"
         case .energy: s.energyWatts.map { String(format: "%.2f W", $0) } ?? "—"
         case .wakeups: s.restricted ? "—" : String(format: "%.0f", s.wakeups)
         case .threads: s.restricted ? "—" : "\(s.threads)"
@@ -60,6 +63,9 @@ struct ProcessOutline: NSViewRepresentable {
             col.title = c.rawValue; col.width = c.width; col.minWidth = 40
             col.sortDescriptorPrototype = NSSortDescriptor(key: c.rawValue, ascending: !c.numeric)
             if c.numeric { col.headerCell.alignment = .right }
+            if c == .netIn || c == .netOut {
+                col.headerToolTip = "Sampled from each process's open connections every tick (via nettop). Connections that open and close between samples aren't counted."
+            }
             ov.addTableColumn(col)
             if c == .name { ov.outlineTableColumn = col }
         }

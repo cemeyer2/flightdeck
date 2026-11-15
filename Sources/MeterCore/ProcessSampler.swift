@@ -27,6 +27,8 @@ public struct ProcessSample: Codable, Sendable, Identifiable, Hashable {
     public var energyWatts: Double?   // from billed energy, nil if not reported
     public var wakeups: Double        // idle wakeups/s
     public var restricted: Bool       // couldn't read full info (other user's process)
+    /// nil = network sampling unavailable or warming up. Present for every process once nettop works.
+    public var network: ProcessNetwork? = nil
     public var startDate: Date { Date(timeIntervalSince1970: Double(identity.startTime) / 1e6) }
 }
 
