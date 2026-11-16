@@ -6,6 +6,15 @@ struct PowerView: View {
     @Environment(\.palette) var p
     @StateObject var freq = Loader { Frequency.clusters() }
     @StateObject var pm = Loader { Frequency.pmsetSettings().map { "\($0.0)\t\($0.1)" } }
+    /// Live clock for a DVFS table: the matching CPU cluster average, or the GPU's.
+    func liveMHz(_ table: String) -> Double? {
+        guard let g = e.current?.gpuDetail else { return nil }
+        if table == "GPU" { return g.frequencyMHz }
+        let kind = table.hasPrefix("Efficiency") ? "E" : "P"
+        let m = g.cpuClusters.filter { $0.name.hasPrefix(kind) }.compactMap(\.mhz)
+        return m.isEmpty ? nil : m.max()
+    }
+
     var body: some View {
         ScrollView {
             VStack(spacing: 12) {
@@ -20,17 +29,20 @@ struct PowerView: View {
                         Spacer()
                     }
                 }
-                Panel(title: "Frequency (DVFS tables)", trailing: "live clock: unavailable without privileged IOReport access") {
+                Panel(title: "Frequency (DVFS tables)", trailing: "live clocks from IOReport") {
                     ForEach(freq.value ?? [], id: \.name) { c in
+                        let live = liveMHz(c.name)
                         VStack(alignment: .leading, spacing: 4) {
                             HStack {
                                 Text(c.name).foregroundStyle(p.text)
+                                if let live { Text(String(format: "now %.0f MHz", live)).foregroundStyle(p.accent) }
                                 Spacer()
                                 Text(String(format: "%.0f – %.0f MHz · %d steps", c.minMHz, c.maxMHz, c.steps.count)).foregroundStyle(p.dim)
                             }.font(.system(size: 12, design: .monospaced))
                             HStack(alignment: .bottom, spacing: 2) {
                                 ForEach(Array(c.steps.enumerated()), id: \.offset) { _, f in
-                                    RoundedRectangle(cornerRadius: 1.5).fill(p.accent.opacity(0.4 + 0.6 * f / max(c.maxMHz, 1)))
+                                    let lit = live.map { f <= $0 + 1 } ?? true
+                                    RoundedRectangle(cornerRadius: 1.5).fill(lit ? p.accent.opacity(0.4 + 0.6 * f / max(c.maxMHz, 1)) : p.meterOff)
                                         .frame(height: max(4, 50 * f / max(c.maxMHz, 1))).help(String(format: "%.0f MHz", f))
                                 }
                             }.frame(height: 52)

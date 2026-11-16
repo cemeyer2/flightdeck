@@ -32,6 +32,8 @@ public struct ProcessSample: Codable, Sendable, Identifiable, Hashable {
     public var network: ProcessNetwork? = nil
     /// GUI apps only: true while the window server considers it hung. nil = not a GUI app / unknown.
     public var notResponding: Bool? = nil
+    /// Share of GPU time (%) over the last sample; nil = this process has no GPU client.
+    public var gpu: Double? = nil
     public var startDate: Date { Date(timeIntervalSince1970: Double(identity.startTime) / 1e6) }
 }
 

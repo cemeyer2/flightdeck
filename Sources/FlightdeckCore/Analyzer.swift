@@ -87,6 +87,10 @@ public final class Analyzer {
     private var volumeFree: [(Date, Double)] = []
     private var cpuEMA = EMA(), cpuSlow = EMA(), diskEMA = EMA(), netEMA = EMA(), wattsEMA = EMA()
     private var since: [String: Date] = [:]
+    private var appGPU: [String: EMA] = [:]
+    private var gpuThermal = EMA()
+    private var lastRecoveries: Int?
+    private var recoveryEvents: [Date] = []
 
     public init() {}
 
@@ -117,6 +121,9 @@ public final class Analyzer {
 
         for a in apps { appCPU[a.id, default: EMA()].update(a.cpu, dt: step, tau: 20) }
         appCPU = appCPU.filter { byKey[$0.key] != nil }
+        for a in apps { appGPU[a.id, default: EMA()].update(a.gpu ?? 0, dt: step, tau: 20) }
+        appGPU = appGPU.filter { byKey[$0.key] != nil }
+        if let tl = s.gpuDetail?.thermalLimited { gpuThermal.update(tl, dt: step, tau: 30) }
         if let c = s.cpu.total.value { cpuEMA.update(c, dt: step, tau: 20); cpuSlow.update(c, dt: step, tau: 60) }
         if let r = s.disk.readBps.value, let w = s.disk.writeBps.value { diskEMA.update(r + w, dt: step, tau: 15) }
         if let i = s.network.inBps.value, let o = s.network.outBps.value { netEMA.update(i + o, dt: step, tau: 15) }
@@ -156,6 +163,31 @@ public final class Analyzer {
             add("cpu-saturated", .caution, "cpu", String(format: "CPU is %.0f%% busy", c),
                 topCPU.map { "Biggest user: \(describe($0)) at \(Int($0.cpu))%." }, "Performance:CPU")
         }
+
+        // GPU
+        if let g = s.gpuDetail {
+            if let r = g.recoveryCount {
+                if let prev = lastRecoveries, r > prev { for _ in 0..<(r - prev) { recoveryEvents.append(t) } }
+                lastRecoveries = r
+            }
+            recoveryEvents.removeAll { t.timeIntervalSince($0) > 600 }
+            if !recoveryEvents.isEmpty {
+                add("gpu-recovery", .warning, "exclamationmark.triangle", "The GPU hung and was restarted \(recoveryEvents.count) time\(recoveryEvents.count == 1 ? "" : "s") in the last 10 minutes",
+                    "An app (or the driver) stalled the GPU, and macOS reset it. If this repeats, check the busiest GPU app below and quit it.", "Performance:GPU")
+            }
+            if let tl = gpuThermal.value, tl > 10 {
+                add("gpu-thermal", .caution, "thermometer.high", String(format: "The GPU is being slowed down for heat (%.0f%% of the time)", tl),
+                    "Its clock is capped to control temperature, so graphics and compute run slower.", "Performance:GPU")
+            }
+            if let used = g.memoryInUse, s.memory.total > 0, Double(used) > Double(s.memory.total) * 0.75 * 0.9 {
+                add("gpu-memory", .caution, "memorychip", "GPU memory is nearly at its working-set limit (\(Fmt.bytes(used)))",
+                    "Apps that need more GPU memory will slow down or fail. Close GPU-heavy apps or tabs.", "Performance:GPU")
+            }
+        }
+        for (k, e) in appGPU { if let v = e.value, v > 80, let a = byKey[k] {
+            add("gpu:\(k)", .caution, "cube.transparent", String(format: "%@ is using %.0f%% of the GPU", describe(a), v),
+                KnownProcess.explain(a.name) ?? "Graphics or compute work from this app is keeping the GPU busy.", "Performance:GPU")
+        } }
 
         // Hung apps
         for p in s.processes where p.notResponding == true {
@@ -292,7 +324,7 @@ public final class Analyzer {
     }
 
     private func resetShortTerm() {
-        appCPU = [:]; cpuEMA = EMA(); cpuSlow = EMA(); diskEMA = EMA(); netEMA = EMA(); wattsEMA = EMA(); since = [:]
+        appCPU = [:]; appGPU = [:]; gpuThermal = EMA(); cpuEMA = EMA(); cpuSlow = EMA(); diskEMA = EMA(); netEMA = EMA(); wattsEMA = EMA(); since = [:]
     }
 }
 

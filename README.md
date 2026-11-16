@@ -67,6 +67,14 @@ disk fills at the current rate. Unhealthy drives raise a warning.
 **Thermals** adds fan speeds from the SMC (RPM, min, max, target, history) and a sensor heatmap of every
 temperature sensor, hottest first.
 
+**GPU** (Performance › GPU): utilisation (device, renderer, tiler), active residency, live average clock and a
+per-P-state histogram, GPU power, GPU memory in use against Metal's recommended working set, driver
+**recoveries** (GPU hangs that macOS reset), thermal clock capping, per-app GPU share and total GPU time (also a
+GPU % column in Processes and a graph in the inspector), live CPU cluster clocks, and Metal and display details.
+The data comes from the accelerator's statistics and IOReport, readable without root. Energy channels macOS hides
+from normal users (CPU, ANE, DRAM) are shown as unavailable, not 0. Findings cover GPU hangs, thermal capping,
+GPU memory near its limit, and apps hogging the GPU.
+
 **Export:** Recorder › Export writes a one-page **PDF flight report** (findings, average/95th/peak statistics,
 top apps, graphs) or **CSV** (system metrics, or per-process) for the replayed recording, or the last hour of the
 black box when live. Unmeasured values are empty CSV cells, not zeros.

@@ -9,7 +9,7 @@ final class ProcItem: NSObject {
 }
 
 enum ProcColumn: String, CaseIterable, Equatable {
-    case name = "Name", pid = "PID", cpu = "CPU %", memory = "Memory", disk = "Disk", netIn = "Net In", netOut = "Net Out", energy = "Energy", wakeups = "Wakeups", threads = "Threads", user = "User"
+    case name = "Name", pid = "PID", cpu = "CPU %", gpu = "GPU %", memory = "Memory", disk = "Disk", netIn = "Net In", netOut = "Net Out", energy = "Energy", wakeups = "Wakeups", threads = "Threads", user = "User"
     var width: CGFloat { switch self { case .name: 240; case .user: 90; case .cpu, .memory, .disk, .netIn, .netOut: 84; default: 62 } }
     var numeric: Bool { self != .name && self != .user }
     func key(_ s: ProcessSample) -> Double {
@@ -17,7 +17,7 @@ enum ProcColumn: String, CaseIterable, Equatable {
         case .pid: Double(s.pid); case .cpu: s.cpu; case .memory: Double(s.memory)
         case .disk: s.diskReadBps + s.diskWriteBps; case .energy: s.energyWatts ?? -1
         case .netIn: s.network?.inBps ?? -1; case .netOut: s.network?.outBps ?? -1
-        case .wakeups: s.wakeups; case .threads: Double(s.threads); default: 0
+        case .wakeups: s.wakeups; case .threads: Double(s.threads); case .gpu: s.gpu ?? -1; default: 0
         }
     }
     func text(_ s: ProcessSample) -> String {
@@ -30,6 +30,7 @@ enum ProcColumn: String, CaseIterable, Equatable {
         case .netIn: s.network.map { $0.inBps > 0 ? Fmt.rate($0.inBps) : "0" } ?? "—"
         case .netOut: s.network.map { $0.outBps > 0 ? Fmt.rate($0.outBps) : "0" } ?? "—"
         case .energy: s.energyWatts.map { String(format: "%.2f W", $0) } ?? "—"
+        case .gpu: s.gpu.map { String(format: "%.1f", $0) } ?? ""
         case .wakeups: s.restricted ? "—" : String(format: "%.0f", s.wakeups)
         case .threads: s.restricted ? "—" : "\(s.threads)"
         case .user: s.user
@@ -133,6 +134,7 @@ struct ProcessOutline: NSViewRepresentable {
                 g.diskWriteBps = members.reduce(0) { $0 + $1.s.diskWriteBps }
                 g.wakeups = members.reduce(0) { $0 + $1.s.wakeups }
                 let e = members.compactMap(\.s.energyWatts); g.energyWatts = e.isEmpty ? nil : e.reduce(0, +)
+                let gp = members.compactMap(\.s.gpu); g.gpu = gp.isEmpty ? nil : gp.reduce(0, +)
                 let n = members.compactMap(\.s.network)
                 g.network = n.isEmpty ? nil : ProcessNetwork(inBps: n.reduce(0) { $0 + $1.inBps }, outBps: n.reduce(0) { $0 + $1.outBps },
                                                              totalIn: n.reduce(0) { $0 + $1.totalIn }, totalOut: n.reduce(0) { $0 + $1.totalOut },

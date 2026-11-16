@@ -162,6 +162,10 @@ struct InspectorView: View {
                 HistoryGraph(traces: [GraphTrace(name: "mem", values: model.series { $0.memory }, color: p.accent)], minHeadroom: 1_048_576,
                              format: Fmt.bytes).frame(height: 90)
             }
+            Panel(title: "GPU", trailing: s?.gpu.map { String(format: "%.1f%% of GPU time", $0) } ?? "not using the GPU") {
+                HistoryGraph(traces: [GraphTrace(name: "gpu", values: model.series { $0.gpu }, color: p.accent2)], minHeadroom: 10,
+                             format: { String(format: "%.0f%%", $0) }).frame(height: 90)
+            }
             Panel(title: "Disk", trailing: s.map { "R \(Fmt.rate($0.diskReadBps)) · W \(Fmt.rate($0.diskWriteBps))" }) {
                 HistoryGraph(traces: [GraphTrace(name: "r", values: model.series { $0.diskRead }, color: p.accent),
                                       GraphTrace(name: "w", values: model.series { $0.diskWrite }, color: p.accent2)], minHeadroom: 65_536,

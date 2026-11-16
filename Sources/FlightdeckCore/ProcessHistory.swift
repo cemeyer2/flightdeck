@@ -6,6 +6,7 @@ public final class ProcessHistory: @unchecked Sendable {
     public struct Point: Sendable {
         public var cpu: Float, memory: Float, diskRead: Float, diskWrite: Float
         public var netIn: Float?, netOut: Float?
+        public var gpu: Float?
     }
     public let capacity: Int
     private var tick = 0
@@ -19,7 +20,8 @@ public final class ProcessHistory: @unchecked Sendable {
         tick += 1
         for p in procs {
             let pt = Point(cpu: Float(p.cpu), memory: Float(p.memory), diskRead: Float(p.diskReadBps), diskWrite: Float(p.diskWriteBps),
-                           netIn: p.network.map { Float($0.inBps) }, netOut: p.network.map { Float($0.outBps) })
+                           netIn: p.network.map { Float($0.inBps) }, netOut: p.network.map { Float($0.outBps) },
+                           gpu: p.gpu.map(Float.init))
             store[p.identity, default: []].append((tick, pt))
         }
         if tick % 30 == 0 {   // trim old points and forget processes gone for a whole window

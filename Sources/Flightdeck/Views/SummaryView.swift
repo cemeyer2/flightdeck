@@ -39,7 +39,9 @@ struct SummaryView: View {
                                 detail: s.map { "thermal pressure: " + thermalName($0.power.thermalState) },
                                 traces: [GraphTrace(name: "t", values: e.series { $0.power.hottest.value }, color: p.accent)], maxValue: 110)
                     SummaryCard(title: "GPU", value: s?.gpu.value.map { Fmt.pct($0) }, fraction: s?.gpu.value.map { $0 / 100 },
-                                detail: "device utilization",
+                                detail: s.flatMap { x in x.gpuDetail.map { g in
+                                    [g.frequencyMHz.map { String(format: "%.0f MHz", $0) }, g.powerWatts.map { String(format: "%.1f W", $0) },
+                                     g.memoryInUse.map { Fmt.bytes($0) + " in use" }].compactMap { $0 }.joined(separator: " · ") } } ?? "device utilization",
                                 traces: [GraphTrace(name: "g", values: e.series { $0.gpu.value }, color: p.accent)], maxValue: 100)
                     TopProcessesCard()
                 }

@@ -225,12 +225,101 @@ struct ThermalPerf: View {
 struct GPUPerf: View {
     @EnvironmentObject var e: Engine
     @Environment(\.palette) var p
+    static let info = GPUSampler.info()
+    static let metal = MetalInfo.collect()
+
     var body: some View {
+        let g = e.current?.gpuDetail
+        let info = Self.info
         VStack(spacing: 12) {
-            Panel(title: "GPU", trailing: SystemInfo.gpuInfo().first) {
-                Readout(label: "Utilization", value: e.current?.gpu.value.map { String(format: "%.0f", $0) }, unit: "%")
-                VFDMeter(fraction: e.current?.gpu.value.map { $0 / 100 }, segments: 40)
-                HistoryGraph(traces: [GraphTrace(name: "g", values: e.series { $0.gpu.value }, color: p.accent)], maxValue: 100).frame(height: 220)
+            Panel(title: info.model, trailing: [info.cores.map { "\($0) GPU cores" }, info.frequencyRange.map { String(format: "%.0f–%.0f MHz", $0.min, $0.max) }].compactMap { $0 }.joined(separator: " · ")) {
+                HStack(spacing: 24) {
+                    Readout(label: "Utilization", value: (g?.deviceUtilization ?? e.current?.gpu.value).map { String(format: "%.0f", $0) }, unit: "%", color: p.accent)
+                    Readout(label: "Active", value: g?.activeResidency.map { String(format: "%.0f", $0) }, unit: "%")
+                    Readout(label: "Frequency", value: g?.frequencyMHz.map { String(format: "%.0f", $0) }, unit: "MHz")
+                    Readout(label: "Power", value: g?.powerWatts.map { String(format: "%.2f", $0) }, unit: "W", color: p.accent2)
+                    Readout(label: "Memory in use", value: g?.memoryInUse.map { Fmt.bytes($0) })
+                    Readout(label: "Recoveries", value: g?.recoveryCount.map(String.init), color: (g?.recoveryCount ?? 0) > 0 ? p.crit : nil)
+                    Spacer()
+                }
+                HStack(spacing: 18) {
+                    MiniGauge(label: "RENDERER", value: g?.rendererUtilization.map { $0 / 100 }, text: g?.rendererUtilization.map { String(format: "%.0f%%", $0) })
+                    MiniGauge(label: "TILER", value: g?.tilerUtilization.map { $0 / 100 }, text: g?.tilerUtilization.map { String(format: "%.0f%%", $0) })
+                    MiniGauge(label: "THERMAL CAP", value: g?.thermalLimited.map { $0 / 100 }, text: g?.thermalLimited.map { String(format: "%.0f%%", $0) })
+                    MiniGauge(label: "MEMORY", value: g?.memoryInUse.map { Double($0) / Double(max(Self.metal.workingSet ?? 1, 1)) },
+                              text: Self.metal.workingSet.map { "of " + Fmt.bytes($0) })
+                }
+            }
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
+                Panel(title: "Utilization", trailing: "device · renderer") {
+                    HistoryGraph(traces: [GraphTrace(name: "dev", values: e.series { $0.gpuDetail?.deviceUtilization ?? $0.gpu.value }, color: p.accent),
+                                          GraphTrace(name: "ren", values: e.series { $0.gpuDetail?.rendererUtilization }, color: p.accent2, fill: false)],
+                                 maxValue: 100, format: { String(format: "%.0f%%", $0) }).frame(height: 120)
+                }
+                Panel(title: "Frequency", trailing: "average while active") {
+                    HistoryGraph(traces: [GraphTrace(name: "mhz", values: e.series { $0.gpuDetail?.frequencyMHz }, color: p.accent)],
+                                 maxValue: info.frequencyRange?.max, minHeadroom: 100, format: { String(format: "%.0f MHz", $0) }).frame(height: 120)
+                }
+                Panel(title: "Power", trailing: "GPU energy (IOReport)") {
+                    HistoryGraph(traces: [GraphTrace(name: "w", values: e.series { $0.gpuDetail?.powerWatts }, color: p.accent2)],
+                                 minHeadroom: 2, format: { String(format: "%.1f W", $0) }).frame(height: 120)
+                }
+                Panel(title: "Memory", trailing: "in use by the GPU driver") {
+                    HistoryGraph(traces: [GraphTrace(name: "m", values: e.series { $0.gpuDetail?.memoryInUse.map { Double($0) } }, color: p.accent)],
+                                 minHeadroom: 268_435_456, format: Fmt.bytes).frame(height: 120)
+                }
+            }
+            Panel(title: "Performance states", trailing: "share of the last sample spent at each clock") {
+                if let r = g?.stateResidency, !r.isEmpty {
+                    HStack(alignment: .bottom, spacing: 6) {
+                        VStack(spacing: 3) {
+                            Text(g?.activeResidency.map { String(format: "%.0f%%", 100 - $0) } ?? "—").font(.system(size: 10, design: .monospaced))
+                            RoundedRectangle(cornerRadius: 2).fill(p.meterOff).frame(width: 34, height: max(CGFloat(100 - (g?.activeResidency ?? 100)) * 1.0, 1))
+                            Text("off").font(.system(size: 9, design: .monospaced)).foregroundStyle(p.dim)
+                        }
+                        ForEach(Array(r.enumerated()), id: \.offset) { i, v in
+                            VStack(spacing: 3) {
+                                Text(String(format: "%.0f%%", v)).font(.system(size: 10, design: .monospaced))
+                                RoundedRectangle(cornerRadius: 2).fill(p.accent.opacity(0.35 + 0.65 * Double(i + 1) / Double(r.count)))
+                                    .frame(width: 34, height: max(CGFloat(v) * 1.0, 1))
+                                Text(g?.stateMHz.flatMap { i < $0.count ? String(format: "%.0f", $0[i]) : nil } ?? "P\(i + 1)")
+                                    .font(.system(size: 9, design: .monospaced)).foregroundStyle(p.dim)
+                            }
+                        }
+                        Spacer()
+                    }.frame(height: 140, alignment: .bottom)
+                    Text("Bars are labelled in MHz. Time at the lowest clocks is normal for light work; the GPU raises its clock under load and lowers it when hot (see Thermal cap).")
+                        .font(.caption).foregroundStyle(p.dim)
+                } else {
+                    Text("Per-state residency isn't available on this Mac (needs Apple silicon IOReport GPU statistics).").foregroundStyle(p.dim)
+                }
+            }
+            Panel(title: "GPU apps", trailing: "share of GPU time · total GPU time since each app started") {
+                let apps = AppUsage.aggregate(e.current?.processes ?? []).filter { $0.gpu != nil }.sorted { ($0.gpu ?? 0) > ($1.gpu ?? 0) }
+                let clients = g?.clients ?? []
+                if apps.isEmpty && clients.isEmpty { Text("No process is using the GPU right now (or per-process GPU time isn't exposed).").foregroundStyle(p.dim) }
+                ForEach(apps.prefix(12)) { a in GPUAppRow(app: a, clients: clients) }
+            }
+            if let cl = g?.cpuClusters, !cl.isEmpty {
+                Panel(title: "CPU clusters", trailing: "live clocks (IOReport)") {
+                    HStack(spacing: 28) {
+                        ForEach(cl) { c in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Readout(label: c.name, value: c.mhz.map { String(format: "%.0f", $0) }, unit: "MHz")
+                                VFDMeter(fraction: c.mhz.map { $0 / max(c.maxMHz, 1) }, segments: 16, color: c.name.hasPrefix("E") ? p.eCore : p.pCore, height: 5).frame(width: 140)
+                                Text(String(format: "active %.0f%% · max %.0f MHz", c.active, c.maxMHz)).font(.system(size: 10, design: .monospaced)).foregroundStyle(p.dim)
+                            }
+                        }
+                        Spacer()
+                    }
+                }
+            }
+            Panel(title: "Device", trailing: "Metal") {
+                Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 4) {
+                    ForEach(Self.metal.rows, id: \.0) { k, v in
+                        GridRow { Text(k).foregroundStyle(p.dim); Text(v).foregroundStyle(p.text).textSelection(.enabled) }
+                    }
+                }.font(.system(size: 12, design: .monospaced))
             }
         }
     }
@@ -402,4 +491,27 @@ func heatColor(_ f: Double) -> Color {
     for i in 1..<stops.count where f <= stops[i].0 { lo = stops[i - 1]; hi = stops[i]; break }
     let t = hi.0 > lo.0 ? (f - lo.0) / (hi.0 - lo.0) : 0
     return Color(red: lo.1.0 + (hi.1.0 - lo.1.0) * t, green: lo.1.1 + (hi.1.1 - lo.1.1) * t, blue: lo.1.2 + (hi.1.2 - lo.1.2) * t)
+}
+
+struct GPUAppRow: View {
+    @Environment(\.palette) var p
+    var app: AppUsage
+    var clients: [GPUClient]
+    var members: [GPUClient] {
+        let pids = Set(app.pids)
+        return clients.filter { pids.contains($0.pid) }
+    }
+    var body: some View {
+        let m = members
+        let total: Double = m.reduce(0) { $0 + $1.totalSeconds }
+        let apis: String = Set(m.flatMap(\.apis)).sorted().joined(separator: ", ")
+        HStack(spacing: 8) {
+            AppIcon(path: app.iconPath.hasSuffix(".app") ? app.iconPath + "/" : app.iconPath).frame(width: 16, height: 16)
+            Text(app.name).lineLimit(1).frame(width: 200, alignment: .leading)
+            VFDMeter(fraction: (app.gpu ?? 0) / 100, segments: 30, height: 6)
+            Text(String(format: "%.1f%%", app.gpu ?? 0)).frame(width: 60, alignment: .trailing)
+            Text(Fmt.duration(total)).foregroundStyle(p.dim).frame(width: 90, alignment: .trailing)
+            Text(apis).foregroundStyle(p.dim).frame(width: 70, alignment: .leading)
+        }.font(.system(size: 12, design: .monospaced))
+    }
 }

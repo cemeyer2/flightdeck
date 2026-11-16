@@ -14,6 +14,7 @@ public struct AppUsage: Sendable, Identifiable, Hashable {
     public var netBps = 0.0
     public var energyWatts: Double?    // nil if no member reports energy
     public var wakeups = 0.0
+    public var gpu: Double?             // nil if no member uses the GPU
     public var pids: [Int32] = []
 
     public static func bundle(of path: String) -> String? {
@@ -46,6 +47,7 @@ public struct AppUsage: Sendable, Identifiable, Hashable {
             g.netBps += (p.network?.inBps ?? 0) + (p.network?.outBps ?? 0)
             if let e = p.energyWatts { g.energyWatts = (g.energyWatts ?? 0) + e }
             g.wakeups += p.wakeups; g.pids.append(p.pid)
+            if let x = p.gpu { g.gpu = (g.gpu ?? 0) + x }
             groups[k.key] = g
         }
         return Array(groups.values)
