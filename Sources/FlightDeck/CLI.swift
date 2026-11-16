@@ -10,6 +10,7 @@ import FlightDeckCore
 ///   --csv <trace> <out.csv> [--processes]
 ///   --report <trace> <out.pdf>
 ///   --stats <trace>                 summary statistics of a recording
+///   --json-stream [interval] [--top N]   one JSON snapshot per line, every `interval` seconds, until killed
 /// Developer-only (not in `usage`): --render-views <dir> and --bench-ui [renders], see UIBench.
 @MainActor
 enum CLI {
@@ -17,6 +18,8 @@ enum CLI {
     FlightDeck command line
       --snapshot [--json] [--top N]   sample the system once (after a 1 s warm-up) and print a summary or JSON
       --findings                      print current findings (what's wrong right now)
+      --json-stream [seconds] [--top N]   print one JSON snapshot per line every `seconds` (default 1) until
+                                      interrupted; --top keeps only the N busiest processes per line
       --stats <trace.flightlog>       summary statistics and findings of a recording
       --csv <trace> <out.csv> [--processes]   export system (or per-process) metrics
       --report <trace> <out.pdf>      write a PDF flight report
@@ -35,7 +38,7 @@ enum CLI {
         // A mistyped flag or a missing argument must not silently open the GUI instead. (Single-dash arguments are
         // left alone: macOS and the automation hooks pass those, e.g. -destination, -NSDocumentRevisionsDebugMode.)
         let known: [String: Int] = ["--snapshot": 0, "--json": 0, "--findings": 0, "--processes": 0, "--top": 1, "--stats": 1, "--csv": 2,
-                                    "--report": 2, "--render-views": 1, "--bench-ui": 0, "--render-iconset": 1, "--render-dock-previews": 1]
+                                    "--report": 2, "--json-stream": 0, "--render-views": 1, "--bench-ui": 0, "--render-iconset": 1, "--render-dock-previews": 1]
         for (i, arg) in a.enumerated().dropFirst() where arg.hasPrefix("--") {
             guard let n = known[arg] else { fail("unknown option \(arg)\n\n\(usage)") }
             if n > 0 && (i + n >= a.count || a[(i + 1)...(i + n)].contains { $0.hasPrefix("--") }) && arg != "--bench-ui" {
@@ -43,6 +46,7 @@ enum CLI {
             }
         }
         if let v = value("--render-views") { UIBench.renderViews(to: v[0]) }
+        if a.contains("--json-stream") { jsonStream(a) }
         if a.contains("--bench-ui") { UIBench.run(renders: Int(value("--bench-ui")?.first ?? "") ?? 20) }
         if a.contains("--snapshot") || a.contains("--findings") {
             // CLI findings come from a single sample, so only instantaneous conditions are found; "sustained for N
@@ -78,6 +82,32 @@ enum CLI {
         if let v = value("--report", 2), let t = load(v[0]) {
             guard let pdf = FlightReportView.pdf(t) else { fail("could not render the report") }
             write(pdf, to: v[1])
+        }
+    }
+
+    /// `--json-stream [interval] [--top N]`: samples forever, writing each snapshot as one line of compact JSON (keys
+    /// sorted, ISO 8601 times) so scripts can read it with `jq` or line by line. The interval is an optional bare number
+    /// after the flag (0.25 s minimum). Unmeasured values encode as `{"unavailable":…}`, as in `--snapshot --json`.
+    /// Ends when stdout is closed (the default SIGPIPE action exits quietly, e.g. under `| head`) or on Ctrl-C.
+    static func jsonStream(_ a: [String]) -> Never {
+        var interval = 1.0
+        if let i = a.firstIndex(of: "--json-stream"), i + 1 < a.count, !a[i + 1].hasPrefix("-") {
+            guard let v = Double(a[i + 1]), v.isFinite, v > 0 else { fail("--json-stream: interval must be a number of seconds") }
+            interval = max(v, 0.25)
+        }
+        let top = a.firstIndex(of: "--top").flatMap { $0 + 1 < a.count ? Int(a[$0 + 1]) : nil }
+        let enc = JSONEncoder(); enc.outputFormatting = [.sortedKeys]; enc.dateEncodingStrategy = .iso8601
+        let sampler = Sampler(); _ = sampler.sample()   // primes the delta-based counters; the first line is already real
+        let out = FileHandle.standardOutput
+        var next = Date().addingTimeInterval(interval)
+        while true {
+            // Sleep to a fixed schedule rather than "interval after the last write", so sampling cost doesn't add drift.
+            Thread.sleep(until: next); next = max(next.addingTimeInterval(interval), Date())
+            var s = sampler.sample()
+            if let top { s.processes = Array(s.processes.sorted { $0.cpu > $1.cpu }.prefix(max(top, 0))) }
+            guard var d = try? enc.encode(s) else { continue }
+            d.append(0x0A)
+            out.write(d)
         }
     }
 

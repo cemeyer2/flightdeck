@@ -135,10 +135,16 @@ public final class MetricsServer: @unchecked Sendable {
         do { l = try NWListener(using: params) } catch { ready("\(error)"); return }
         listener = l
         l.newConnectionHandler = { [weak self] c in self?.accept(c) }
+        var reported = false   // only touched on `queue`, where state updates are delivered
         l.stateUpdateHandler = { [weak self] st in
             switch st {
-            case .ready: self?.port = l.port?.rawValue; ready(nil)
-            case .failed(let e): ready("\(e)"); l.cancel()
+            case .ready:
+                self?.port = l.port?.rawValue
+                if !reported { reported = true; ready(nil) }
+            // `.waiting` is how a listener reports e.g. "address already in use"; it won't recover on its own here.
+            case .failed(let e), .waiting(let e):
+                if !reported { reported = true; ready("\(e)") }
+                l.cancel()
             default: break
             }
         }
