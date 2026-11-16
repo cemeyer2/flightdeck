@@ -110,10 +110,32 @@ public enum SleepLog {
         var requesters: [String: Int] = [:]
         var awakeIntervals: [String: [(Date, Date)]] = [:]
         var awakeReason: [String: String] = [:]
+        // Local-time text form of `since` (the log's own timestamps are local time), for the cheap prefix comparison.
+        let sinceText: String = { let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "yyyy-MM-dd HH:mm:ss"
+            return f.string(from: since.addingTimeInterval(-86_400)) }()   // a day of slack covers time-zone differences
+        // DateFormatter is slow and consecutive lines share a minute: parse each "yyyy-MM-dd HH:mm" + zone once, then add
+        // the seconds.
+        var minuteCache: [Substring: Date] = [:]
+        func date(_ line: Substring) -> Date? {
+            let u = Array(line.utf8.prefix(25))
+            guard u.count == 25, let s1 = Int(String(decoding: u[17..<19], as: UTF8.self)) else { return nil }
+            let key = line.prefix(16) + line.dropFirst(19).prefix(6)
+            if let m = minuteCache[key] { return m.addingTimeInterval(TimeInterval(s1)) }
+            guard let full = stamp.date(from: String(line.prefix(16)) + ":00" + String(line.dropFirst(19).prefix(6))) else { return nil }
+            minuteCache[key] = full
+            return full.addingTimeInterval(TimeInterval(s1))
+        }
         for line in text.split(separator: "\n") {
             // Each line is a 25-character timestamp, a space, a padded event type, a tab, then the message. Lines without a valid
             // timestamp (headers, wrapped continuation lines) are skipped.
-            guard line.count > 26, let t = stamp.date(from: String(line.prefix(25))), t >= since else { continue }
+            // Cheap rejections first: the log is ~30k lines and DateFormatter is slow. Timestamps ("yyyy-MM-dd HH:mm:ss")
+            // sort as text, so lines older than the window are skipped by comparing the first 19 characters, and only
+            // event types we use get their date parsed.
+            guard line.utf8.count > 26, line.prefix(19) >= sinceText[...] else { continue }
+            let typeField = line.dropFirst(26).prefix(20)
+            guard typeField.hasPrefix("Sleep") || typeField.hasPrefix("DarkWake") || typeField.hasPrefix("Wake")
+                    || typeField.hasPrefix("Assertions") else { continue }
+            guard let t = date(line), t >= since else { continue }
             let body = line.dropFirst(26)
             let tab = body.firstIndex(of: "\t") ?? body.endIndex
             let type = body[..<tab].trimmingCharacters(in: .whitespaces)
@@ -144,7 +166,7 @@ public enum SleepLog {
                 for m in msg.matches(of: #/process=([^ ]+) request=/#) { requesters[String(m.1), default: 0] += 1 }
             case "Assertions":
                 // "PID 883(Google Chrome) Released PreventUserIdleSystemSleep "reason" 00:12:03 …"
-                if let m = msg.firstMatch(of: #/PID \d+\((.+?)\) Released (\w+) "(.*?)" (\d\d):(\d\d):(\d\d)/#),
+                if msg.contains(" Released "), let m = msg.firstMatch(of: #/PID \d+\((.+?)\) Released (\w+) "(.*?)" (\d\d):(\d\d):(\d\d)/#),
                    ["PreventUserIdleSystemSleep", "PreventSystemSleep", "NoIdleSleepAssertion", "PreventUserIdleDisplaySleep", "NoDisplaySleepAssertion"].contains(String(m.2)),
                    let h = Int(m.4), let mi = Int(m.5), let se = Int(m.6) {
                     // interval [release - held, release], clipped to the window; overlaps are merged below

@@ -253,8 +253,8 @@ final class Engine: ObservableObject {
                 outcome = p.terminationReason == .uncaughtSignal ? "Command stopped after 60 s" : "Command exited \(p.terminationStatus)"
                 if !out.isEmpty { outcome += ": " + out }
             } catch { outcome = "Command failed to start: \(error.localizedDescription)" }
-            let final = outcome
-            await MainActor.run { self?.updateLog(entryID, result: final) }
+            let final = outcome, owner = self   // capture once, outside the concurrent closure
+            await MainActor.run { owner?.updateLog(entryID, result: final) }
         }
     }
 
@@ -370,6 +370,7 @@ final class Engine: ObservableObject {
         queue.async { [sampler, analyzer, incidentLog, ruleEngine] in
             sampler.processes.includeSelf = includeSelf
             sampler.networkInterval = visible ? 0 : 5   // per-process network every 5 s while no window is visible
+            sampler.background = !visible
             let s = sampler.sample()
             self.processHistory.record(s.processes)
             let found = analyzer.ingest(s)

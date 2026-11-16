@@ -49,6 +49,9 @@ public final class Sampler: @unchecked Sendable {
     /// Minimum seconds between nettop runs (0 = every sample). The app raises it while no window is visible, which is
     /// the biggest single saving in background cost (each run is a process launch).
     public var networkInterval: TimeInterval = 0
+    /// Set by the app while no window is visible: slow-changing, costly sources (temperature sensors, hang checks,
+    /// Wi-Fi) refresh less often. Findings that depend on them react a few seconds later; nothing is skipped entirely.
+    public var background = false { didSet { power.background = background } }
 
     /// Starts a nettop run in the background unless one is running or the last started too recently.
     private func refreshNetwork() {
@@ -80,7 +83,7 @@ public final class Sampler: @unchecked Sendable {
 
     /// Wi-Fi details, re-read at most every 5 s.
     private func currentWiFi() -> WiFiInfo? {
-        if wifiRead.map({ Date().timeIntervalSince($0) >= 5 }) ?? true { wifi = WiFiInfo.current(); wifiRead = Date() }
+        if wifiRead.map({ Date().timeIntervalSince($0) >= (background ? 15 : 5) }) ?? true { wifi = WiFiInfo.current(); wifiRead = Date() }
         return wifi
     }
 
@@ -111,7 +114,7 @@ public final class Sampler: @unchecked Sendable {
         }
         // Hang state uses private window-server calls (see HangDetector) and only covers regular Dock apps; other
         // processes stay nil (unknown), never false. Checked every 2 s; SMART data every 5 minutes.
-        if hangsRead.map({ Date().timeIntervalSince($0) >= 2 }) ?? true { hangs = HangDetector.check(); hangsRead = Date() }
+        if hangsRead.map({ Date().timeIntervalSince($0) >= (background ? 6 : 2) }) ?? true { hangs = HangDetector.check(); hangsRead = Date() }
         if !hangs.isEmpty { for i in procs.indices { procs[i].notResponding = hangs[procs[i].pid] } }
         if drivesRead.map({ Date().timeIntervalSince($0) > 300 }) ?? true { drives = DriveHealthReader.read(); drivesRead = Date() }
         let assertions = PowerAssertions.byPID()

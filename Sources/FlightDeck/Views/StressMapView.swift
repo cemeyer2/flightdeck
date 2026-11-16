@@ -94,7 +94,8 @@ struct MapGeometry {
     func hub(_ s: Subsystem) -> CGPoint {
         let i = Double(Self.order.firstIndex(of: s) ?? 0)
         let a = -Double.pi / 2 + 2 * Double.pi * i / Double(Self.order.count)
-        return CGPoint(x: center.x + ringR * cos(a), y: center.y + ringR * sin(a))
+        // Explicit CGFloat(Double) so older toolchains don't find `cos` ambiguous between the Double and CGFloat overloads.
+        return CGPoint(x: center.x + ringR * CGFloat(Foundation.cos(a)), y: center.y + ringR * CGFloat(Foundation.sin(a)))
     }
 }
 
@@ -155,7 +156,7 @@ struct StressMap: View {
             var pt = w > 0 ? CGPoint(x: g.center.x + (x / w - g.center.x) * 0.75, y: g.center.y + (y / w - g.center.y) * 0.75) : g.center
             // A small golden-angle offset per rank, so apps aimed at the same spot separate in a stable direction.
             let a = Double(i) * 2.399963
-            pt.x += cos(a) * 3; pt.y += sin(a) * 3
+            pt.x += CGFloat(Foundation.cos(a)) * 3; pt.y += CGFloat(Foundation.sin(a)) * 3
             return PlacedBubble(m: m, center: pt, radius: max(minR, maxR * sqrt(m.total)))
         }
         func clamp(_ b: inout PlacedBubble) {

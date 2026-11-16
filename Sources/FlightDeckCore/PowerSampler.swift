@@ -57,6 +57,8 @@ public final class PowerSampler {
     private let thermal = ThermalSensors()
     /// Reading every HID sensor costs ~70 ms, so sensors refresh on their own slower cadence.
     public static let sensorInterval: TimeInterval = 4
+    /// No window visible: read the (expensive) temperature sensors every 10 s instead of every 4 s.
+    public var background = false
     private var lastSensorRead: Date?
     private var lastTemps: [SensorReading] = []
     public init() {}
@@ -115,7 +117,7 @@ public final class PowerSampler {
            let t = IOPSGetProvidingPowerSourceType(info)?.takeUnretainedValue() as String? {
             source = t == kIOPMACPowerKey ? "AC Power" : t == kIOPMBatteryPowerKey ? "Battery" : t
         }
-        if lastSensorRead.map({ Date().timeIntervalSince($0) >= Self.sensorInterval }) ?? true {
+        if lastSensorRead.map({ Date().timeIntervalSince($0) >= (background ? 10 : Self.sensorInterval) }) ?? true {
             lastTemps = thermal.read(); lastSensorRead = Date()
         }
         let temps = lastTemps

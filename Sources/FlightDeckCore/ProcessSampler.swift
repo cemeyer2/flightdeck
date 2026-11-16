@@ -71,6 +71,8 @@ public final class ProcessSampler {
     /// so it is resolved once. Pruned every sample to processes still alive.
     private var pathCache: [ProcessIdentity: (String, String)] = [:]
     private var translatedCache: [ProcessIdentity: Bool] = [:]
+    /// Start times of processes whose proc_bsdinfo is unreadable (other users'), keyed by PID with their name.
+    private var startCache: [Int32: (start: UInt64, comm: String)] = [:]
 
     /// Rosetta translation flag from the kernel's process record (P_TRANSLATED).
     /// Read via sysctl KERN_PROC_PID because libproc doesn't expose p_flag. 0x20000 is P_TRANSLATED from
@@ -173,7 +175,13 @@ public final class ProcessSampler {
                 restricted = true
             }
             var start = bsd.pbi_start_tvsec * 1_000_000 + bsd.pbi_start_tvusec
-            if start == 0, let s = Self.startTime(pid) { start = s }
+            if start == 0 {
+                // kinfo_proc costs a syscall per process, and a process's start time never changes: cache it per PID,
+                // re-reading only if the name changed (the PID was reused by a different program).
+                let comm = withUnsafeBytes(of: bsd.pbi_comm) { String(decoding: $0.prefix(while: { $0 != 0 }), as: UTF8.self) }
+                if let c = startCache[pid], c.comm == comm { start = c.start }
+                else if let s = Self.startTime(pid) { start = s; startCache[pid] = (s, comm) }
+            }
             let ident = ProcessIdentity(pid: pid, startTime: start)
 
             // rusage v6 is the source for CPU time, physical footprint, disk I/O, billed energy and idle wakeups. It
@@ -238,6 +246,8 @@ public final class ProcessSampler {
         prev = next; lastTime = now
         pathCache = pathCache.filter { next[$0.key] != nil }
         translatedCache = translatedCache.filter { next[$0.key] != nil }
+        let livePIDs = Set(next.keys.map(\.pid))
+        startCache = startCache.filter { livePIDs.contains($0.key) }
         return out
     }
 
