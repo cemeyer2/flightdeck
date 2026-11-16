@@ -1,5 +1,5 @@
 import XCTest
-@testable import MeterCore
+@testable import FlightdeckCore
 
 final class CoreTests: XCTestCase {
     func testSeriesKeepsGaps() {
@@ -64,16 +64,16 @@ final class EnergyTests: XCTestCase {
 }
 
 final class TraceFixture: XCTestCase {
-    /// Writes /tmp/meterline-sample.mltrace (set ML_WRITE_TRACE=1) with a sampling gap in the middle.
+    /// Writes /tmp/flightdeck-sample.flightlog (set FD_WRITE_TRACE=1) with a sampling gap in the middle.
     func testWriteSampleTrace() throws {
-        guard ProcessInfo.processInfo.environment["ML_WRITE_TRACE"] != nil else { return }
+        guard ProcessInfo.processInfo.environment["FD_WRITE_TRACE"] != nil else { return }
         let s = Sampler(); _ = s.sample()
         var frames: [Snapshot] = []
         for i in 0..<40 {
             Thread.sleep(forTimeInterval: i == 20 ? 1.5 : 0.25)
             frames.append(Trace.trimmed(s.sample()))
         }
-        try Trace(host: "fixture", model: "test", interval: 0.25, frames: frames).write(to: URL(fileURLWithPath: "/tmp/meterline-sample.mltrace"))
+        try Trace(host: "fixture", model: "test", interval: 0.25, frames: frames).write(to: URL(fileURLWithPath: "/tmp/flightdeck-sample.flightlog"))
     }
 }
 
@@ -114,9 +114,9 @@ final class ProcessNetworkTests: XCTestCase {
 }
 
 final class ProcessNetworkAccuracy: XCTestCase {
-    /// ML_NET_ACCURACY=1: download 5 MB with curl and compare counted bytes.
+    /// FD_NET_ACCURACY=1: download 5 MB with curl and compare counted bytes.
     func testCountsKnownDownload() throws {
-        guard ProcessInfo.processInfo.environment["ML_NET_ACCURACY"] != nil else { return }
+        guard ProcessInfo.processInfo.environment["FD_NET_ACCURACY"] != nil else { return }
         let s = ProcessNetworkSampler(); _ = s.sample()
         let p = Process(); p.executableURL = URL(fileURLWithPath: "/usr/bin/curl")
         p.arguments = ["-s", "-o", "/dev/null", "--limit-rate", "1M", "https://speed.cloudflare.com/__down?bytes=5000000"]

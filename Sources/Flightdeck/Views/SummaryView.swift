@@ -1,5 +1,5 @@
 import SwiftUI
-import MeterCore
+import FlightdeckCore
 
 struct SummaryView: View {
     @EnvironmentObject var e: Engine

@@ -1,5 +1,5 @@
 import SwiftUI
-import MeterCore
+import FlightdeckCore
 
 enum PerfTab: String, CaseIterable, Identifiable { case cpu = "CPU", memory = "Memory", disk = "Disk", network = "Network", energy = "Energy", thermals = "Thermals", gpu = "GPU"; var id: String { rawValue } }
 

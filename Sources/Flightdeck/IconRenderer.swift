@@ -1,7 +1,7 @@
 import AppKit
 
-/// `Meterline --render-iconset <dir>` writes the static app icon PNGs (used by scripts/bundle.sh).
-/// `Meterline --render-dock-previews <dir>` writes one PNG per live Dock mode with demo data.
+/// `Flightdeck --render-iconset <dir>` writes the static app icon PNGs (used by scripts/bundle.sh).
+/// `Flightdeck --render-dock-previews <dir>` writes one PNG per live Dock mode with demo data.
 enum IconRenderer {
     static func handleCommandLine() {
         let args = CommandLine.arguments

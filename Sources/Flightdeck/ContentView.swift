@@ -1,5 +1,5 @@
 import SwiftUI
-import MeterCore
+import FlightdeckCore
 
 enum Destination: String, CaseIterable, Identifiable, Hashable {
     case summary = "Summary", performance = "Performance", processes = "Processes", systemInfo = "System Info",
@@ -49,7 +49,7 @@ struct ContentView: View {
         .toolbar { ToolbarItemGroup(placement: .primaryAction) { ToolbarControls() } }
         .modifier(ErrorAlert())
         .onAppear {
-            // Debug/automation hook: `open Meterline.app --args -destination "Processes"`
+            // Debug/automation hook: `open Flightdeck.app --args -destination "Processes"`
             if let d = UserDefaults.standard.string(forKey: "destination").flatMap(Destination.init(rawValue:)) {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { selection = d }
             }
@@ -93,7 +93,7 @@ struct ToolbarControls: View {
                     .foregroundStyle(engine.recording ? .red : .primary)
             }.help("Flight Recorder: record all telemetry panels")
             Button { engine.openTrace() } label: { Label("Open Trace", systemImage: "folder") }
-                .help("Open a .mltrace recording")
+                .help("Open a .flightlog recording")
             Menu {
                 Picker("Theme", selection: $theme) { ForEach(ThemeID.allCases) { Text($0.title).tag($0) } }.pickerStyle(.inline)
             } label: { Label("Theme", systemImage: "paintpalette") }
@@ -103,7 +103,7 @@ struct ToolbarControls: View {
 struct ErrorAlert: ViewModifier {
     @EnvironmentObject var engine: Engine
     func body(content: Content) -> some View {
-        content.alert("Meterline", isPresented: Binding(get: { engine.lastError != nil }, set: { if !$0 { engine.lastError = nil } })) {
+        content.alert("Flightdeck", isPresented: Binding(get: { engine.lastError != nil }, set: { if !$0 { engine.lastError = nil } })) {
             Button("OK") { engine.lastError = nil }
         } message: { Text(engine.lastError ?? "") }
     }

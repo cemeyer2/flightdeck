@@ -1,5 +1,5 @@
 import SwiftUI
-import MeterCore
+import FlightdeckCore
 
 /// Segmented VFD-style bar meter.
 struct VFDMeter: View {

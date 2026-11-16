@@ -1,5 +1,5 @@
 import SwiftUI
-import MeterCore
+import FlightdeckCore
 import Combine
 
 /// Loads data off the main thread and optionally refreshes it.

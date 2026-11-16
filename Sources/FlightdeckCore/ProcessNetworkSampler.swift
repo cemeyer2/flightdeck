@@ -3,7 +3,7 @@ import Foundation
 public struct ProcessNetwork: Codable, Sendable, Hashable {
     public var inBps: Double
     public var outBps: Double
-    public var totalIn: UInt64     // since Meterline started observing
+    public var totalIn: UInt64     // since Flightdeck started observing
     public var totalOut: UInt64
     public var connections: Int
 }

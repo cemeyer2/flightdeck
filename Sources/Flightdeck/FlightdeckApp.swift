@@ -1,8 +1,8 @@
 import SwiftUI
-import MeterCore
+import FlightdeckCore
 
 @main
-struct MeterlineApp: App {
+struct FlightdeckApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
     @StateObject private var engine = Engine()
     @AppStorage("theme") private var theme: ThemeID = .dark
@@ -11,7 +11,7 @@ struct MeterlineApp: App {
     init() { IconRenderer.handleCommandLine() }
 
     var body: some Scene {
-        WindowGroup("Meterline") {
+        WindowGroup("Flightdeck") {
             ContentView()
                 .environmentObject(engine)
                 .environment(\.palette, Palette.of(theme))
@@ -74,8 +74,8 @@ struct SettingsView: View {
             Picker("Sample interval", selection: $engine.interval) {
                 Text("0.5 s").tag(0.5); Text("1 s").tag(1.0); Text("2 s").tag(2.0); Text("5 s").tag(5.0)
             }
-            Toggle("Include Meterline in measurements (self-monitoring)", isOn: $engine.includeSelf)
-            Text("Meterline sends no data anywhere. All measurements stay on this Mac.")
+            Toggle("Include Flightdeck in measurements (self-monitoring)", isOn: $engine.includeSelf)
+            Text("Flightdeck sends no data anywhere. All measurements stay on this Mac.")
                 .font(.caption).foregroundStyle(.secondary)
         }
         .padding(20).frame(width: 440)

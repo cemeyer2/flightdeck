@@ -1,6 +1,6 @@
 import SwiftUI
 import AppKit
-import MeterCore
+import FlightdeckCore
 
 final class ProcItem: NSObject {
     var s: ProcessSample

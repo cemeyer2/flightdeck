@@ -38,9 +38,11 @@ public final class Sampler: @unchecked Sendable {
     }
 }
 
-/// `.mltrace` file: zlib-compressed JSON of frames.
+/// `.flightlog` file: zlib-compressed JSON of frames.
 public struct Trace: Codable, Sendable {
-    public static let fileExtension = "mltrace"
+    public static let fileExtension = "flightlog"
+    /// Same format, written before the rename from Meterline. Still opened, never written.
+    public static let legacyFileExtensions = ["mltrace"]
     public var version = 1
     public var host: String
     public var model: String

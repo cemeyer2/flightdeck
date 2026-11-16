@@ -1,5 +1,5 @@
 import SwiftUI
-import MeterCore
+import FlightdeckCore
 
 struct DiskPerf: View {
     @EnvironmentObject var e: Engine

@@ -50,7 +50,7 @@ public enum Benchmarks {
                 while Date().timeIntervalSince(t0) < 2 { memcpy(b, a, size); copied += size }
                 return .init(name: name, score: Double(copied) / Date().timeIntervalSince(t0) / 1e9, unit: "GB/s", detail: "memcpy 256 MB blocks")
             case "Disk sequential write", "Disk sequential read":
-                let url = FileManager.default.temporaryDirectory.appendingPathComponent("meterline-bench.bin")
+                let url = FileManager.default.temporaryDirectory.appendingPathComponent("flightdeck-bench.bin")
                 let chunk = Data(count: 8 << 20), total = 1 << 30
                 if name.hasSuffix("write") || !FileManager.default.fileExists(atPath: url.path) {
                     FileManager.default.createFile(atPath: url.path, contents: nil)

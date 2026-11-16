@@ -1,5 +1,5 @@
 import SwiftUI
-import MeterCore
+import FlightdeckCore
 import UniformTypeIdentifiers
 
 enum Mode: Equatable { case live, replay }
@@ -20,13 +20,13 @@ final class Engine: ObservableObject {
     @Published private(set) var mode: Mode = .live
     @Published private(set) var recording = false
     @Published private(set) var recorded: [Snapshot] = []
-    @Published var trace: MeterCore.Trace?
+    @Published var trace: FlightdeckCore.Trace?
     @Published var replayIndex = 0 { didSet { if mode == .replay { applyReplay() } } }
     @Published var playing = false
     @Published var lastError: String?
 
     private let sampler = Sampler()
-    private let queue = DispatchQueue(label: "meterline.sampler", qos: .utility)
+    private let queue = DispatchQueue(label: "flightdeck.sampler", qos: .utility)
     private var timer: Timer?
     private var playTimer: Timer?
     private var inFlight = false
@@ -59,7 +59,7 @@ final class Engine: ObservableObject {
 
     private func ingest(_ s: Snapshot) {
         inFlight = false
-        if recording { recorded.append(MeterCore.Trace.trimmed(s)) }
+        if recording { recorded.append(FlightdeckCore.Trace.trimmed(s)) }
         DockIconController.shared.ingest(s, recording: recording)
         guard mode == .live else { return }
         current = s
@@ -83,12 +83,12 @@ final class Engine: ObservableObject {
 
     func saveRecording() {
         guard !recorded.isEmpty else { return }
-        let t = MeterCore.Trace(host: Host.current().localizedName ?? "Mac", model: Sysctl.string("hw.model") ?? "",
+        let t = FlightdeckCore.Trace(host: Host.current().localizedName ?? "Mac", model: Sysctl.string("hw.model") ?? "",
                                 interval: interval, frames: recorded)
         let panel = NSSavePanel()
-        panel.allowedContentTypes = [UTType(filenameExtension: MeterCore.Trace.fileExtension) ?? .data]
+        panel.allowedContentTypes = [UTType(filenameExtension: FlightdeckCore.Trace.fileExtension) ?? .data]
         let df = DateFormatter(); df.dateFormat = "yyyy-MM-dd HH.mm.ss"
-        panel.nameFieldStringValue = "Recording \(df.string(from: Date())).\(MeterCore.Trace.fileExtension)"
+        panel.nameFieldStringValue = "Recording \(df.string(from: Date())).\(FlightdeckCore.Trace.fileExtension)"
         if panel.runModal() == .OK, let url = panel.url {
             do { try t.write(to: url); NSDocumentController.shared.noteNewRecentDocumentURL(url) }
             catch { lastError = error.localizedDescription }
@@ -97,21 +97,22 @@ final class Engine: ObservableObject {
 
     func openTrace() {
         let panel = NSOpenPanel()
-        panel.allowedContentTypes = [UTType(filenameExtension: MeterCore.Trace.fileExtension) ?? .data]
+        panel.allowedContentTypes = ([FlightdeckCore.Trace.fileExtension] + FlightdeckCore.Trace.legacyFileExtensions)
+            .compactMap { UTType(filenameExtension: $0) }
         if panel.runModal() == .OK, let url = panel.url { open(url) }
     }
 
     func open(_ url: URL) {
-        do { load(try MeterCore.Trace.read(from: url)) } catch { lastError = "Could not open trace: \(error.localizedDescription)" }
+        do { load(try FlightdeckCore.Trace.read(from: url)) } catch { lastError = "Could not open trace: \(error.localizedDescription)" }
     }
 
     func replayRecorded() {
         guard !recorded.isEmpty else { return }
         recording = false
-        load(MeterCore.Trace(host: Host.current().localizedName ?? "", model: "", interval: interval, frames: recorded))
+        load(FlightdeckCore.Trace(host: Host.current().localizedName ?? "", model: "", interval: interval, frames: recorded))
     }
 
-    private func load(_ t: MeterCore.Trace) {
+    private func load(_ t: FlightdeckCore.Trace) {
         guard !t.frames.isEmpty else { lastError = "Trace is empty"; return }
         trace = t; mode = .replay
         let start = UserDefaults.standard.integer(forKey: "replayIndex")   // debug/automation hook

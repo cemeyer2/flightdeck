@@ -1,6 +1,6 @@
 import AppKit
 import SwiftUI
-import MeterCore
+import FlightdeckCore
 
 enum DockMode: String, CaseIterable, Identifiable {
     case cpuHistory = "CPU History", cores = "CPU Cores", gauges = "System Gauges", appIcon = "App Icon"

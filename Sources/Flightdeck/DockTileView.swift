@@ -1,6 +1,6 @@
 import AppKit
 import SwiftUI
-import MeterCore
+import FlightdeckCore
 
 /// Draws the Dock tile / app icon in the VFD instrument style. Resolution-independent (unit = width/128).
 final class DockTileView: NSView {

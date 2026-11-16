@@ -1,5 +1,5 @@
 import SwiftUI
-import MeterCore
+import FlightdeckCore
 
 struct AppTraffic: Identifiable {
     var id: String
@@ -49,7 +49,7 @@ struct AppNetworkPanel: View {
 
     var body: some View {
         let rows = AppGrouping.traffic(e.current?.processes ?? [], byApp: byApp)
-        Panel(title: byApp ? "Network by app" : "Network by process", trailing: "totals since Meterline started") {
+        Panel(title: byApp ? "Network by app" : "Network by process", trailing: "totals since Flightdeck started") {
             HStack {
                 Picker("", selection: $byApp) { Text("Apps").tag(true); Text("Processes").tag(false) }
                     .pickerStyle(.segmented).labelsHidden().frame(width: 200)

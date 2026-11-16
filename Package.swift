@@ -2,16 +2,16 @@
 import PackageDescription
 
 let package = Package(
-    name: "Meterline",
+    name: "Flightdeck",
     platforms: [.macOS(.v14)],
     products: [
-        .executable(name: "Meterline", targets: ["Meterline"]),
-        .library(name: "MeterCore", targets: ["MeterCore"]),
+        .executable(name: "Flightdeck", targets: ["Flightdeck"]),
+        .library(name: "FlightdeckCore", targets: ["FlightdeckCore"]),
     ],
     targets: [
-        .target(name: "MeterCore", swiftSettings: [.swiftLanguageMode(.v5)]),
-        .executableTarget(name: "Meterline", dependencies: ["MeterCore"],
+        .target(name: "FlightdeckCore", swiftSettings: [.swiftLanguageMode(.v5)]),
+        .executableTarget(name: "Flightdeck", dependencies: ["FlightdeckCore"],
                           swiftSettings: [.swiftLanguageMode(.v5)]),
-        .testTarget(name: "MeterCoreTests", dependencies: ["MeterCore"]),
+        .testTarget(name: "FlightdeckCoreTests", dependencies: ["FlightdeckCore"]),
     ]
 )
