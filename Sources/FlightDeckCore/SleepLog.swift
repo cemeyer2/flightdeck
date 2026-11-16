@@ -184,3 +184,28 @@ public enum SleepLog {
                            keptAwake: awakeIntervals.map { name, iv in (name, Int(unionLength(iv)), awakeReason[name] ?? "") }.sorted { $0.1 > $1.1 })
     }
 }
+
+extension SleepLog {
+    /// Findings about the most recent sleep, shown for 12 hours after waking: many dark wakes (info) and battery lost
+    /// while asleep (caution). Both name the main cause so the banner says why, not just that.
+    public static func findings(_ r: SleepReport, now: Date = Date()) -> [Finding] {
+        guard let s = r.sessions.first, now.timeIntervalSince(s.end) < 12 * 3600, s.duration > 1800 else { return [] }
+        let reasons = Dictionary(grouping: s.darkWakes, by: \.explanation).map { ($0.key, $0.value.count) }.sorted { $0.1 > $1.1 }
+        let main = reasons.first.map { "mostly \($0.0.lowercased()) (×\($0.1))" }
+        var out: [Finding] = []
+        if s.darkWakes.count >= 30 {
+            out.append(Finding(id: "sleep-wakes", severity: .info, icon: "moon.zzz",
+                               title: "Your Mac woke \(s.darkWakes.count) times while asleep" + (main.map { ", \($0)" } ?? ""),
+                               detail: "Each dark wake runs network upkeep or background tasks for a few seconds; frequent ones cost battery.",
+                               since: s.end, destination: "Sleep & Wake"))
+        }
+        if let used = s.batteryUsed, used >= 10 {
+            let holder = r.keptAwake.first.map { " \($0.process) held the Mac awake longest." } ?? ""
+            out.append(Finding(id: "sleep-drain", severity: .caution, icon: "battery.25",
+                               title: "Lost \(used)% battery while asleep (\(Int(s.duration / 3600)) h)",
+                               detail: (main.map { "Dark wakes were \($0)." } ?? "") + holder,
+                               since: s.end, destination: "Sleep & Wake"))
+        }
+        return out
+    }
+}

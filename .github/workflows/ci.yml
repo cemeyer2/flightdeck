@@ -1,0 +1,23 @@
+# Builds and tests FlightDeck on every push and pull request.
+# Tests that need real hardware (GPU statistics, internet, a C compiler) skip themselves on runners without them.
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  test:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build (debug)
+        run: swift build
+      - name: Test
+        run: swift test
+      - name: Build (release, universal)
+        run: swift build -c release --arch arm64 --arch x86_64
+      - name: Render views off-screen (smoke test)
+        run: |
+          BIN=$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)/FlightDeck
+          "$BIN" --render-views /tmp/views
+          ls -l /tmp/views

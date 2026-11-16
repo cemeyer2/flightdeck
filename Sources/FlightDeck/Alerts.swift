@@ -19,9 +19,33 @@ final class Alerts: NSObject, UNUserNotificationCenterDelegate {
     /// Minimum `Finding.Severity` raw value to notify for (2 = caution, 3 = warning).
     var minSeverity: Int { UserDefaults.standard.object(forKey: "alertMinSeverity") as? Int ?? 2 }
     /// Finding ids the user muted (alerts only; findings still show).
+    /// Entries are finding ids ("cpu:/Applications/Xcode.app") or whole kinds ("kind:hang").
     var muted: Set<String> {
         get { Set(UserDefaults.standard.stringArray(forKey: "mutedFindings") ?? []) }
         set { UserDefaults.standard.set(Array(newValue).sorted(), forKey: "mutedFindings") }
+    }
+
+    /// A finding's kind is its id up to the first ":" ("hang:123-456" → "hang"); ids without one are their own kind.
+    static func kind(of id: String) -> String { id.split(separator: ":").first.map(String.init) ?? id }
+
+    /// Readable names for kinds, for "Mute all … alerts".
+    static func kindName(_ k: String) -> String {
+        ["cpu": "busy-app", "gpu": "GPU-hog", "hang": "not-responding", "awake": "keeping-awake", "leak": "memory-growth",
+         "wakeups": "wake-up", "report": "repeated crash/hang", "drive": "drive-health", "rule": "rule"][k] ?? k
+    }
+
+    /// Muted findings don't notify and don't light the annunciator, menu bar or Dock lamp.
+    func isMuted(_ f: Finding) -> Bool { let m = muted; return m.contains(f.id) || m.contains("kind:" + Self.kind(of: f.id)) }
+
+    /// Last time each exactly-muted finding was seen; per-instance mutes (a hang of one process, say) that haven't
+    /// come back for 30 days are pruned so the list doesn't grow forever. Kind mutes are kept until unmuted.
+    private func pruneMutes(seen ids: Set<String>, now: Date) {
+        var seenAt = UserDefaults.standard.dictionary(forKey: "mutedSeen") as? [String: Double] ?? [:]
+        let m = muted
+        for id in m where !id.hasPrefix("kind:") && (ids.contains(id) || seenAt[id] == nil) { seenAt[id] = now.timeIntervalSince1970 }
+        let stale = m.filter { !$0.hasPrefix("kind:") && now.timeIntervalSince1970 - (seenAt[$0] ?? 0) > 30 * 86_400 }
+        if !stale.isEmpty { muted = m.subtracting(stale) }
+        UserDefaults.standard.set(seenAt.filter { muted.contains($0.key) }, forKey: "mutedSeen")
     }
     /// How long a finding must have lasted before it notifies, in seconds.
     var after: TimeInterval { (UserDefaults.standard.object(forKey: "alertAfterMinutes") as? Double ?? 2) * 60 }
@@ -52,7 +76,8 @@ final class Alerts: NSObject, UNUserNotificationCenterDelegate {
         notifiedSince = notifiedSince.filter { ids.contains($0.key) }
         guard enabled, let center else { return }
         let muted = self.muted
-        for f in findings where f.severity.rawValue >= minSeverity && now.timeIntervalSince(f.since) >= after && !muted.contains(f.id) {
+        pruneMutes(seen: ids, now: now)
+        for f in findings where f.severity.rawValue >= minSeverity && now.timeIntervalSince(f.since) >= after && !isMuted(f) {
             // Mark the occurrence as handled before the cooldown check: an occurrence suppressed by the cooldown is not
             // notified later, even once the cooldown has passed.
             guard notifiedSince[f.id] != f.since else { continue }

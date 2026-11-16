@@ -206,6 +206,9 @@ struct SettingsView: View {
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 HStack {
                     Text("Using \(Fmt.bytes(blackBoxBytes))").font(.caption).monospacedDigit()
+                    if let err = engine.blackBox.lastWriteError {
+                        Text("Can't write: \(err)").font(.caption).foregroundStyle(.red).lineLimit(2).help(err)
+                    }
                     Spacer()
                     Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([engine.blackBox.dir]) }
                     Button("Clear…") { confirmClear = true }

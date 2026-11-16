@@ -36,6 +36,11 @@ public final class BlackBox: @unchecked Sendable {
     private var lastCoarse: Date?
     private let lock = NSLock()
 
+    private var _lastWriteError: String?
+    /// The most recent failure to write a segment (nil once a write succeeds again).
+    public var lastWriteError: String? { lock.lock(); defer { lock.unlock() }; return _lastWriteError }
+    private func setWriteError(_ e: String?) { lock.lock(); _lastWriteError = e; lock.unlock() }
+
     public init(dir: URL, config: Config = Config()) {
         self.dir = dir; self.config = config
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -85,7 +90,9 @@ public final class BlackBox: @unchecked Sendable {
         guard let a = frames.first?.time, let b = frames.last?.time else { return }
         let name = "\(tier.rawValue)-\(Int64(a.timeIntervalSince1970 * 1000))-\(Int64(b.timeIntervalSince1970 * 1000)).\(Trace.fileExtension)"
         let t = Trace(host: Host.current().localizedName ?? "Mac", model: Sysctl.string("hw.model") ?? "", interval: interval, frames: frames)
-        try? t.write(to: dir.appendingPathComponent(name))
+        // A failed write (disk full, permissions) is remembered and shown in Settings rather than silently dropped.
+        do { try t.write(to: dir.appendingPathComponent(name)); setWriteError(nil) }
+        catch { setWriteError("\(Date().formatted(date: .omitted, time: .shortened)): \(error.localizedDescription)") }
     }
 
     /// A segment file on disk, described from its name (times) and file size.

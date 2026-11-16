@@ -286,11 +286,18 @@ struct FindingActions: View {
         }
         if let d = f.destination { Button("Show in \(d.replacingOccurrences(of: ":", with: " › "))") { e.navigationRequest = d } }
         Divider()
-        // Muting is keyed by finding id and only suppresses notifications; the finding still shows in the UI.
+        // Muting stops notifications and keeps the finding off the lights (it's listed as muted in the banner).
+        // "This" mutes the exact finding; "all …" mutes its kind, e.g. every not-responding alert for any app.
+        let kind = Alerts.kind(of: f.id)
         if Alerts.shared.muted.contains(f.id) {
-            Button("Unmute Alerts for This") { Alerts.shared.muted.remove(f.id) }
+            Button("Unmute This") { Alerts.shared.muted.remove(f.id) }
         } else {
-            Button("Mute Alerts for This") { Alerts.shared.muted.insert(f.id) }
+            Button("Mute This") { Alerts.shared.muted.insert(f.id) }
+        }
+        if Alerts.shared.muted.contains("kind:" + kind) {
+            Button("Unmute All \(Alerts.kindName(kind)) Alerts") { Alerts.shared.muted.remove("kind:" + kind) }
+        } else if kind != f.id {
+            Button("Mute All \(Alerts.kindName(kind)) Alerts") { Alerts.shared.muted.insert("kind:" + kind) }
         }
         Button("Copy") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(f.title + (f.detail.map { "\n" + $0 } ?? ""), forType: .string) }
     }

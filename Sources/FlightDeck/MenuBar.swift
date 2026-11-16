@@ -39,7 +39,7 @@ struct MenuBarLabel: View {
 
     var body: some View {
         let s = e.liveSnapshot
-        let worst = e.liveFindings.map(\.severity).max() ?? .info
+        let worst = e.unmutedLiveFindings.map(\.severity).max() ?? .info
         let caution = worst >= .caution
         Group {
             switch style {
@@ -101,7 +101,7 @@ struct MenuBarPanel: View {
 
     var body: some View {
         let s = e.liveSnapshot
-        let f = e.liveFindings
+        let f = e.unmutedLiveFindings
         let worst = f.map(\.severity).max()
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {

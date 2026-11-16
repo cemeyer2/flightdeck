@@ -38,6 +38,36 @@ public final class Sampler: @unchecked Sendable {
     let power = PowerSampler()
     public let processes = ProcessSampler()
     let processNetwork = ProcessNetworkSampler()
+    // nettop runs on its own serial queue so a slow or stuck run never delays a snapshot; each sample uses the latest
+    // finished result (at most about one tick old). All of processNetwork's state is touched only on this queue.
+    private let netQueue = DispatchQueue(label: "flightdeck.nettop", qos: .utility)
+    private let netLock = NSLock()
+    private var latestNet: [Int32: ProcessNetwork]?
+    private var latestNetTime: Date?
+    private var netRunning = false
+    private var lastNetStart = Date.distantPast
+    /// Minimum seconds between nettop runs (0 = every sample). The app raises it while no window is visible, which is
+    /// the biggest single saving in background cost (each run is a process launch).
+    public var networkInterval: TimeInterval = 0
+
+    /// Starts a nettop run in the background unless one is running or the last started too recently.
+    private func refreshNetwork() {
+        netLock.lock()
+        guard !netRunning, Date().timeIntervalSince(lastNetStart) >= networkInterval else { netLock.unlock(); return }
+        netRunning = true; lastNetStart = Date()
+        netLock.unlock()
+        netQueue.async { [self] in
+            let r = processNetwork.sample()
+            netLock.lock(); latestNet = r; latestNetTime = Date(); netRunning = false; netLock.unlock()
+        }
+    }
+
+    /// The latest per-process network result, or nil if nettop is unavailable or the result is stale (> 15 s old).
+    private func currentNetwork() -> [Int32: ProcessNetwork]? {
+        netLock.lock(); defer { netLock.unlock() }
+        guard let t = latestNetTime, Date().timeIntervalSince(t) < 15 + networkInterval else { return nil }
+        return latestNet
+    }
     /// Opt-in; its latest results are attached to each snapshot while running.
     public let probe = NetworkProbe()
     private let gpuSampler = GPUSampler()
@@ -63,17 +93,21 @@ public final class Sampler: @unchecked Sendable {
         // nettop and the GPU clients only report bare PIDs. If a PID now belongs to a different process (new start
         // time), the old process's running totals must not carry over to it.
         for p in procs where pidStarts[p.pid].map({ $0 != p.identity.startTime }) == true {
-            processNetwork.forget(pid: p.pid); gpuSampler.forget(pid: p.pid)
+            let pid = p.pid
+            netQueue.async { [processNetwork] in processNetwork.forget(pid: pid) }
+            gpuSampler.forget(pid: pid)
         }
         pidStarts = Dictionary(procs.map { ($0.pid, $0.identity.startTime) }, uniquingKeysWith: { a, _ in a })
         // Per-process network comes from nettop (macOS has no public per-process byte counters). When it ran, a
         // process missing from its output had no traffic, so it gets a real zero; when it didn't run, `network`
         // stays nil (unavailable). `retain` drops running totals for processes that have exited.
-        if let net = processNetwork.sample() {
+        refreshNetwork()
+        if let net = currentNetwork() {
             for i in procs.indices {
                 procs[i].network = net[procs[i].pid] ?? ProcessNetwork(inBps: 0, outBps: 0, totalIn: 0, totalOut: 0, connections: 0)
             }
-            processNetwork.retain(pids: Set(procs.map(\.pid)))
+            let live = Set(procs.map(\.pid))
+            netQueue.async { [processNetwork] in processNetwork.retain(pids: live) }
         }
         // Hang state uses private window-server calls (see HangDetector) and only covers regular Dock apps; other
         // processes stay nil (unknown), never false. Checked every 2 s; SMART data every 5 minutes.

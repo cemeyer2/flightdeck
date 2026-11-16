@@ -126,7 +126,9 @@ struct DiagnosisBanner: View {
     @Environment(\.palette) var p
 
     var body: some View {
-        let f = e.findings
+        let all = e.findings
+        let f = all.filter { !Alerts.shared.isMuted($0) }
+        let muted = all.count - f.count
         let worst = f.map(\.severity).max()
         VStack(alignment: .leading, spacing: 8) {
             if e.current == nil {
@@ -139,6 +141,9 @@ struct DiagnosisBanner: View {
             if f.count > 6 {
                 Button("\(f.count - 6) more in the Flight Log") { e.navigationRequest = Destination.flightLog.rawValue }
                     .buttonStyle(.link).font(.caption)
+            }
+            if muted > 0 {
+                Text("\(muted) muted finding\(muted == 1 ? "" : "s") (right-click a finding to mute or unmute)").font(.caption).foregroundStyle(p.dim)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -167,14 +172,14 @@ struct AnnunciatorPanel: View {
         ("STORAGE", ["disk-low", "disk-full"], "Disk Space"),
         ("NET", ["net-", "wifi-weak"], "Performance:Network"),
         ("GPU", ["gpu:", "gpu-recovery", "gpu-memory"], "Performance:GPU"),
-        ("POWER", ["unusual-power", "battery-health"], "Performance:Energy"),
+        ("POWER", ["unusual-power", "battery-health", "sleep-"], "Performance:Energy"),
         ("HANG", ["hang:", "report:Hang"], "Processes"),
         ("CRASH", ["report:Crash"], "Flight Log"),
         ("AWAKE", ["awake:"], "Processes"),
     ]
 
     var body: some View {
-        let f = e.findings
+        let f = e.findings.filter { !Alerts.shared.isMuted($0) }   // muted findings don't light the annunciator
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 6), spacing: 6) {
             ForEach(Self.lights, id: \.label) { light in
                 let hits = f.filter { x in light.match.contains { x.id.hasPrefix($0) } }.sorted { $0.severity > $1.severity }

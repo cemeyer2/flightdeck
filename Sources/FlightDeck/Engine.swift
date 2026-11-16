@@ -69,7 +69,19 @@ final class Engine: ObservableObject {
     @Published private(set) var diskFullDays: Double?
     /// Findings for the current mode: live analyzer findings plus diagnostic-report findings, or in replay the findings
     /// recomputed for the replayed moment (diagnostic reports aren't part of a trace).
-    var findings: [Finding] { mode == .live ? liveFindings + reportFindings : replayFindings }
+    var findings: [Finding] { mode == .live ? liveFindings + reportFindings + sleepFindings : replayFindings }
+    /// Live findings the user hasn't muted: these drive the caution lights (menu bar, Dock lamp).
+    var unmutedLiveFindings: [Finding] { (liveFindings + reportFindings + sleepFindings).filter { !Alerts.shared.isMuted($0) } }
+    /// Findings about the last sleep (many dark wakes, battery drain), from the power log after each wake.
+    @Published private(set) var sleepFindings: [Finding] = []
+
+    /// Reads the power log off the main thread and refreshes `sleepFindings`.
+    private func refreshSleepFindings() {
+        Task {
+            let f = await Task.detached(priority: .utility) { SleepLog.read(days: 1).map { SleepLog.findings($0) } ?? [] }.value
+            sleepFindings = f
+        }
+    }
     /// macOS diagnostic reports from the last 7 days (rescanned every 5 minutes).
     @Published private(set) var reports: [DiagnosticReport] = []
     /// Findings derived from recent diagnostic reports (crashes, hangs, etc.).
@@ -151,6 +163,13 @@ final class Engine: ObservableObject {
         applyProbe()
         let r = rules; queue.async { [ruleEngine] in ruleEngine.rules = r }
         startVisibilityTracking()
+        // Sleep findings: at launch, after every wake, and every 30 minutes (so they expire 12 h after waking).
+        refreshSleepFindings()
+        NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
+            // give powerd a moment to write the wake to the log
+            DispatchQueue.main.asyncAfter(deadline: .now() + 20) { MainActor.assumeIsolated { self?.refreshSleepFindings() } }
+        }
+        Timer.scheduledTimer(withTimeInterval: 1800, repeats: true) { [weak self] _ in Task { @MainActor in self?.refreshSleepFindings() } }
         // On quit, flush the black box and close/save the incident log synchronously so nothing buffered is lost.
         NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: nil) { [blackBox, blackBoxQueue, queue, incidentLog] _ in
             blackBoxQueue.sync { blackBox.flush() }
@@ -345,10 +364,12 @@ final class Engine: ObservableObject {
         lastTick = Date()
         inFlight = true
         let includeSelf = self.includeSelf
+        let visible = uiVisible
         let front = NSWorkspace.shared.frontmostApplication?.processIdentifier
         resumeSuspended()
         queue.async { [sampler, analyzer, incidentLog, ruleEngine] in
             sampler.processes.includeSelf = includeSelf
+            sampler.networkInterval = visible ? 0 : 5   // per-process network every 5 s while no window is visible
             let s = sampler.sample()
             self.processHistory.record(s.processes)
             let found = analyzer.ingest(s)
@@ -365,7 +386,7 @@ final class Engine: ObservableObject {
                 // publish only real changes (each publish re-evaluates every observing view)
                 if found.map(\.signature) != self.liveFindings.map(\.signature) { self.liveFindings = found }
                 if fullDays.map({ ($0 * 10).rounded() }) != self.diskFullDays.map({ ($0 * 10).rounded() }) { self.diskFullDays = fullDays }
-                Alerts.shared.evaluate(found + self.reportFindings, now: s.time)
+                Alerts.shared.evaluate(found + self.reportFindings + self.sleepFindings, now: s.time)
                 firings.forEach { self.execute($0) }
                 if let log { self.incidents = log }
                 self.ingest(s)
@@ -433,7 +454,7 @@ final class Engine: ObservableObject {
         inFlight = false
         if recording { recorded.append(FlightDeckCore.Trace.trimmed(s)) }
         if blackBoxEnabled { let iv = interval; blackBoxQueue.async { [blackBox] in blackBox.append(s, interval: iv) } }
-        DockIconController.shared.ingest(s, recording: recording, caution: liveFindings.map(\.severity.rawValue).max() ?? 0)
+        DockIconController.shared.ingest(s, recording: recording, caution: unmutedLiveFindings.map(\.severity.rawValue).max() ?? 0)
         var light = s; light.processes = Array(s.processes.sorted { $0.cpu > $1.cpu }.prefix(12))
         if !uiVisible {
             // menu bar strip still updates, just less often

@@ -285,3 +285,23 @@ final class CoreFindingsTests: XCTestCase {
         XCTAssertEqual(try Trace.read(from: url).osVersion, ProcessInfo.processInfo.operatingSystemVersionString)
     }
 }
+
+final class SleepFindingTests: XCTestCase {
+    /// A night with many dark wakes and real battery drain yields both findings, naming the main cause.
+    func testRestlessNight() {
+        var lines = ["2026-11-16 00:00:00 -0600 Sleep               \tEntering Sleep state due to 'Clamshell Sleep':TCPKeepAlive=active Using Batt (Charge:90%) 60 secs"]
+        for i in 0..<35 {
+            let t = String(format: "2026-11-16 %02d:%02d:00 -0600", 1 + i / 6, (i % 6) * 10)
+            lines.append("\(t) DarkWake            \tDarkWake from Deep Idle [CDNPB] : due to smc.sysState.Wake(0x70070000) bluetooth-pcie/ Using BATT (Charge:88%) 10 secs")
+            lines.append("\(t) Sleep               \tEntering Sleep state due to 'Maintenance Sleep':TCPKeepAlive=active Using BATT (Charge:88%) 590 secs")
+        }
+        lines.append("2026-11-16 07:00:00 -0600 Wake                \tDarkWake to FullWake from Deep Idle [CDNVA] : due to EC.LidOpen/Lid Open Using BATT (Charge:76%)")
+        let r = SleepLog.parse(lines.joined(separator: "\n"), since: .distantPast)
+        let now = SleepLog.stamp.date(from: "2026-11-16 08:00:00 -0600")!
+        let f = SleepLog.findings(r, now: now)
+        XCTAssertEqual(f.map(\.id).sorted(), ["sleep-drain", "sleep-wakes"])
+        XCTAssertTrue(f.first { $0.id == "sleep-wakes" }!.title.contains("bluetooth"))
+        XCTAssertTrue(f.first { $0.id == "sleep-drain" }!.title.hasPrefix("Lost 14% battery"))
+        XCTAssertTrue(SleepLog.findings(r, now: now.addingTimeInterval(13 * 3600)).isEmpty, "only for 12 hours after waking")
+    }
+}

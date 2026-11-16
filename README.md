@@ -48,7 +48,7 @@ subsystem. Hover to see why; click to jump to the cause.
 apps hogging CPU, memory pressure and growing swap, apps whose memory grows steadily (likely leaks), thermal throttling (and explains kernel_task), measured CPU throttling (busy performance cores held well below their top clock while hot), heavy disk or network I/O, frequent wake-ups, a startup disk that will fill up within days,
 and anything unusual for *this* Mac, compared with a baseline built from the black box's 24 hours. Well-known
 background work (Spotlight, Time Machine, iCloud, Photos analysis, updates) is explained. Anything lasting 20 s or
-more goes into the **Flight Log** (kept 7 days) with a one-click replay of that moment from the black box. A **timeline** (1/6/24 h) of CPU, memory pressure and temperature with incident markers sits on top; click any moment to replay it. The Flight Log also lists **macOS reports** from the last 7 days (crashes with exception type, hangs, memory kills, CPU and disk-write limit violations), and an app that crashes or hangs repeatedly becomes a finding. When an app hangs or hogs the CPU or GPU, FlightDeck **captures its call stacks automatically** (3 s with `/usr/bin/sample`, at most one per problem every 10 minutes) and attaches them to the incident with a one-line summary such as "Main thread waiting in __psynch_mutexwait ← -[Model sortItems:]" (Settings to turn off; kept 7 days). Right-click a finding to inspect the responsible process, quit its app, or mute its alerts.
+more goes into the **Flight Log** (kept 7 days) with a one-click replay of that moment from the black box. A **timeline** (1/6/24 h) of CPU, memory pressure and temperature with incident markers sits on top; click any moment to replay it. The Flight Log also lists **macOS reports** from the last 7 days (crashes with exception type, hangs, memory kills, CPU and disk-write limit violations), and an app that crashes or hangs repeatedly becomes a finding. When an app hangs or hogs the CPU or GPU, FlightDeck **captures its call stacks automatically** (3 s with `/usr/bin/sample`, at most one per problem every 10 minutes) and attaches them to the incident with a one-line summary such as "Main thread waiting in __psynch_mutexwait ← -[Model sortItems:]" (Settings to turn off; kept 7 days). Muting (right-click a finding) can target one finding or a whole kind (e.g. every not-responding alert); muted findings don't notify or light the caution lights and are listed as muted in the banner. Right-click a finding to inspect the responsible process, quit its app, or mute its alerts.
 
 **Master caution:** a menu bar instrument strip (caution light, CPU and memory bars; or CPU % or the light alone)
 opens a panel with the caution status, gauges, findings, top apps and quick actions. With it on, closing the window
@@ -122,6 +122,8 @@ Flight Recorder is recording. The static `AppIcon.icns` is rendered by the same 
 
 **Startup Apps** shows who signed every launch agent, daemon and login item, flags unsigned ones, and marks items
 whose program no longer exists (leftovers from removed apps), with a summary at the top.
+
+After each wake, a restless or draining night (30+ dark wakes, or 10%+ battery lost while asleep) becomes a finding that names the main cause.
 
 **Sleep & Wake** reads the power-management log (no root): every sleep session with why it slept, what woke it,
 each dark wake (screen-off wakes for network upkeep, Power Nap, Bluetooth) in plain English, battery used overnight,
