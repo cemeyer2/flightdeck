@@ -2,7 +2,7 @@ import SwiftUI
 import FlightDeckCore
 
 enum Destination: String, CaseIterable, Identifiable, Hashable {
-    case summary = "Summary", flightLog = "Flight Log", performance = "Performance", processes = "Processes", systemInfo = "System Info",
+    case summary = "Summary", flightLog = "Flight Log", rules = "Rules", performance = "Performance", processes = "Processes", systemInfo = "System Info",
          startup = "Startup Apps", users = "Users", services = "Services", power = "Power & Freq", sleep = "Sleep & Wake",
          connections = "Connections", apps = "Installed Apps", diskSpace = "Disk Space", benchmarks = "Benchmarks"
     var id: String { rawValue }
@@ -10,6 +10,7 @@ enum Destination: String, CaseIterable, Identifiable, Hashable {
         switch self {
         case .summary: "gauge.with.dots.needle.50percent"
         case .flightLog: "list.bullet.clipboard"
+        case .rules: "bolt.badge.automatic"
         case .performance: "waveform.path.ecg"
         case .processes: "list.bullet.indent"
         case .systemInfo: "info.circle"
@@ -80,6 +81,7 @@ struct ContentView: View {
         switch selection {
         case .summary: SummaryView()
         case .flightLog: FlightLogView()
+        case .rules: RulesView()
         case .performance: PerformanceView()
         case .processes: ProcessesView()
         case .systemInfo: SystemInfoView()

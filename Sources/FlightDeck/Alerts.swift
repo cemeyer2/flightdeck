@@ -53,6 +53,14 @@ final class Alerts: NSObject, UNUserNotificationCenterDelegate {
         }
     }
 
+    /// A plain notification (rules), independent of finding severity settings.
+    func post(title: String, body: String, destination: String? = "Rules") {
+        guard let center else { return }
+        let c = UNMutableNotificationContent()
+        c.title = title; c.body = body; c.userInfo = ["destination": destination ?? ""]
+        center.add(UNNotificationRequest(identifier: UUID().uuidString, content: c, trigger: nil))
+    }
+
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
         let d = response.notification.request.content.userInfo["destination"] as? String
         await MainActor.run { onOpen?(d?.isEmpty == false ? d : nil) }

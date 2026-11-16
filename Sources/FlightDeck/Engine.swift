@@ -45,6 +45,13 @@ final class Engine: ObservableObject {
     /// macOS diagnostic reports from the last 7 days (rescanned every 5 minutes).
     @Published private(set) var reports: [DiagnosticReport] = []
     @Published private(set) var reportFindings: [Finding] = []
+
+    // Rules: user automations evaluated on every sample.
+    @Published var rules: [Rule] = RuleEngine.load(UserDefaults.standard.data(forKey: "rules")) {
+        didSet { UserDefaults.standard.set(RuleEngine.save(rules), forKey: "rules"); let r = rules; queue.async { [ruleEngine] in ruleEngine.rules = r } }
+    }
+    struct RuleLogEntry: Identifiable { let id = UUID(); var firing: RuleFiring; var result: String }
+    @Published private(set) var ruleLog: [RuleLogEntry] = []
     /// Set to a Destination raw value (optionally "Performance:<tab>") to navigate there.
     @Published var navigationRequest: String?
     /// Called on the main actor for each incident once it has lasted long enough to log.
@@ -63,6 +70,7 @@ final class Engine: ObservableObject {
     private let blackBoxQueue = DispatchQueue(label: "flightdeck.blackbox", qos: .background)
     // Confined to `queue`.
     nonisolated private let analyzer = Analyzer()
+    nonisolated private let ruleEngine = RuleEngine()
     nonisolated private let incidentLog = IncidentLog(url: IncidentLog.defaultURL)
     nonisolated(unsafe) private var incidentRevision = -1
     nonisolated(unsafe) private var lastIncidentSave = Date()
@@ -94,11 +102,45 @@ final class Engine: ObservableObject {
         }
         applyThresholds()
         applyProbe()
+        let r = rules; queue.async { [ruleEngine] in ruleEngine.rules = r }
         startVisibilityTracking()
         NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: nil) { [blackBox, blackBoxQueue, queue, incidentLog] _ in
             blackBoxQueue.sync { blackBox.flush() }
             queue.sync { incidentLog.closeAll(at: Date()); incidentLog.save() }
         }
+    }
+
+    /// Carries out a rule's action. Signals are identity-checked (a recycled PID is never hit); every action is announced.
+    private func execute(_ f: RuleFiring) {
+        let r = f.rule
+        let what = f.targets.count > 1 ? "\(f.subject) (\(f.targets.count) processes)" : f.subject
+        let measured = "\(r.metric.rawValue) \(String(format: "%.1f", f.value)) for \(r.minutes.formatted()) min"
+        var result: String
+        func signal(_ sig: Int32, _ verb: String) -> String {
+            var ok = 0, failed = 0
+            for id in f.targets { do { try ProcessSampler.send(sig, to: id); ok += 1 } catch { failed += 1 } }
+            return failed == 0 ? "\(verb) \(what)" : "\(verb) \(ok) of \(f.targets.count) processes of \(f.subject) (\(failed) not permitted or gone)"
+        }
+        switch r.action {
+        case .notify: result = "Notified"
+        case .lowerPriority:
+            var ok = 0
+            for id in f.targets where ProcessSampler.identity(of: id.pid) == id { if (try? ProcessInspector.setNice(pid: id.pid, 10)) != nil { ok += 1 } }
+            result = "Lowered the priority of \(ok) of \(f.targets.count) processes"
+        case .suspend: result = signal(SIGSTOP, "Suspended")
+        case .quit: result = signal(SIGTERM, "Quit")
+        case .forceQuit: result = signal(SIGKILL, "Force quit")
+        case .command:
+            let p = Process(); p.executableURL = URL(fileURLWithPath: "/bin/sh"); p.arguments = ["-c", r.command]
+            var env = ProcessInfo.processInfo.environment
+            env["FD_RULE"] = r.name; env["FD_SUBJECT"] = f.subject; env["FD_METRIC"] = r.metric.rawValue
+            env["FD_VALUE"] = String(format: "%.2f", f.value); env["FD_PIDS"] = f.targets.map { "\($0.pid)" }.joined(separator: " ")
+            p.environment = env
+            do { try p.run(); result = "Ran the command (pid \(p.processIdentifier))" } catch { result = "Command failed: \(error.localizedDescription)" }
+        }
+        Alerts.shared.post(title: "Rule “\(r.name)”", body: "\(what): \(measured). \(result).")
+        ruleLog.insert(RuleLogEntry(firing: f, result: result), at: 0)
+        if ruleLog.count > 100 { ruleLog.removeLast(ruleLog.count - 100) }
     }
 
     /// On the sampling queue: when a hang or a sustained CPU/GPU hog is first logged, sample its call stacks.
@@ -152,11 +194,12 @@ final class Engine: ObservableObject {
         lastTick = Date()
         inFlight = true
         let includeSelf = self.includeSelf
-        queue.async { [sampler, analyzer, incidentLog] in
+        queue.async { [sampler, analyzer, incidentLog, ruleEngine] in
             sampler.processes.includeSelf = includeSelf
             let s = sampler.sample()
             self.processHistory.record(s.processes)
             let found = analyzer.ingest(s)
+            let firings = ruleEngine.evaluate(s)
             let fullDays = analyzer.daysUntilFull()
             let fresh = incidentLog.update(found, at: s.time)
             self.captureEvidence(for: fresh, findings: found, snapshot: s)
@@ -168,6 +211,7 @@ final class Engine: ObservableObject {
                 if found.map(\.signature) != self.liveFindings.map(\.signature) { self.liveFindings = found }
                 if fullDays.map({ ($0 * 10).rounded() }) != self.diskFullDays.map({ ($0 * 10).rounded() }) { self.diskFullDays = fullDays }
                 Alerts.shared.evaluate(found + self.reportFindings, now: s.time)
+                firings.forEach { self.execute($0) }
                 if let log { self.incidents = log }
                 fresh.forEach { self.onNewIncident?($0) }
                 self.ingest(s)

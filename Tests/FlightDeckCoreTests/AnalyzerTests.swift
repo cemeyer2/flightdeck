@@ -233,3 +233,30 @@ final class NoiseTests: XCTestCase {
         XCTAssertTrue(log.incidents.isEmpty)
     }
 }
+
+final class RuleEngineTests: XCTestCase {
+    func testFiresOncePerOccurrenceAfterDurationWithCooldownAndProtection() {
+        let t = AnalyzerTests(); let t0 = Date(timeIntervalSince1970: 13_000_000)
+        let e = RuleEngine()
+        e.rules = [Rule(name: "hog", target: .app, match: "busy", metric: .cpu, threshold: 100, minutes: 1, action: .quit, cooldownMinutes: 5)]
+        func procs(_ c: Double) -> [ProcessSample] {
+            [t.proc("Busy", path: "/Applications/Busy.app/Contents/MacOS/Busy", pid: 50, cpu: c / 2),
+             t.proc("Busy Helper", path: "/Applications/Busy.app/Contents/Helpers/H", pid: 51, cpu: c / 2),
+             t.proc("kernel_task", path: "", pid: 0, cpu: 500), t.proc("WindowServer", path: "/System/x/WindowServer", pid: 60, cpu: 500)]
+        }
+        var firings: [RuleFiring] = []
+        for i in 0..<200 { firings += e.evaluate(t.snap(t0.addingTimeInterval(Double(i)), procs: procs(150))) }
+        XCTAssertEqual(firings.count, 1, "once per occurrence, after 60 s")
+        XCTAssertEqual(firings[0].time.timeIntervalSince(t0), 60, accuracy: 1)
+        XCTAssertEqual(Set(firings[0].targets.map(\.pid)), [50, 51], "the app's processes")
+        // condition breaks, then returns within the cooldown: no second firing
+        for i in 200..<205 { firings += e.evaluate(t.snap(t0.addingTimeInterval(Double(i)), procs: procs(10))) }
+        for i in 205..<280 { firings += e.evaluate(t.snap(t0.addingTimeInterval(Double(i)), procs: procs(150))) }
+        XCTAssertEqual(firings.count, 1, "cooldown")
+        // protected processes are never targets, even with a match-all rule
+        let any = RuleEngine(); any.rules = [Rule(name: "any", target: .process, metric: .cpu, threshold: 100, minutes: 0, action: .forceQuit)]
+        let f = any.evaluate(t.snap(t0, procs: procs(150)))
+        XCTAssertFalse(f.contains { ["kernel_task", "WindowServer"].contains($0.subject) })
+        XCTAssertEqual(RuleEngine.load(RuleEngine.save(RuleEngine.examples)).count, 3)
+    }
+}

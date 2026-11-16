@@ -121,6 +121,11 @@ whose program no longer exists (leftovers from removed apps), with a summary at 
 each dark wake (screen-off wakes for network upkeep, Power Nap, Bluetooth) in plain English, battery used overnight,
 which processes scheduled wakes, and which apps kept the Mac awake and for how long.
 
+**Rules** automate responses: "when app *Chrome* has CPU % above 300 for 10 minutes, notify me / lower its priority /
+suspend / quit / force quit / run a command". Commands get `FD_RULE`, `FD_SUBJECT`, `FD_PIDS`, `FD_METRIC` and `FD_VALUE`
+in their environment (names are never spliced into the shell). Rules fire once per occurrence with a cooldown, signals
+are identity-checked, FlightDeck and core macOS processes are never targeted, and every action posts a notification.
+
 ## Measurement principles
 
 - **No invented zeros.** Every value is `Measured<T>`, either `.value` or `.unavailable(reason)`. Unmeasured
