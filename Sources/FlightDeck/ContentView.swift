@@ -1,6 +1,12 @@
+// The main window: a sidebar of destinations, the selected destination's view below the replay bar, the toolbar, the
+// first-run welcome sheet, and handling of `Engine.navigationRequest` (how findings, menus and notifications jump to a
+// screen).
 import SwiftUI
 import FlightDeckCore
 
+/// Sidebar destinations. The raw value is the visible title and also the navigation key used by
+/// `Engine.navigationRequest`, finding destinations, notification payloads and the `-destination` launch argument,
+/// so renaming a case changes those strings too.
 enum Destination: String, CaseIterable, Identifiable, Hashable {
     case summary = "Summary", flightLog = "Flight Log", rules = "Rules", performance = "Performance", processes = "Processes", systemInfo = "System Info",
          startup = "Startup Apps", users = "Users", services = "Services", power = "Power & Freq", sleep = "Sleep & Wake",
@@ -25,19 +31,23 @@ enum Destination: String, CaseIterable, Identifiable, Hashable {
         case .benchmarks: "speedometer"
         }
     }
+    /// Destinations whose content follows live (or replayed) samples. Not read anywhere at present.
     var isLive: Bool { [.summary, .flightLog, .performance, .processes, .power].contains(self) }
 }
 
+/// Main window content. Selection and Performance tab are per-window scene storage, so they survive relaunches.
 struct ContentView: View {
     @Environment(\.palette) var p
     @SceneStorage("destination") private var selection: Destination = .summary
     @SceneStorage("perfTab") private var perfTab: PerfTab = .cpu
     @EnvironmentObject var engine: Engine
     @Environment(\.openWindow) private var openWindow
+    // Shown on first launch until WelcomeView sets "welcomed"; "skipWelcome" lets automation suppress it.
     @State private var showWelcome = !UserDefaults.standard.bool(forKey: "welcomed") && !UserDefaults.standard.bool(forKey: "skipWelcome")
 
     var body: some View {
         NavigationSplitView {
+            // The binding ignores nil so clicking empty sidebar space can't deselect everything.
             List(Destination.allCases, selection: Binding(get: { selection }, set: { if let v = $0 { selection = v } })) { d in
                 Label(d.rawValue, systemImage: d.icon).tag(d)
             }
@@ -55,6 +65,7 @@ struct ContentView: View {
         .toolbar { ToolbarItemGroup(placement: .primaryAction) { ToolbarControls() } }
         .modifier(ErrorAlert())
         .sheet(isPresented: $showWelcome) { WelcomeView().environmentObject(engine).environment(\.palette, p) }
+        // Requests look like "Processes" or "Performance:GPU". Cleared immediately so the same request can be made again.
         .onChange(of: engine.navigationRequest) {
             guard let r = engine.navigationRequest else { return }
             engine.navigationRequest = nil
@@ -63,12 +74,14 @@ struct ContentView: View {
             if parts.count > 1, let t = PerfTab(rawValue: parts[1]) { perfTab = t }
         }
         .onAppear {
+            // The inspector WindowGroup is opened by value (a ProcessIdentity), which only a SwiftUI view can do.
             AppActions.openInspector = { openWindow(id: "inspector", value: $0) }
             // automation hook: `-inspectPID 123` opens the inspector for that process
             let ipid = UserDefaults.standard.integer(forKey: "inspectPID")
             if ipid > 0, let id = ProcessSampler.identity(of: Int32(ipid)) {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2) { openWindow(id: "inspector", value: id) }
             }
+            // Fallback in case the menu bar item (which normally installs this) is turned off.
             if Alerts.shared.onOpen == nil { Alerts.shared.onOpen = { [engine] d in AppActions.showMain(navigate: d, engine: engine) } }
             // Debug/automation hook: `open FlightDeck.app --args -destination "Processes"`
             if let d = UserDefaults.standard.string(forKey: "destination").flatMap(Destination.init(rawValue:)) {
@@ -99,6 +112,8 @@ struct ContentView: View {
 
 }
 
+/// Toolbar: pause/resume, sample interval, Flight Recorder record/stop, open trace, theme. Pause is disabled in replay
+/// (live sampling keeps running there regardless).
 struct ToolbarControls: View {
     @EnvironmentObject var engine: Engine
     @AppStorage("theme") private var theme: ThemeID = .dark
@@ -124,6 +139,7 @@ struct ToolbarControls: View {
     }
 }
 
+/// Presents `engine.lastError` as an alert; dismissing it clears the error.
 struct ErrorAlert: ViewModifier {
     @EnvironmentObject var engine: Engine
     func body(content: Content) -> some View {
@@ -133,6 +149,7 @@ struct ErrorAlert: ViewModifier {
     }
 }
 
+/// Bottom of the sidebar: recording frame count and the LIVE / PAUSED / REPLAY state.
 struct SidebarFooter: View {
     @EnvironmentObject var engine: Engine
     var body: some View {
@@ -148,6 +165,8 @@ struct SidebarFooter: View {
     }
 }
 
+/// Transport controls shown above the detail view only while a trace is loaded. Changing `replayIndex` makes the
+/// Engine rebuild `frames`/`current`, so every view shows the replayed moment.
 struct ReplayBar: View {
     @EnvironmentObject var engine: Engine
     @Environment(\.palette) var p
@@ -159,6 +178,7 @@ struct ReplayBar: View {
                 Button { engine.togglePlay() } label: { Image(systemName: engine.playing ? "pause.fill" : "play.fill") }
                 Button { engine.replayIndex = max(0, engine.replayIndex - 1) } label: { Image(systemName: "backward.frame.fill") }
                 Button { engine.replayIndex = min(t.frames.count - 1, engine.replayIndex + 1) } label: { Image(systemName: "forward.frame.fill") }
+                // The upper bound is at least 1 because a closed range needs distinct ends; Engine clamps the index.
                 Slider(value: Binding(get: { Double(engine.replayIndex) }, set: { engine.replayIndex = Int($0) }),
                        in: 0...Double(max(t.frames.count - 1, 1)))
                 Text("\(engine.replayIndex + 1)/\(t.frames.count)").font(.system(size: 11, design: .monospaced)).monospacedDigit()

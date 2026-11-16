@@ -1,5 +1,9 @@
+// The line/area graph used by every history view (Summary, Performance tabs, inspector, flight report) and its legend.
+// Graphs are fed `[Double?]` series (usually from `Engine.series`/`rateSeries`), where nil means "no sample".
 import SwiftUI
 
+/// One series in a HistoryGraph. `values` are evenly spaced in time, oldest first; `id` is the name, so names must be
+/// unique within one graph.
 struct GraphTrace: Identifiable {
     var id: String { name }
     var name: String
@@ -9,14 +13,19 @@ struct GraphTrace: Identifiable {
 }
 
 /// History graph. `nil` samples break the line (gap) instead of interpolating.
+/// Drawn in a single Canvas (cheap to re-render once per sample). Values are clamped to 0…scale.
 struct HistoryGraph: View {
     @Environment(\.palette) var p
     var traces: [GraphTrace]
     var maxValue: Double? = nil      // nil = adaptive
+    /// Lower bound for the adaptive scale, in the series' units, so a quiet metric (e.g. 1 KB/s) isn't stretched to
+    /// fill the graph and look busy.
     var minHeadroom: Double = 1
+    /// When set, the scale's top value is printed in the top-left corner with this formatter.
     var format: ((Double) -> String)? = nil
     var showGrid = true
 
+    /// The value at the top of the graph: `maxValue`, or 15% above the largest visible value rounded up to a "nice" number.
     var scale: Double {
         if let maxValue { return maxValue }
         let m = traces.flatMap { $0.values.compactMap { $0 } }.max() ?? 0
@@ -63,6 +72,7 @@ struct HistoryGraph: View {
                         ctx.stroke(line, with: .color(t.color.opacity(0.35)), style: StrokeStyle(lineWidth: 1.5 + p.glow * 1.5, lineJoin: .round))
                     }
                     ctx.stroke(line, with: .color(t.color), style: StrokeStyle(lineWidth: 1.5, lineJoin: .round))
+                    // A sample with gaps on both sides has no line to draw; show it as a dot so it isn't invisible.
                     if run.count == 1 { ctx.fill(Path(ellipseIn: CGRect(x: run[0].x - 1.5, y: run[0].y - 1.5, width: 3, height: 3)), with: .color(t.color)) }
                 }
             }
@@ -74,6 +84,7 @@ struct HistoryGraph: View {
         .clipShape(RoundedRectangle(cornerRadius: 6))
     }
 
+    /// Smallest of 1, 2, 2.5, 5 or 10 × a power of ten that is ≥ `v` (axis-friendly maximum).
     func niceCeil(_ v: Double) -> Double {
         guard v > 0 else { return 1 }
         let mag = pow(10, floor(log10(v)))
@@ -82,6 +93,7 @@ struct HistoryGraph: View {
     }
 }
 
+/// A row of colour swatches with a label and current value each: (label, colour, formatted value).
 struct Legend: View {
     @Environment(\.palette) var p
     var items: [(String, Color, String)]

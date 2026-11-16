@@ -1,19 +1,27 @@
+// The menu bar extra: the label drawn in the menu bar (MenuBarLabel) and its drop-down panel (MenuBarPanel), plus the
+// AppActions hooks that let AppKit-level code (AppDelegate, notifications, menus) open SwiftUI windows, and the login
+// item toggle. Both views read `liveSnapshot`/`liveFindings`, so they keep showing live data during replay.
 import SwiftUI
 import AppKit
 import ServiceManagement
 import FlightDeckCore
 
+/// What the menu bar label shows; the raw value is stored in the "menuBarStyle" user default and shown in Settings.
 enum MenuBarStyle: String, CaseIterable, Identifiable {
     case gauges = "Gauges", cpuText = "CPU %", light = "Caution light only"
     var id: String { rawValue }
 }
 
 /// Global hooks for things AppKit callbacks need but only SwiftUI views can do.
+/// `openMain`/`openInspector` capture a view's `openWindow` action; they are set when MenuBarLabel or ContentView appears.
 @MainActor enum AppActions {
     static var openMain: (() -> Void)?
     static var openInspector: ((ProcessIdentity) -> Void)?
+    /// Brings the main window forward (opening it if it was closed), then optionally navigates. Navigation is delayed
+    /// 0.3 s so a newly opened window's ContentView exists to observe `navigationRequest`.
     static func showMain(navigate: String? = nil, engine: Engine? = nil) {
         NSApp.activate(ignoringOtherApps: true)
+        // SwiftUI gives a `Window(id: "main")` an NSWindow identifier starting with "main".
         if let w = NSApp.windows.first(where: { $0.identifier?.rawValue.hasPrefix("main") == true && $0.canBecomeMain }) {
             w.makeKeyAndOrderFront(nil)
         } else { openMain?() }
@@ -22,6 +30,8 @@ enum MenuBarStyle: String, CaseIterable, Identifiable {
 }
 
 /// Menu bar label: a tiny instrument strip (CPU and memory bars, master caution light), drawn as an image.
+/// Because the menu bar label is always on screen, this view is re-evaluated on each `liveSnapshot` publish; Engine
+/// throttles those to every 5 s while no window is visible.
 struct MenuBarLabel: View {
     @EnvironmentObject var e: Engine
     @Environment(\.openWindow) private var openWindow
@@ -41,12 +51,17 @@ struct MenuBarLabel: View {
                                            severity: caution ? worst : nil, lightOnly: style == .light))
             }
         }
+            // The label exists for the app's whole lifetime (when the menu bar item is enabled), which makes it a
+            // reliable place to install the global hooks.
         .onAppear {
             AppActions.openMain = { openWindow(id: "main") }
             Alerts.shared.onOpen = { [e] d in AppActions.showMain(navigate: d, engine: e) }
         }
     }
 
+    /// Draws the 16 pt-high strip with AppKit: a caution light (orange = caution, red = warning, hollow outline when
+    /// nothing is at caution or above) and, unless `lightOnly`, CPU and memory bars as 0…1 fractions. A nil value draws
+    /// only the empty track (unavailable, not zero). Not a template image, so the light keeps its colour.
     static func render(cpu: Double?, mem: Double?, severity: Finding.Severity?, lightOnly: Bool) -> NSImage {
         let h: CGFloat = 16, barW: CGFloat = 5, gap: CGFloat = 2
         let w: CGFloat = lightOnly ? 12 : 12 + gap + barW * 2 + gap
@@ -78,6 +93,7 @@ struct MenuBarLabel: View {
 }
 
 /// The drop-down: master caution, a gauge row, findings, top processes and quick actions.
+/// Uses live data only (not the replayed moment), like the label.
 struct MenuBarPanel: View {
     @EnvironmentObject var e: Engine
     @Environment(\.palette) var p
@@ -100,6 +116,7 @@ struct MenuBarPanel: View {
             HStack(spacing: 14) {
                 MiniGauge(label: "CPU", value: s?.cpu.total.value.map { $0 / 100 }, text: s?.cpu.total.value.map { String(format: "%.0f%%", $0) })
                 MiniGauge(label: "MEM", value: s.map { Double($0.memory.used) / Double(max($0.memory.total, 1)) }, text: s.map { Fmt.bytes($0.memory.used) })
+                // Gauge scales: temperature against 110 °C, power against 60 W (both are just display ranges).
                 MiniGauge(label: "TEMP", value: s?.power.hottest.value.map { $0 / 110 }, text: s?.power.hottest.value.map { String(format: "%.0f°", $0) })
                 MiniGauge(label: "POWER", value: s?.power.systemWatts.value.map { min($0 / 60, 1) }, text: s?.power.systemWatts.value.map { String(format: "%.1fW", $0) })
             }
@@ -123,8 +140,10 @@ struct MenuBarPanel: View {
             }
             Divider()
             Text("TOP PROCESSES").font(.system(size: 10, weight: .bold, design: .monospaced)).foregroundStyle(p.dim)
+                // Top apps (processes grouped by app bundle), by CPU in % of one core.
             ForEach(AppUsage.aggregate(s?.processes ?? []).sorted { $0.cpu > $1.cpu }.prefix(5)) { a in
                 HStack {
+                    // AppIcon looks for ".app/" in the path, so a bare bundle path needs the trailing slash to get its icon.
                     AppIcon(path: a.iconPath.hasSuffix(".app") ? a.iconPath + "/" : a.iconPath).frame(width: 14, height: 14)
                     Text(a.name).lineLimit(1)
                     Spacer()
@@ -145,6 +164,7 @@ struct MenuBarPanel: View {
     }
 }
 
+/// A labelled value with a short 10-segment meter; "—" and a dark meter when unavailable.
 struct MiniGauge: View {
     @Environment(\.palette) var p
     var label: String
@@ -159,6 +179,8 @@ struct MiniGauge: View {
     }
 }
 
+/// "Open at login" via SMAppService (macOS 13+). Registration can fail (e.g. when not running from an app bundle);
+/// callers show the error.
 enum LoginItem {
     static var isEnabled: Bool { SMAppService.mainApp.status == .enabled }
     static func set(_ on: Bool) throws { on ? try SMAppService.mainApp.register() : try SMAppService.mainApp.unregister() }

@@ -1,5 +1,9 @@
 import Foundation
 
+// The Applications inventory, plus recursive size helpers shared with the Disk Usage tool. All functions do blocking
+// file-system work and are called off the main thread by the UI's loaders.
+/// One application bundle. `architectures` is "arm64", "x86_64", "Universal" or "—" (unknown, e.g. a script-based app).
+/// `isAppStore` is detected by the Mac App Store receipt inside the bundle.
 public struct InstalledApp: Identifiable, Hashable, Sendable {
     public var id: String { path }
     public var name: String
@@ -14,6 +18,8 @@ public struct InstalledApp: Identifiable, Hashable, Sendable {
 }
 
 public enum InstalledApps {
+    /// Top-level .app bundles in the standard Applications folders. Apps nested in subfolders (other than Utilities) are
+    /// not found; duplicates by path are skipped.
     public static func scan() -> [InstalledApp] {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         let roots = ["/Applications", "\(home)/Applications", "/System/Applications", "/System/Applications/Utilities", "/Applications/Utilities"]
@@ -47,6 +53,8 @@ public enum InstalledApps {
     }
 
     /// Allocated size of a directory tree (expensive; call off-main).
+    /// Uses the allocated size (blocks actually used on disk, including resource forks) so sparse and compressed files
+    /// aren't over-counted. Unreadable entries are skipped by the error handler, so the result is a lower bound.
     public static func size(of path: String) -> UInt64 {
         let url = URL(fileURLWithPath: path)
         guard let e = FileManager.default.enumerator(at: url, includingPropertiesForKeys: [.totalFileAllocatedSizeKey], options: [], errorHandler: { _, _ in true }) else { return 0 }
@@ -58,6 +66,7 @@ public enum InstalledApps {
     }
 }
 
+/// One child of a directory in the Disk Usage tool, with its recursive allocated size in bytes.
 public struct DirEntry: Identifiable, Hashable, Sendable {
     public var id: String { path }
     public var name: String
@@ -68,6 +77,8 @@ public struct DirEntry: Identifiable, Hashable, Sendable {
 
 public enum DiskUsage {
     /// Immediate children of `path` with recursive sizes. Calls `progress` as each child completes.
+    /// Runs synchronously on the caller's (background) thread; `cancelled` is polled between children so navigating away
+    /// stops the walk early.
     public static func children(of path: String, progress: @Sendable (DirEntry) -> Void, cancelled: @Sendable () -> Bool) {
         let fm = FileManager.default
         guard let items = try? fm.contentsOfDirectory(atPath: path) else { return }
@@ -77,9 +88,13 @@ public enum DiskUsage {
             var isDir: ObjCBool = false
             guard fm.fileExists(atPath: p, isDirectory: &isDir) else { continue }
             let url = URL(fileURLWithPath: p)
+            // Symlinks are skipped so a link can't count a tree twice or loop.
             if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true { continue }
             let size: UInt64
             if isDir.boolValue {
+                // /System/Volumes holds the Data volume that is already reachable through firmlinks (it would be counted twice),
+                // /Volumes holds other disks, /dev is devices, and /private/var/vm holds swap files whose size changes
+                // constantly.
                 if ["/System/Volumes", "/Volumes", "/dev", "/private/var/vm"].contains(p) { continue }
                 size = InstalledApps.size(of: p)
             } else {

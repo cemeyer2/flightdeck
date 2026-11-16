@@ -1,9 +1,17 @@
+// Tests for the analysis layer built on top of the samplers: Analyzer findings (sustained CPU, leaks, disk-full
+// forecast, baseline, swapping, throttling, awake), IncidentLog, EnergyBudget, CSV export, ProcessQuery, Timeline and
+// RuleEngine. Inputs are Snapshots cloned from one real sample (`BlackBoxTests.base`) at fixed timestamps, with every
+// field the code under test reads overridden, so results don't depend on what the test machine is doing.
 import XCTest
 @testable import FlightDeckCore
 
+/// Analyzer behaviour on synthetic sample streams. `proc` and `snap` are also used by the other test classes in this
+/// file to build quiet, fully measured snapshots that only differ in what each test sets.
 final class AnalyzerTests: XCTestCase {
     static let base: Snapshot = BlackBoxTests.base
 
+    /// A process sample with the given identity and load, and every other per-process metric zeroed/absent so it can't
+    /// trigger unrelated findings.
     func proc(_ name: String, path: String, pid: Int32, cpu: Double = 1, mem: UInt64 = 100_000_000) -> ProcessSample {
         var p = Self.base.processes[0]
         p.identity = ProcessIdentity(pid: pid, startTime: 1); p.name = name; p.path = path
@@ -11,6 +19,7 @@ final class AnalyzerTests: XCTestCase {
         return p
     }
 
+    /// A calm system snapshot (normal pressure, no swap, no I/O, no battery, half-full disk) at time `t`.
     func snap(_ t: Date, cpu: Double = 10, procs: [ProcessSample], free: UInt64? = nil) -> Snapshot {
         var s = Self.base
         s.time = t; s.cpu.total = .value(cpu); s.processes = procs
@@ -21,6 +30,9 @@ final class AnalyzerTests: XCTestCase {
         return s
     }
 
+    /// Protects the core "which app is responsible" rule: helper processes roll up into their `.app`, the finding lists
+    /// every responsible PID (for Inspect/Quit), `since` is when the condition began (not when it was reported), a short
+    /// spell under the threshold isn't flagged, and a long sampling gap restarts the condition rather than bridging it.
     func testSustainedAppCPUGroupsHelpersAndKeepsStartTime() {
         let a = Analyzer(); let t0 = Date(timeIntervalSince1970: 1_000_000)
         func procs(_ c: Double) -> [ProcessSample] {
@@ -41,6 +53,8 @@ final class AnalyzerTests: XCTestCase {
         XCTAssertEqual(a.findings.first { $0.id == "cpu:/Applications/Xcode.app" }?.since, t0.addingTimeInterval(420))
     }
 
+    /// A leak finding needs steady growth. Memory that jumps around, even by more in total, must not be reported,
+    /// or every app with a large cache would be called leaky.
     func testMemoryLeakDetectedOnlyForSteadyGrowth() {
         let a = Analyzer(); let t0 = Date(timeIntervalSince1970: 2_000_000)
         for i in 0...40 {   // 20 minutes, 30 s apart; leaky grows 1 → 3 GB, noisy jumps around
@@ -54,9 +68,11 @@ final class AnalyzerTests: XCTestCase {
         XCTAssertFalse(a.findings.contains { $0.id == "leak:/Applications/Noisy.app" })
     }
 
+    /// The startup-disk forecast extrapolates the free-space trend linearly (days until full) and raises a caution
+    /// finding when that is close.
     func testDiskFullForecast() {
         let a = Analyzer(); let t0 = Date(timeIntervalSince1970: 3_000_000)
-        // loses 10 GB/hour from 100 GB free: ~10 h left at the end of a 3 h window
+        // Loses 10 GB/hour from 100 GB free over a 3 h window, ending with 70 GB free: ~7 h (0.29 days) left.
         for m in stride(from: 0, through: 180, by: 1) {
             let free = UInt64(100e9 - Double(m) / 60 * 10e9)
             a.ingest(snap(t0.addingTimeInterval(Double(m) * 60), procs: [], free: free))
@@ -67,6 +83,8 @@ final class AnalyzerTests: XCTestCase {
         XCTAssertTrue(a.findings.contains { $0.id == "disk-full" && $0.severity == .caution })
     }
 
+    /// The "unusual for this Mac" baseline is seeded from history (the black box) and only flags load well above it:
+    /// a modest rise (20% vs a 5–14% baseline) is ignored, a sustained 70% is reported.
     func testBaselineFlagsUnusualCPU() {
         let a = Analyzer(); let t0 = Date(timeIntervalSince1970: 4_000_000)
         a.seed(history: (0..<400).map { snap(t0.addingTimeInterval(Double($0) * 10), cpu: Double(5 + $0 % 10), procs: []) })
@@ -79,11 +97,14 @@ final class AnalyzerTests: XCTestCase {
     }
 }
 
+/// Incident logging: the persistent "what happened at 3:14 pm" history built from findings.
 final class IncidentLogTests: XCTestCase {
     func f(_ id: String, since: Date, _ sev: Finding.Severity = .caution) -> Finding {
         Finding(id: id, severity: sev, icon: "x", title: id, detail: nil, since: since, destination: nil)
     }
 
+    /// Short blips (under `minDuration`, 20 s) are noise and never logged; a lasting finding is reported once, keeps its
+    /// original start and its worst severity, gets an end time when it clears, and survives a save/reload round trip.
     func testLogsOnlyLastingFindingsAndPersists() throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("inc-\(UUID().uuidString).json")
         let log = IncidentLog(url: url)
@@ -104,7 +125,10 @@ final class IncidentLogTests: XCTestCase {
     }
 }
 
+/// Energy budget integration over black-box frames.
 final class EnergyBudgetTests: XCTestCase {
+    /// Energy is integrated per app over time (W × s → Wh) and a 1000 s hole in the recording contributes nothing:
+    /// gaps are missing data, not time at the last known power. The average is over recorded time only.
     func testIntegratesPerAppAndSkipsGaps() {
         let t0 = Date(timeIntervalSince1970: 6_000_000)
         var base = AnalyzerTests.base
@@ -123,7 +147,10 @@ final class EnergyBudgetTests: XCTestCase {
     }
 }
 
+/// CSV export and recording statistics.
 final class ExportTests: XCTestCase {
+    /// Unmeasured values must export as empty cells, not 0, so spreadsheets and averages aren't skewed by invented
+    /// zeros; statistics likewise ignore the unmeasured frame (average 50 of 40 and 60, not 33).
     func testCSVLeavesUnmeasuredEmptyAndStats() {
         var a = AnalyzerTests.base; a.time = Date(timeIntervalSince1970: 7_000_000); a.cpu.total = .unavailable("warming up")
         var b = a; b.time = a.time.addingTimeInterval(1); b.cpu.total = .value(40)
@@ -140,7 +167,9 @@ final class ExportTests: XCTestCase {
     }
 }
 
+/// Sleep-prevention assertions become a plain-English finding.
 final class AwakeFindingTests: XCTestCase {
+    /// An app holding a display-sleep assertion is reported per app, with the reason string the app gave macOS.
     func testAppKeepingMacAwake() {
         let t = AnalyzerTests()
         var p = t.proc("Zoom", path: "/Applications/zoom.us.app/Contents/MacOS/zoom.us", pid: 40)
@@ -153,7 +182,10 @@ final class AwakeFindingTests: XCTestCase {
     }
 }
 
+/// The Processes filter mini-language.
 final class ProcessQueryTests: XCTestCase {
+    /// Each term type (cpu>, mem> with unit suffixes, user:, kind:intel for Rosetta, app: on the bundle path, free text
+    /// on name, bare numbers as PID) matches as documented, all terms must match, and a blank query is empty.
     func testQueries() {
         let t = AnalyzerTests()
         var chrome = t.proc("Google Chrome Helper", path: "/Applications/Google Chrome.app/Contents/Frameworks/x/Helper", pid: 7, cpu: 60, mem: 2 << 30)
@@ -174,7 +206,10 @@ final class ProcessQueryTests: XCTestCase {
     }
 }
 
+/// Timeline bucketing for the Flight Log strips.
 final class TimelineTests: XCTestCase {
+    /// Buckets with no samples are gaps (nil values, `isGap`), never zero, so the timeline can hatch periods when the
+    /// Mac was asleep or FlightDeck wasn't running instead of drawing them as idle.
     func testBucketsAndGaps() {
         let t0 = Date(timeIntervalSince1970: 9_000_000)
         var frames: [Snapshot] = []
@@ -190,7 +225,10 @@ final class TimelineTests: XCTestCase {
     }
 }
 
+/// Swap activity thresholds.
 final class SwappingTests: XCTestCase {
+    /// The "swapping" finding is driven by the swap-out rate derived from cumulative page counters: ~49 MB/s is flagged,
+    /// ~1.6 MB/s of background swap is not.
     func testHeavySwapIsFlaggedLightIsNot() {
         let t = AnalyzerTests(); let t0 = Date(timeIntervalSince1970: 10_000_000)
         func run(_ pagesPerSec: UInt64) -> Bool {
@@ -207,7 +245,9 @@ final class SwappingTests: XCTestCase {
     }
 }
 
+/// Measured CPU throttling.
 final class ThrottleTests: XCTestCase {
+    /// Feeds a minute of busy (95% active) P-cluster samples at the given clock and hotspot temperature.
     func run(mhz: Double, hot: Double) -> Bool {
         let t = AnalyzerTests(); let a = Analyzer(); let t0 = Date(timeIntervalSince1970: 11_000_000)
         for i in 0..<60 {
@@ -218,6 +258,8 @@ final class ThrottleTests: XCTestCase {
         }
         return a.findings.contains { $0.id == "cpu-throttled" }
     }
+    /// Throttling is only claimed when busy P-cores run well below their top clock *and* the Mac is hot; low clocks
+    /// alone are ordinary power management, and high clocks while hot aren't throttling.
     func testThrottlingNeedsLowClocksWhileBusyAndHot() {
         XCTAssertTrue(run(mhz: 1800, hot: 98))
         XCTAssertFalse(run(mhz: 3100, hot: 98), "full clocks are not throttling")
@@ -225,7 +267,10 @@ final class ThrottleTests: XCTestCase {
     }
 }
 
+/// Findings that should show in the UI but not clutter the incident log.
 final class NoiseTests: XCTestCase {
+    /// "Keeps the Mac awake" is usually intentional (a video call, a download), so it is excluded from incidents even
+    /// when it lasts.
     func testAwakeIsNotAnIncident() {
         let log = IncidentLog(url: nil); let t0 = Date(timeIntervalSince1970: 12_000_000)
         let f = Finding(id: "awake:/Applications/x.app", severity: .info, icon: "x", title: "x keeps the display awake", detail: nil, since: t0, destination: nil)
@@ -234,7 +279,12 @@ final class NoiseTests: XCTestCase {
     }
 }
 
+/// User automation rules.
 final class RuleEngineTests: XCTestCase {
+    /// Guards the safety properties of rules, which can quit processes: a rule fires only after its condition has held
+    /// for `minutes`, once per occurrence (not every sample), targets every process of the matched app, respects its
+    /// cooldown when the condition breaks and returns, and never targets protected processes (kernel_task,
+    /// WindowServer…) even with a match-everything rule. Also checks the examples survive save/load.
     func testFiresOncePerOccurrenceAfterDurationWithCooldownAndProtection() {
         let t = AnalyzerTests(); let t0 = Date(timeIntervalSince1970: 13_000_000)
         let e = RuleEngine()

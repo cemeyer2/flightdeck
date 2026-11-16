@@ -1,11 +1,16 @@
+// Colour themes. Every view reads the active Palette from the environment (`\.palette`), set at each scene root in
+// FlightDeckApp from the "theme" user default. Fonts for VFD-style readouts are defined at the bottom.
 import SwiftUI
 
+/// User-selectable theme; the raw value is what's stored in the "theme" user default.
 enum ThemeID: String, CaseIterable, Identifiable {
     case light, dark, green, amber, blue, mono
     var id: String { rawValue }
     var title: String { rawValue.capitalized }
 }
 
+/// All colours a view needs. The four phosphor themes (green, amber, blue, mono) are single-hue CRT/VFD looks:
+/// every role is a shade of one colour, and warning/critical don't change hue (see `level`).
 struct Palette {
     var id: ThemeID
     var background: Color
@@ -23,9 +28,13 @@ struct Palette {
     var crit: Color
     var glow: Double           // phosphor bloom radius
     var scheme: ColorScheme
+    /// Single-hue themes: hue carries no meaning there (warn and crit equal the accent colour).
     var mono: Bool { id == .green || id == .amber || id == .blue || id == .mono }
 
+    /// Builds the palette for a theme. Pure, cheap, and called freely from view bodies.
     static func of(_ id: ThemeID) -> Palette {
+        // Shared recipe for phosphor themes: near-black background, everything else derived from one colour `c`
+        // (plus `c2` for secondary traces and E-cores).
         func phosphor(_ c: Color, _ c2: Color) -> Palette {
             Palette(id: id, background: Color(white: 0.03), panel: Color(white: 0.06), panelBorder: c.opacity(0.25),
                     text: c, dim: c.opacity(0.55), accent: c, accent2: c2, meterOff: c.opacity(0.10),
@@ -53,7 +62,7 @@ struct Palette {
         }
     }
 
-    /// Value-to-color for meters (mono themes stay single-hue).
+    /// Value-to-color for meters (mono themes stay single-hue): above 75% uses `warn`, above 90% `crit`.
     func level(_ fraction: Double) -> Color {
         if mono { return accent }
         if fraction > 0.9 { return crit }
@@ -62,6 +71,7 @@ struct Palette {
     }
 }
 
+// The environment default (dark) is only seen by views rendered without a palette set, e.g. in previews.
 private struct PaletteKey: EnvironmentKey { static let defaultValue = Palette.of(.dark) }
 extension EnvironmentValues {
     var palette: Palette { get { self[PaletteKey.self] } set { self[PaletteKey.self] = newValue } }

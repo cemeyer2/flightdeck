@@ -1,7 +1,11 @@
+// Network quality tests: ping output parsing, Wi-Fi/route read cost, decoding of recordings made before the Wi-Fi and
+// latency fields existed, and the accuracy of interface byte counters.
 import XCTest
 @testable import FlightDeckCore
 
 final class NetworkQualityTests: XCTestCase {
+    /// Parses ping's summary into loss, average latency and jitter (stddev). When every packet is lost the average must be
+    /// nil, not 0 ms, since a dead link is not a fast one.
     func testPingParse() {
         let ok = """
         PING 1.1.1.1 (1.1.1.1): 56 data bytes
@@ -17,6 +21,8 @@ final class NetworkQualityTests: XCTestCase {
         XCTAssertEqual(d.loss, 100); XCTAssertNil(d.avgMs, "no latency is invented when everything was lost")
     }
 
+    /// Reading Wi-Fi state, the default route and DNS must stay well under 0.5 s, since the sampler reads Wi-Fi on every
+    /// tick. Values are printed only, as they depend on the machine's network.
     func testWiFiAndRouteRead() {
         let t0 = Date()
         let w = WiFiInfo.current()
@@ -25,6 +31,8 @@ final class NetworkQualityTests: XCTestCase {
         XCTAssertLessThan(Date().timeIntervalSince(t0), 0.5)
     }
 
+    /// Older recordings (and black-box segments) lack the newer `wifi` and `latency` keys; they must still decode, with
+    /// those fields nil, so old .flightlog files stay openable.
     func testOldSnapshotsDecodeWithoutNewFields() throws {
         let s = BlackBoxTests.base
         var json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(s)) as! [String: Any]
@@ -34,8 +42,10 @@ final class NetworkQualityTests: XCTestCase {
     }
 }
 
+/// Interface byte counters.
 final class InterfaceCounterTests: XCTestCase {
     /// Byte counters must be the full 64-bit values (NET_RT_IFLIST2 alone wraps at 4 GB).
+    // Compares each interface's totals with `netstat -ib`, allowing 1% or 50 MB for traffic between the two reads.
     func testCountersMatchNetstat() throws {
         let n = NetworkSampler().sample()
         guard let out = Shell.run("/usr/sbin/netstat", ["-ib"]) else { throw XCTSkip("no netstat") }

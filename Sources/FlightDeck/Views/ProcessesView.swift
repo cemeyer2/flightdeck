@@ -1,16 +1,24 @@
 import SwiftUI
 import FlightDeckCore
+// Processes destination: the live process list (ProcessOutline, an AppKit NSOutlineView wrapper in Components) with
+// filter, tree/apps/flat views, context menus and a detail bar for the selection. Also defines AppIcon and IconCache,
+// which every view showing app icons uses, and BarCell.
 
+/// Lists `e.current.processes` (so during replay it shows the recorded processes). Actions go through
+/// `ProcessSampler.send`, which re-checks PID + start time, so a replayed or stale row can never signal a recycled PID.
 struct ProcessesView: View {
     @EnvironmentObject var e: Engine
     @Environment(\.palette) var p
     @State private var filter = ""
     @AppStorage("procView") private var view = "tree"   // tree | apps | flat
     @AppStorage("procMineOnly") private var mineOnly = false
+    /// Selected row by identity, not PID, so the selection doesn't jump to a new process that reuses the PID.
     @State private var selection: ProcessIdentity?
+    /// Pending confirmation for Quit / Force Quit: (process, signal, verb).
     @State private var confirm: (ProcessSample, Int32, String)?
     @State private var error: String?
 
+    /// The processes handed to the outline, optionally only the current user's.
     var visibleProcesses: [ProcessSample] {
         let procs = e.current?.processes ?? []
         return mineOnly ? procs.filter { $0.uid == getuid() } : procs
@@ -22,8 +30,11 @@ struct ProcessesView: View {
         return NSWorkspace.shared.runningApplications.first { $0.bundleURL?.standardizedFileURL.path == URL(fileURLWithPath: b).standardizedFileURL.path }
     }
 
+    /// AppKit context menu for a row (ProcessOutline is an NSOutlineView, so it needs an NSMenu rather than SwiftUI).
+    /// App-group rows act on the whole app through NSRunningApplication; process rows send identity-checked signals.
     func nsMenu(_ s: ProcessSample) -> NSMenu {
         let m = NSMenu()
+        // App rows quit immediately, as the Dock's Quit does: the app itself can still prompt to save.
         if s.pid < 0 {   // app group row
             let app = runningApp(s)
             m.addItem(ClosureMenuItem("Quit App", enabled: app != nil) { app?.terminate() })
@@ -45,9 +56,11 @@ struct ProcessesView: View {
     }
 
     var body: some View {
+        // Looked up fresh from the current snapshot so the detail bar reflects the latest sample of the selection.
         let selected = e.current?.processes.first { $0.identity == selection }
         VStack(spacing: 0) {
             HStack(spacing: 12) {
+                // The filter mini-language (cpu>50, user:root, kind:intel, hung…) is parsed in ProcessOutline/ProcessQuery.
                 TextField("Filter: name, PID, or cpu>50 mem>1g user:root app:chrome kind:intel gpu>0 sleep hung", text: $filter)
                     .textFieldStyle(.roundedBorder).frame(maxWidth: 420)
                     .help("Space-separated terms, all must match. cpu>50 · gpu>0 · mem>1g · disk>10m · net>100k · threads>100 · wakeups>500 · user:root · app:chrome · kind:intel · sleep · hung · restricted · or any text")
@@ -61,6 +74,7 @@ struct ProcessesView: View {
                         .font(.system(size: 11, design: .monospaced)).foregroundStyle(p.dim)
                 }
             }.padding(10)
+            // Double-click opens the inspector, except on synthetic app-group rows (negative PIDs).
             ProcessOutline(frameTime: e.current?.time, processes: visibleProcesses, tree: view == "tree", byApp: view == "apps", filter: filter, palette: p, selection: $selection, menu: nsMenu,
                            onOpen: { if $0.pid > 0 { AppActions.openInspector?($0.identity) } })
             if let selected, selected.pid > 0 { ProcessDetailBar(s: selected, actions: { AnyView(actions(selected)) }) }
@@ -72,6 +86,7 @@ struct ProcessesView: View {
         .alert("Action failed", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) { Button("OK") {} } message: { Text(error ?? "") }
     }
 
+    /// The detail bar's Actions menu (SwiftUI equivalent of the row context menu, plus Select Parent).
     @ViewBuilder func actions(_ s: ProcessSample) -> some View {
         Button("Inspect…") { AppActions.openInspector?(s.identity) }
         Divider()
@@ -83,6 +98,7 @@ struct ProcessesView: View {
         Divider()
         Button("Reveal in Finder") { NSWorkspace.shared.selectFile(s.path, inFileViewerRootedAtPath: "") }.disabled(s.path.isEmpty)
         Button("Copy Path") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(s.path, forType: .string) }
+        // Switches to tree view and clears the filter so the parent row is guaranteed to be visible.
         Button("Select Parent") { filter = ""; view = "tree"; selection = e.current?.processes.first { $0.pid == s.ppid }?.identity }
     }
 
@@ -91,6 +107,7 @@ struct ProcessesView: View {
     }
 }
 
+/// Text over a level-coloured background bar filled to `fraction` (clamped to 0…1); used for numeric table cells.
 struct BarCell: View {
     @Environment(\.palette) var p
     var text: String
@@ -105,6 +122,8 @@ struct BarCell: View {
     }
 }
 
+/// Icon of the `.app` bundle a path lives in (the outermost "X.app/" match), or a generic gear for non-app processes.
+/// Callers pass bundle paths with a trailing "/" so the bundle itself matches.
 struct AppIcon: View {
     var path: String
     var body: some View {
@@ -117,6 +136,8 @@ struct AppIcon: View {
     }
 }
 
+/// NSWorkspace icon lookups hit the disk, and the process list re-renders every sample, so icons are cached forever
+/// by bundle path. Main-thread only (SwiftUI body), hence the unchecked `nonisolated(unsafe)` static.
 enum IconCache {
     nonisolated(unsafe) static var cache: [String: NSImage] = [:]
     static func icon(_ path: String) -> NSImage {
@@ -125,6 +146,8 @@ enum IconCache {
     }
 }
 
+/// Bottom bar for the selected process: identity, CPU time, start time, lifetime disk totals ("—" when restricted)
+/// and buttons for the inspector (⌘I) and actions.
 struct ProcessDetailBar: View {
     @Environment(\.palette) var p
     var s: ProcessSample

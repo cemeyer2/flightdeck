@@ -1,9 +1,16 @@
 import SwiftUI
 import FlightDeckCore
+// Performance destination: the tab container plus the CPU and Memory tabs. The Disk, Network, Energy, Thermals and
+// GPU tabs live in PerformanceView2.swift. Every tab reads `e.current` and `e.series`/`e.rateSeries` (Engine's rolling
+// 120-frame history, nil = gap), so the same views show live data or a replayed recording without changes.
 
+/// Tabs of the Performance page. Raw values double as picker labels and as the "Performance:<tab>" navigation suffix.
 enum PerfTab: String, CaseIterable, Identifiable { case cpu = "CPU", memory = "Memory", disk = "Disk", network = "Network", energy = "Energy", thermals = "Thermals", gpu = "GPU"; var id: String { rawValue } }
 
+/// Tab picker over a scrolling page; only the selected tab is built, so hidden tabs cost nothing per sample.
+/// It uses a plain ScrollView because off-screen renders (UIBench) draw the tab views directly, not this container.
 struct PerformanceView: View {
+    /// Per-window selected tab, restored with the window's scene state.
     @SceneStorage("perfTab") var tab: PerfTab = .cpu
     var body: some View {
         VStack(spacing: 0) {
@@ -25,6 +32,7 @@ struct PerformanceView: View {
         }
         .onAppear {   // automation hook: -perfTab Network
             if let t = UserDefaults.standard.string(forKey: "perfTab").flatMap(PerfTab.init(rawValue:)) {
+                // Delayed so the change lands after the window's own scene-state restoration.
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { tab = t }
             }
         }
@@ -32,8 +40,11 @@ struct PerformanceView: View {
 }
 
 // MARK: CPU
+/// CPU tab layouts: one combined user/system graph, one tile per logical core, or one panel per P/E cluster.
 enum CPUMode: String, CaseIterable, Identifiable { case overall = "Overall", logical = "Logical Processors", clusters = "Clusters"; var id: String { rawValue } }
 
+/// CPU tab: utilisation split into user and system (% of the whole machine), load average, process/thread counts,
+/// then the chosen layout.
 struct CPUPerf: View {
     @EnvironmentObject var e: Engine
     @Environment(\.palette) var p
@@ -62,21 +73,27 @@ struct CPUPerf: View {
                     Legend(items: [("User", p.accent, s?.user.value.map(Fmt.pct) ?? "—"), ("System", p.accent2, s?.system.value.map(Fmt.pct) ?? "—")])
                 }
             case .logical:
+                // Number of logical cores in the current snapshot (0 before the first sample).
                 let n = s?.cores.count ?? e.current.map { _ in 0 } ?? 0
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 200), spacing: 10)], spacing: 10) {
                     ForEach(0..<n, id: \.self) { i in CoreTile(index: i) }
                 }
                 CoreLegend()
             case .clusters:
+                // Cluster view averages the per-core history of every core of a kind (Apple silicon E or P).
+                // The clock comes from `gpuDetail.cpuClusters` (IOReport DVFS residency); that cluster list is only
+                // available on Apple silicon, so the clock graph is shown only when some frame actually has it.
                 ForEach([CoreKind.efficiency, .performance], id: \.self) { kind in
                     let idx = (s?.cores ?? []).filter { $0.kind == kind }.map(\.index)
                     if !idx.isEmpty {
                         let avg: (Snapshot) -> Double? = { snap in
+                            // Bounds-checked: a replayed recording may come from a Mac with a different core count.
                             let v = idx.compactMap { $0 < snap.cpu.cores.count ? snap.cpu.cores[$0].total : nil }
                             return v.isEmpty ? nil : v.reduce(0, +) / Double(v.count)
                         }
                         let prefix = kind == .performance ? "P" : "E"
                         let mhz: (Snapshot) -> Double? = { snap in
+                            // A Mac can have several clusters of one kind (e.g. P0, P1); show the fastest.
                             snap.gpuDetail?.cpuClusters.filter { $0.name.hasPrefix(prefix) }.compactMap(\.mhz).max()
                         }
                         Panel(title: kind == .performance ? "Performance cores (\(idx.count))" : "Efficiency cores (\(idx.count))",
@@ -85,6 +102,8 @@ struct CPUPerf: View {
                             VFDMeter(fraction: e.current.flatMap(avg).map { $0 / 100 }, segments: 40, color: kind == .performance ? p.pCore : p.eCore)
                             HistoryGraph(traces: [GraphTrace(name: kind.rawValue, values: e.series(avg), color: kind == .performance ? p.pCore : p.eCore)], maxValue: 100).frame(height: 160)
                             if e.series(mhz).contains(where: { $0 != nil }) {
+                                // The y-axis tops out at the cluster's maximum frequency when known, so "held below its
+                                // top clock" (throttling) is visible at a glance.
                                 let top = (e.current?.gpuDetail?.cpuClusters.first { $0.name.hasPrefix(prefix) }?.maxMHz) ?? 0
                                 HistoryGraph(traces: [GraphTrace(name: "mhz", values: e.series(mhz), color: p.accent2, fill: false)],
                                              maxValue: top > 0 ? top : nil, minHeadroom: 500, format: { String(format: "%.0f MHz", $0) }).frame(height: 70)
@@ -93,6 +112,7 @@ struct CPUPerf: View {
                         }
                     }
                 }
+                // Intel Macs (and unknown topologies) report every core as `.unknown`.
                 if (s?.cores ?? []).allSatisfy({ $0.kind == .unknown }) {
                     Text("This Mac has a single core type; cluster view is unavailable.").foregroundStyle(p.dim)
                 }
@@ -101,6 +121,8 @@ struct CPUPerf: View {
     }
 }
 
+/// One logical core: current % of that core, a meter and a short history, tinted by P/E kind. The kind comes from the
+/// live sampler's topology (`e.cpuKind`), not from the snapshot.
 struct CoreTile: View {
     @EnvironmentObject var e: Engine
     @Environment(\.palette) var p
@@ -126,6 +148,7 @@ struct CoreTile: View {
     }
 }
 
+/// Colour key for P/E core tinting in the logical-processor grid.
 struct CoreLegend: View {
     @Environment(\.palette) var p
     var body: some View {
@@ -138,6 +161,8 @@ struct CoreLegend: View {
 }
 
 // MARK: Memory
+/// Memory tab: the composition of RAM (from `e.current.memory`), pressure and swap, a composition trend, paging and
+/// swap rates derived from cumulative VM counters, and the apps using the most memory.
 struct MemoryPerf: View {
     @EnvironmentObject var e: Engine
     @Environment(\.palette) var p
@@ -157,11 +182,13 @@ struct MemoryPerf: View {
                 if let m { CompositionBar(m: m) }
             }
             HStack(spacing: 12) {
+                // `pressureLevel` is the kernel's memory-pressure level (1 normal, 2 warning, 4 critical), hence the gaps.
                 Panel(title: "Pressure", trailing: m.map { ["", "Normal", "Warning", "", "Critical"][min($0.pressureLevel, 4)] }) {
                     VFDMeter(fraction: m?.pressure.value.map { $0 / 100 }, segments: 30)
                     HistoryGraph(traces: [GraphTrace(name: "p", values: e.series { $0.memory.pressure.value }, color: p.accent)], maxValue: 100).frame(height: 150)
                 }
                 Panel(title: "Swap", trailing: m?.swapUsed.value.map { Fmt.bytes($0) + " of " + (m?.swapTotal.value.map(Fmt.bytes) ?? "—") }) {
+                    // At least 1 GB of y-range so a few MB of swap doesn't look like a cliff.
                     HistoryGraph(traces: [GraphTrace(name: "s", values: e.series { $0.memory.swapUsed.value }, color: p.accent2)], minHeadroom: 1_073_741_824, format: Fmt.bytes).frame(height: 172)
                 }
             }
@@ -174,10 +201,14 @@ struct MemoryPerf: View {
                 Legend(items: [("Used", p.accent, m.map { Fmt.bytes($0.used) } ?? "—"), ("Compressed", p.accent2, m.map { Fmt.bytes($0.compressed) } ?? "—"), ("Wired", p.eCore, m.map { Fmt.bytes($0.wired) } ?? "—")])
             }
             Panel(title: "Paging and swap", trailing: "per second") {
+                // VM counters are cumulative page counts; converted to bytes and differentiated per second by
+                // `rateSeries`, which yields nil across gaps and counter resets rather than a bogus spike or negative rate.
+                // Swap counters can be unavailable (nil) on some systems; compression counts are always present.
                 let swapOut = e.rateSeries { s in s.memory.swapOuts.flatMap { v in s.memory.pageSize.map { Double(v * $0) } } }
                 let swapIn = e.rateSeries { s in s.memory.swapIns.flatMap { v in s.memory.pageSize.map { Double(v * $0) } } }
                 let comp = e.rateSeries { s in s.memory.pageSize.map { Double(s.memory.compressions * $0) } }
                 HStack(spacing: 28) {
+                    // Over 20 MB/s of swap-out is flagged red: the system is actively short of memory.
                     Readout(label: "Swap out", value: (swapOut.last ?? nil).map(Fmt.rate), color: (swapOut.last ?? nil).map { $0 > 20e6 ? p.crit : p.accent } ?? p.accent)
                     Readout(label: "Swap in", value: (swapIn.last ?? nil).map(Fmt.rate), color: p.accent2)
                     Readout(label: "Compressing", value: (comp.last ?? nil).map(Fmt.rate))
@@ -189,6 +220,7 @@ struct MemoryPerf: View {
                     .font(.caption).foregroundStyle(p.dim)
             }
             Panel(title: "Memory by app", trailing: "helpers grouped into their app") {
+                // AppUsage.aggregate rolls helper processes into their app, so a browser counts as one row.
                 let total = Double(max(m?.total ?? 1, 1))
                 ForEach(AppUsage.aggregate(e.current?.processes ?? []).sorted { $0.memory > $1.memory }.prefix(12)) { a in
                     HStack(spacing: 8) {
@@ -214,6 +246,8 @@ struct MemoryPerf: View {
     }
 }
 
+/// Stacked bar of RAM: app memory, wired, compressed and cached files, each as a fraction of installed memory; the
+/// remainder is drawn as free. Hover a segment for its size.
 struct CompositionBar: View {
     @Environment(\.palette) var p
     var m: MemorySample

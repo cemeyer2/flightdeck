@@ -1,3 +1,6 @@
+// Developer tooling reached via CLI flags: renders views off-screen into PNGs or times their render cost, using a
+// headless Engine fed with real samples. `\.offscreen` is set so MaybeScroll doesn't wrap content in a ScrollView
+// (which ImageRenderer renders empty).
 import SwiftUI
 import FlightDeckCore
 
@@ -6,6 +9,8 @@ import FlightDeckCore
 @MainActor
 enum UIBench {
     /// Writes a 2x PNG of each main view (for visual review without opening a window).
+    /// Collects ~10 s of real samples first so graphs have history. Set FD_RENDER_ALL to also render the inventory
+    /// views; their loaders run asynchronously, so the main run loop is spun for 2 s before each one.
     static func renderViews(to dir: String) -> Never {
         let e = Engine(headless: true)
         let sampler = Sampler(); let analyzer = Analyzer()
@@ -41,6 +46,7 @@ enum UIBench {
                 out(d.rawValue.replacingOccurrences(of: " ", with: "_"), height: 1300, v)
             }
         }
+        // The inspector is rendered for FlightDeck's own process, which is always present.
         if let me = e.current?.processes.first(where: { $0.pid == getpid() }) {
             let model = InspectorModel(identity: me.identity, engine: e)
             for _ in 0..<2 {   // let the background detail loads finish (two, so rates exist)
@@ -52,6 +58,8 @@ enum UIBench {
         exit(0)
     }
 
+    /// Prints the average time per full render of each view, in ms. Each iteration uses a new ImageRenderer so no
+    /// cached image is reused; the first render is a discarded warm-up.
     static func run(renders: Int) -> Never {
         let e = Engine(headless: true)
         let sampler = Sampler(); let analyzer = Analyzer()
@@ -85,6 +93,7 @@ enum UIBench {
         bench("· ConnectionQuality", ConnectionQualityPanel())
         bench("· DriveHealth", DriveHealthPanel())
         bench("· EnergyBudget", EnergyBudgetPanel())
+        // Micro-benchmarks of pieces that views compute on every render.
         let g = e.current!
         bench("· aggregate x1", Text("\(AppUsage.aggregate(g.processes).count)"))
         bench("· HistoryGraph", HistoryGraph(traces: [GraphTrace(name: "c", values: e.series { $0.cpu.total.value }, color: .blue)], maxValue: 100).frame(height: 200))

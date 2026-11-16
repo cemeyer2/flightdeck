@@ -1,8 +1,12 @@
 import Foundation
 import Darwin
 
+// System-wide and per-core CPU usage from Mach host_processor_info tick counters, plus load averages. Called once per
+// tick by Sampler on the sampling queue.
+/// Core type from the hw.perflevel* sysctls; `.unknown` on Intel or single-level chips.
 public enum CoreKind: String, Codable, Sendable { case performance, efficiency, unknown }
 
+/// One logical CPU over the last interval: % of that core's time in user (incl. nice) and system mode.
 public struct CoreSample: Codable, Sendable {
     public var index: Int
     public var kind: CoreKind
@@ -11,6 +15,9 @@ public struct CoreSample: Codable, Sendable {
     public var total: Double { user + system }
 }
 
+/// Whole-machine CPU over the last interval as % of all cores (0...100, not % of one core). Measured values are
+/// unavailable on the first sample ("warming up") or if the Mach call fails. `loadAverage` is the 1/5/15-minute
+/// run-queue averages from getloadavg.
 public struct CPUSample: Codable, Sendable {
     public var total: Measured<Double>
     public var user: Measured<Double>
@@ -19,12 +26,15 @@ public struct CPUSample: Codable, Sendable {
     public var loadAverage: [Double]
 }
 
+/// Stateful: keeps the previous per-core tick counters to diff against. Confined to the sampling queue.
 public final class CPUSampler {
+    /// Per core, CPU_STATE_MAX counters (user, system, idle, nice) in scheduler ticks, cumulative since boot.
     private var previous: [[UInt32]] = []
     public let performanceCores: Int
     public let efficiencyCores: Int
     public let logicalCount: Int
 
+    /// Topology is read once. On Apple silicon perflevel0 is the performance cluster and perflevel1 the efficiency one.
     public init() {
         logicalCount = Sysctl.int("hw.logicalcpu") ?? ProcessInfo.processInfo.processorCount
         let levels = Sysctl.int("hw.nperflevels") ?? 1
@@ -46,6 +56,8 @@ public final class CPUSampler {
         var count: natural_t = 0
         var info: processor_info_array_t?
         var infoCount: mach_msg_type_number_t = 0
+        // host_processor_info returns an out-of-line Mach array of `integer_t` (count * CPU_STATE_MAX entries) that we own
+        // and must vm_deallocate, done by the defer below.
         let kr = host_processor_info(mach_host_self(), PROCESSOR_CPU_LOAD_INFO, &count, &info, &infoCount)
         var load = [Double](repeating: 0, count: 3)
         getloadavg(&load, 3)
@@ -57,10 +69,13 @@ public final class CPUSampler {
 
         var current: [[UInt32]] = []
         for i in 0..<Int(count) {
+            // The kernel counters are 32-bit and wrap; reading them as UInt32 lets `&-` below give the correct delta across
+            // a wrap.
             let base = Int(CPU_STATE_MAX) * i
             current.append((0..<Int(CPU_STATE_MAX)).map { UInt32(bitPattern: info[base + $0]) })
         }
         defer { previous = current }
+        // No baseline yet (or the CPU count changed): report "warming up" rather than a misleading 0%.
         guard previous.count == current.count else {
             return CPUSample(total: .unavailable("warming up"), user: .unavailable("warming up"),
                              system: .unavailable("warming up"), cores: [], loadAverage: load)
@@ -77,6 +92,7 @@ public final class CPUSampler {
                                     user: total > 0 ? user / total * 100 : 0,
                                     system: total > 0 ? sys / total * 100 : 0))
         }
+        // Two samples inside the same scheduler tick have nothing to divide by.
         guard tt > 0 else {
             return CPUSample(total: .unavailable("no ticks"), user: .unavailable(""), system: .unavailable(""), cores: cores, loadAverage: load)
         }

@@ -1,82 +1,126 @@
+// The app's central model object. Engine drives the sampling timer, owns the Sampler and the analysis pipeline
+// (Analyzer, IncidentLog, RuleEngine, evidence capture), feeds the black box, Dock tile and alerts, and publishes the
+// state every SwiftUI view reads. It also implements replay: loading a trace swaps `frames`/`current` for recorded data.
+//
+// Threading: Engine itself is @MainActor. Sampling and analysis run on the serial `queue` ("flightdeck.sampler");
+// the black box writes on `blackBoxQueue`, and stack sampling for evidence runs on `evidenceQueue`.
 import SwiftUI
 import FlightDeckCore
 import UniformTypeIdentifiers
 
+/// Whether views show live data or a loaded trace. Live sampling continues during replay (see `liveSnapshot`).
 enum Mode: Equatable { case live, replay }
 
 /// Owns sampling, history, and the Flight Recorder. Views read `frames` (history, `nil` = gap)
 /// and `current`; in replay mode both come from the loaded trace, so every view replays for free.
 @MainActor
 final class Engine: ObservableObject {
+    /// Number of samples kept for graphs (120 = 2 minutes at the default 1 s interval).
     static let historyLength = 120
 
+    /// The snapshot views display: the latest live sample, or in replay mode the frame at `replayIndex`.
     @Published private(set) var current: Snapshot?
     /// Always the latest live sample, even while replaying (menu bar, Dock, alerts).
     @Published private(set) var liveSnapshot: Snapshot?
+    /// Graph history, oldest first, always `historyLength` long. `nil` entries are gaps (sampling was paused, or a hole
+    /// in a replayed recording); graphs draw them as breaks rather than interpolating across. Processes are trimmed to the top 12
+    /// by CPU to keep the array light; use `current` for the full list.
     @Published private(set) var frames: [Snapshot?] = Array(repeating: nil, count: Engine.historyLength)
+    /// Pausing closes every open incident (we can't tell how long they lasted while unobserved); resuming pushes a
+    /// gap so graphs show the unobserved stretch as a break.
     @Published var paused = false { didSet { if !paused { pushGap() } else { queue.async { [incidentLog] in incidentLog.closeAll(at: Date()) } } } }
+    /// Sample interval in seconds while a window is visible.
     @AppStorage("interval") var interval: Double = 1.0 { didSet { restartTimer() } }
+    /// Whether FlightDeck's own process is included in the process list.
     @AppStorage("includeSelf") var includeSelf = true
     /// Sample interval while no FlightDeck window is visible (menu bar / background only).
     @AppStorage("backgroundInterval") var backgroundInterval: Double = 2.0
+    /// When the last sample was started; used by `tick()` to throttle to `backgroundInterval` while hidden.
     private var lastTick = Date.distantPast
+    /// Whether samples are written to the always-on black box recorder.
     @AppStorage("blackBoxEnabled") var blackBoxEnabled = true
+    /// Per-app CPU threshold (% of one core) above which the Analyzer reports a sustained CPU hog. Forwarded to the
+    /// sampling queue on change.
     @AppStorage("appCPUThreshold") var appCPUThreshold = 80.0 { didSet { applyThresholds() } }
     /// Opt-in: pings the router and `netProbeHost` every 10 s. Off by default (privacy).
     @AppStorage("netProbeEnabled") var netProbeEnabled = false { didSet { applyProbe() } }
     @AppStorage("netProbeHost") var netProbeHost = "1.1.1.1" { didSet { applyProbe() } }
 
+    // Flight Recorder: user-started recordings (`recorded`) and replay of a loaded `trace`.
     // Flight Recorder
     @Published private(set) var mode: Mode = .live
     @Published private(set) var recording = false
+    /// Frames captured since `startRecording()`, trimmed with `Trace.trimmed` to keep memory down.
     @Published private(set) var recorded: [Snapshot] = []
     @Published var trace: FlightDeckCore.Trace?
+    /// Position in `trace.frames` being shown. Every change rebuilds `frames`, `current` and `replayFindings`.
     @Published var replayIndex = 0 { didSet { if mode == .replay { applyReplay() } } }
     @Published var playing = false
+    /// User-facing error message (shown as an alert by the main window); set from the main actor only.
     @Published var lastError: String?
 
+    // Analysis: findings (live, or recomputed for the replayed moment) and the incident log.
+    // `liveFindings` and `incidents` are copies of state that lives on the sampling queue, republished after each sample.
     // Analysis: findings (live, or recomputed for the replayed moment) and the incident log
     @Published private(set) var liveFindings: [Finding] = []
     @Published private(set) var replayFindings: [Finding] = []
     @Published private(set) var incidents: [Incident] = []
     /// Days until the startup disk fills at the current trend (nil = no clear shrinking trend).
     @Published private(set) var diskFullDays: Double?
+    /// Findings for the current mode: live analyzer findings plus diagnostic-report findings, or in replay the findings
+    /// recomputed for the replayed moment (diagnostic reports aren't part of a trace).
     var findings: [Finding] { mode == .live ? liveFindings + reportFindings : replayFindings }
     /// macOS diagnostic reports from the last 7 days (rescanned every 5 minutes).
     @Published private(set) var reports: [DiagnosticReport] = []
+    /// Findings derived from recent diagnostic reports (crashes, hangs, etc.).
     @Published private(set) var reportFindings: [Finding] = []
 
+    // Rules: user automations evaluated on every sample. The main-actor array is the source of truth and is persisted to
+    // UserDefaults on every change; a copy is pushed to the queue-confined RuleEngine.
     // Rules: user automations evaluated on every sample.
     @Published var rules: [Rule] = RuleEngine.load(UserDefaults.standard.data(forKey: "rules")) {
         didSet { UserDefaults.standard.set(RuleEngine.save(rules), forKey: "rules"); let r = rules; queue.async { [ruleEngine] in ruleEngine.rules = r } }
     }
+    /// One line in the rule activity log: what fired and what the action did.
     struct RuleLogEntry: Identifiable { let id = UUID(); var firing: RuleFiring; var result: String }
+    /// Most recent rule actions first, capped at 100.
     @Published private(set) var ruleLog: [RuleLogEntry] = []
     /// Set to a Destination raw value (optionally "Performance:<tab>") to navigate there.
     @Published var navigationRequest: String?
     /// Called on the main actor for each incident once it has lasted long enough to log.
+    /// Currently nothing assigns this hook.
     var onNewIncident: ((Incident) -> Void)?
 
+    /// Reads all the system counters. Its delta state means it must only be used on `queue`.
     private let sampler = Sampler()
+    /// Serial sampling queue: sampling, analysis, incident tracking and rule evaluation all happen here.
     private let queue = DispatchQueue(label: "flightdeck.sampler", qos: .utility)
     private var timer: Timer?
     private var playTimer: Timer?
+    /// True from the moment a sample is dispatched until its results are ingested on the main actor; a slow sample
+    /// causes ticks to be skipped rather than piling up work on the queue.
     private var inFlight = false
 
+    // Black box: always-on rolling recorder, written off the sampling queue on its own background-priority queue.
     // Black box: always-on rolling recorder, written off the sampling queue.
     let blackBox = BlackBox(dir: BlackBox.defaultDirectory)
     /// Recent history of every process (for the inspector).
+    /// Thread-safe (internally locked): recorded on `queue`, read from views.
     let processHistory = ProcessHistory()
     private let blackBoxQueue = DispatchQueue(label: "flightdeck.blackbox", qos: .background)
+    // Confined to `queue`. They are `nonisolated` so the sampling closures can use them without hopping to the main actor;
+    // `nonisolated(unsafe)` marks vars whose safety comes from that confinement rather than from the compiler.
     // Confined to `queue`.
     nonisolated private let analyzer = Analyzer()
     nonisolated private let ruleEngine = RuleEngine()
     nonisolated private let incidentLog = IncidentLog(url: IncidentLog.defaultURL)
+    /// Last `incidentLog.revision` published to `incidents`, so the log is only copied to the main actor when it changed.
     nonisolated(unsafe) private var incidentRevision = -1
     nonisolated(unsafe) private var lastIncidentSave = Date()
     // Evidence capture (confined to `queue`): one capture at a time, at most one per finding every 10 minutes.
     nonisolated(unsafe) private var evidenceBusy = false
     nonisolated(unsafe) private var lastEvidence: [String: Date] = [:]
+    /// Stack sampling takes several seconds, so it runs on its own queue to avoid stalling sampling.
     private let evidenceQueue = DispatchQueue(label: "flightdeck.evidence", qos: .utility)
 
     /// `headless`: no timers, no black box, no Dock tile; frames are fed with `feed(_:)` (UI benchmark).
@@ -85,14 +129,19 @@ final class Engine: ObservableObject {
     init(headless: Bool = false) {
         self.headless = headless
         if headless { return }
+        // The first sample only establishes baselines for delta-based counters (CPU ticks, bytes); its result is discarded.
         queue.async { [sampler] in _ = sampler.sample() }   // prime deltas
         restartTimer()
+        // Housekeeping off the main thread: prune old black-box segments and evidence files, then seed the Analyzer's
+        // baselines with the last 24 h of coarse black-box history so "unusual for this Mac" findings work right after launch.
         blackBoxQueue.async { [blackBox, queue, analyzer] in
             blackBox.prune(); EvidenceStore.prune()
             let history = blackBox.trace(.coarse, from: Date().addingTimeInterval(-86_400))?.frames ?? []
             queue.async { analyzer.seed(history: history) }
         }
+        // Safe to read here: nothing has touched incidentLog on `queue` yet (it only loaded from disk in its initializer).
         incidents = incidentLog.incidents
+        // Diagnostic reports: rescan every 5 minutes on a detached task (reading many report files is slow).
         Task { [weak self] in
             while !Task.isCancelled {
                 let r = await Task.detached(priority: .utility) { DiagnosticReports.scan(since: Date().addingTimeInterval(-7 * 86_400)) }.value
@@ -104,18 +153,22 @@ final class Engine: ObservableObject {
         applyProbe()
         let r = rules; queue.async { [ruleEngine] in ruleEngine.rules = r }
         startVisibilityTracking()
+        // On quit, flush the black box and close/save the incident log synchronously so nothing buffered is lost.
         NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: nil) { [blackBox, blackBoxQueue, queue, incidentLog] _ in
             blackBoxQueue.sync { blackBox.flush() }
             queue.sync { incidentLog.closeAll(at: Date()); incidentLog.save() }
         }
     }
 
+    /// Runs on the main actor, called from `tick()` for each firing returned by the RuleEngine.
     /// Carries out a rule's action. Signals are identity-checked (a recycled PID is never hit); every action is announced.
     private func execute(_ f: RuleFiring) {
         let r = f.rule
         let what = f.targets.count > 1 ? "\(f.subject) (\(f.targets.count) processes)" : f.subject
         let measured = "\(r.metric.rawValue) \(String(format: "%.1f", f.value)) for \(r.minutes.formatted()) min"
         var result: String
+        // Sends `sig` to every target. `ProcessSampler.send` checks PID + start time first, so a recycled PID is refused
+        // and counted as failed rather than signalled.
         func signal(_ sig: Int32, _ verb: String) -> String {
             var ok = 0, failed = 0
             for id in f.targets { do { try ProcessSampler.send(sig, to: id); ok += 1 } catch { failed += 1 } }
@@ -125,12 +178,15 @@ final class Engine: ObservableObject {
         case .notify: result = "Notified"
         case .lowerPriority:
             var ok = 0
+            // Same identity check for renice. Only lowering priority (nice 10) is attempted, which needs no privileges for
+            // processes the user owns; failures are simply not counted.
             for id in f.targets where ProcessSampler.identity(of: id.pid) == id { if (try? ProcessInspector.setNice(pid: id.pid, 10)) != nil { ok += 1 } }
             result = "Lowered the priority of \(ok) of \(f.targets.count) processes"
         case .suspend: result = signal(SIGSTOP, "Suspended")
         case .quit: result = signal(SIGTERM, "Quit")
         case .forceQuit: result = signal(SIGKILL, "Force quit")
         case .command:
+            // User shell commands get the firing's details in FD_* environment variables. The process isn't waited on.
             let p = Process(); p.executableURL = URL(fileURLWithPath: "/bin/sh"); p.arguments = ["-c", r.command]
             var env = ProcessInfo.processInfo.environment
             env["FD_RULE"] = r.name; env["FD_SUBJECT"] = f.subject; env["FD_METRIC"] = r.metric.rawValue
@@ -143,6 +199,10 @@ final class Engine: ObservableObject {
         if ruleLog.count > 100 { ruleLog.removeLast(ruleLog.count - 100) }
     }
 
+    /// `fresh` are incidents IncidentLog just logged (findings that lasted past its `minDuration`). Only hangs, CPU and
+    /// GPU hogs get evidence. At most one capture runs at a time, and each finding key is captured at most once per
+    /// 10 minutes. The capture runs on `evidenceQueue`; its result is attached to the incident back on `queue`.
+    /// Disabled by the `autoEvidence` default. Set FD_DEBUG_EVIDENCE in the environment to log decisions.
     /// On the sampling queue: when a hang or a sustained CPU/GPU hog is first logged, sample its call stacks.
     nonisolated private func captureEvidence(for fresh: [Incident], findings: [Finding], snapshot s: Snapshot) {
         let debug = ProcessInfo.processInfo.environment["FD_DEBUG_EVIDENCE"] != nil
@@ -150,6 +210,7 @@ final class Engine: ObservableObject {
         guard UserDefaults.standard.object(forKey: "autoEvidence") as? Bool ?? true, !evidenceBusy else { return }
         for inc in fresh where ["hang:", "cpu:", "gpu:"].contains(where: { inc.key.hasPrefix($0) }) {
             if let last = lastEvidence[inc.key], s.time.timeIntervalSince(last) < 600 { continue }
+            // Never sample ourselves; and skip if the process has already gone.
             guard let pid = findings.first(where: { $0.id == inc.key })?.pids?.first, pid != getpid(),
                   let p = s.processes.first(where: { $0.pid == pid }) else { continue }
             evidenceBusy = true; lastEvidence[inc.key] = s.time
@@ -162,10 +223,12 @@ final class Engine: ObservableObject {
                     self.evidenceBusy = false
                 }
             }
+            // One capture per sample: anything else that's fresh will be considered on a later sample, if still eligible.
             break
         }
     }
 
+    /// Restarts the optional latency probe (router + internet host) with the current settings; blank host means 1.1.1.1.
     private func applyProbe() {
         let p = sampler.probe
         p.stop()
@@ -173,13 +236,17 @@ final class Engine: ObservableObject {
         if netProbeEnabled { p.start() }
     }
 
+    /// Pushes the user's thresholds to the Analyzer on the sampling queue.
     private func applyThresholds() {
         let cpu = appCPUThreshold
         queue.async { [analyzer] in analyzer.thresholds.appCPU = cpu }
     }
 
+    /// Maps a CPU index to performance/efficiency core kind (for per-core graphs).
     var cpuKind: (Int) -> CoreKind { { [sampler] in sampler.cpu.kind(of: $0) } }
 
+    /// The timer always fires at `interval`; when no window is visible `tick()` skips ticks to approximate
+    /// `backgroundInterval`. 10% tolerance lets macOS coalesce wakeups for lower energy use.
     private func restartTimer() {
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
@@ -188,8 +255,12 @@ final class Engine: ObservableObject {
         timer?.tolerance = interval * 0.1
     }
 
+    /// One sampling cycle. Main actor -> `queue` (sample, analyse, log incidents, evaluate rules, capture evidence)
+    /// -> main actor (publish findings, alerts, rule actions, incidents, then `ingest`).
     private func tick() {
         guard !paused, !inFlight else { return }
+        // Hidden: only sample once `backgroundInterval` has elapsed. The quarter-interval slack stops timer jitter from
+        // making us skip an extra tick.
         if !uiVisible, Date().timeIntervalSince(lastTick) < max(backgroundInterval, interval) - interval * 0.25 { return }
         lastTick = Date()
         inFlight = true
@@ -203,6 +274,7 @@ final class Engine: ObservableObject {
             let fullDays = analyzer.daysUntilFull()
             let fresh = incidentLog.update(found, at: s.time)
             self.captureEvidence(for: fresh, findings: found, snapshot: s)
+            // Persist the incident log at most once a minute (and on quit).
             if s.time.timeIntervalSince(self.lastIncidentSave) > 60 { incidentLog.save(); self.lastIncidentSave = s.time }
             let log: [Incident]? = incidentLog.revision != self.incidentRevision ? incidentLog.incidents : nil
             self.incidentRevision = incidentLog.revision
@@ -219,6 +291,7 @@ final class Engine: ObservableObject {
         }
     }
 
+    /// Used by UIBench (no timers): bypasses the queue, analysis and visibility staging entirely.
     /// Headless: push a snapshot (with its findings) as if it had just been sampled.
     func feed(_ s: Snapshot, findings: [Finding]) {
         processHistory.record(s.processes)
@@ -235,6 +308,7 @@ final class Engine: ObservableObject {
     private var hiddenFrames: [Snapshot?]?
     private var hiddenCurrent: Snapshot?
     private var lastHiddenLivePublish = Date.distantPast
+    /// Registers window/app notifications that can change visibility. Called once from `init`.
 
     func startVisibilityTracking() {
         let names: [Notification.Name] = [NSWindow.didChangeOcclusionStateNotification, NSWindow.didMiniaturizeNotification,
@@ -248,6 +322,8 @@ final class Engine: ObservableObject {
         }
     }
 
+    /// Recomputes `uiVisible`. On hide, the current live history is copied into the staging vars; on show, staged
+    /// history is published in one go. Set FD_DEBUG_VISIBILITY to log each window's state.
     private func updateVisibility() {
         let visible = !NSApp.isHidden && NSApp.windows.contains { w in
             w.isVisible && !w.isMiniaturized && w.occlusionState.contains(.visible)
@@ -267,6 +343,7 @@ final class Engine: ObservableObject {
         }
     }
 
+    /// Main actor, at the end of each tick: record, black box, Dock tile, then publish (or stage, if hidden).
     private func ingest(_ s: Snapshot) {
         inFlight = false
         if recording { recorded.append(FlightDeckCore.Trace.trimmed(s)) }
@@ -275,6 +352,7 @@ final class Engine: ObservableObject {
         var light = s; light.processes = Array(s.processes.sorted { $0.cpu > $1.cpu }.prefix(12))
         if !uiVisible {
             // menu bar strip still updates, just less often
+            // In replay, live samples only reach `liveSnapshot`; `frames`/`current` belong to the trace.
             if s.time.timeIntervalSince(lastHiddenLivePublish) >= 5 { liveSnapshot = s; lastHiddenLivePublish = s.time }
             guard mode == .live else { return }
             if hiddenFrames == nil { hiddenFrames = frames }
@@ -287,18 +365,23 @@ final class Engine: ObservableObject {
         frames.removeFirst(); frames.append(light)
     }
 
+    /// Inserts a gap marker (after a pause) into graph history, per-process history and the Dock tile graph.
     private func pushGap() {
         processHistory.gap()
         DockIconController.shared.gap()
         if mode == .live { frames.removeFirst(); frames.append(nil) }
     }
 
+    /// Forces an immediate sample even while paused. Note: assigning `paused` triggers its didSet, so this also pushes gaps
+    /// and, when restoring a paused state, closes open incidents. Currently not called anywhere.
     func sampleNow() { let p = paused; paused = false; tick(); paused = p }
 
     // MARK: series helpers
+    /// One value per frame of `frames`; `nil` where the frame is a gap or the metric is unavailable.
     func series(_ f: (Snapshot) -> Double?) -> [Double?] { frames.map { $0.flatMap(f) } }
 
     /// Per-second rate of a cumulative counter between consecutive frames (nil across gaps or resets).
+    /// A decrease (counter reset, e.g. an interface coming back up) yields nil, not a negative rate. Element 0 is always nil.
     func rateSeries(_ f: (Snapshot) -> Double?) -> [Double?] {
         var out: [Double?] = [nil]
         for i in 1..<max(frames.count, 1) {
@@ -310,7 +393,9 @@ final class Engine: ObservableObject {
     }
 
     // MARK: Flight Recorder
+    /// Starts a fresh user recording (in memory until saved).
     func startRecording() { recorded = []; recording = true }
+    /// Stops recording and immediately offers to save it.
     func stopRecording() { recording = false; saveRecording() }
 
     func saveRecording() {
@@ -321,16 +406,20 @@ final class Engine: ObservableObject {
 
     // MARK: Black box
     /// Saves the last `minutes` of the black box (full resolution up to an hour, 10 s resolution beyond).
+    /// Shows a save panel (modal, main actor).
     func saveBlackBox(minutes: Int) {
         guard let t = blackBoxTrace(minutes: minutes) else { return }
         save(t, prefix: "Black Box \(minutes >= 60 ? "\(minutes / 60)h" : "\(minutes)m")")
     }
 
+    /// Loads the last `minutes` of the black box into replay, positioned at the most recent frame.
     func replayBlackBox(minutes: Int) {
         guard let t = blackBoxTrace(minutes: minutes) else { return }
         load(t, startAtEnd: true)
     }
 
+    /// Reads from the black box synchronously on its queue (so it waits for pending writes). The fine tier is used when
+    /// it covers the whole range. Returns nil and sets `lastError` when there's nothing to show.
     private func blackBoxTrace(minutes: Int) -> FlightDeckCore.Trace? {
         let from = Date().addingTimeInterval(-Double(minutes) * 60)
         let tier: BlackBox.Tier = Double(minutes) * 60 <= blackBox.config.fineRetention ? .fine : .coarse
@@ -339,7 +428,8 @@ final class Engine: ObservableObject {
         return t
     }
 
-    /// Replays the black box around a moment (e.g. an incident), with some context either side.
+    /// Replays the black box around a moment (e.g. an incident), with 2 minutes of context either side.
+    /// Positions replay at `start`.
     func replayBlackBox(from start: Date, to end: Date) {
         let from = start.addingTimeInterval(-120), to = end.addingTimeInterval(120)
         let tier: BlackBox.Tier = Date().timeIntervalSince(from) <= blackBox.config.fineRetention ? .fine : .coarse
@@ -350,10 +440,12 @@ final class Engine: ObservableObject {
         load(t, startAt: start)
     }
 
+    /// Clears the persisted incident log on the queue and the published copy immediately.
     func clearIncidents() { queue.async { [incidentLog] in incidentLog.clear() } ; incidents = [] }
 
     func clearBlackBox() { blackBoxQueue.async { [blackBox] in blackBox.clear() } }
 
+    /// Asks where to save a trace (modal save panel), naming it "<prefix> <date>".
     private func save(_ t: FlightDeckCore.Trace, prefix: String) {
         let panel = NSSavePanel()
         panel.allowedContentTypes = [UTType(filenameExtension: FlightDeckCore.Trace.fileExtension) ?? .data]
@@ -365,6 +457,7 @@ final class Engine: ObservableObject {
         }
     }
 
+    /// Open panel for `.flightlog` traces (and the legacy `.mltrace` extension from before the rename).
     func openTrace() {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = ([FlightDeckCore.Trace.fileExtension] + FlightDeckCore.Trace.legacyFileExtensions)
@@ -376,12 +469,15 @@ final class Engine: ObservableObject {
         do { load(try FlightDeckCore.Trace.read(from: url)) } catch { lastError = "Could not open trace: \(error.localizedDescription)" }
     }
 
+    /// Stops the current recording and replays it without saving first.
     func replayRecorded() {
         guard !recorded.isEmpty else { return }
         recording = false
         load(FlightDeckCore.Trace(host: Host.current().localizedName ?? "", model: "", interval: interval, frames: recorded))
     }
 
+    /// Enters replay mode with `t`. Start position: the end (`startAtEnd`), the first frame at or after `startAt`, or the
+    /// `replayIndex` user default (for automation/screenshots, 0 by default).
     private func load(_ t: FlightDeckCore.Trace, startAtEnd: Bool = false, startAt: Date? = nil) {
         guard !t.frames.isEmpty else { lastError = "Trace is empty"; return }
         playing = false; playTimer?.invalidate()
@@ -389,14 +485,18 @@ final class Engine: ObservableObject {
         let start = startAtEnd ? t.frames.count - 1
             : startAt.map { d in t.frames.firstIndex { $0.time >= d } ?? 0 }
             ?? UserDefaults.standard.integer(forKey: "replayIndex")   // debug/automation hook
+        // `mode` is already .replay here, so assigning replayIndex runs applyReplay through its didSet; the explicit call
+        // after it recomputes the same moment a second time.
         replayIndex = min(max(start, 0), t.frames.count - 1); applyReplay()
     }
 
+    /// Back to live. History is cleared (not restored), so graphs start filling again from the next sample.
     func exitReplay() {
         playing = false; playTimer?.invalidate(); trace = nil; mode = .live
         frames = Array(repeating: nil, count: Self.historyLength); current = nil
     }
 
+    /// Plays the trace at twice its recorded speed; wraps to the start if already at the end, stops at the last frame.
     func togglePlay() {
         playing.toggle(); playTimer?.invalidate()
         guard playing, let t = trace else { return }
@@ -409,6 +509,8 @@ final class Engine: ObservableObject {
         }
     }
 
+    /// Rebuilds `frames` as the `historyLength` frames ending at `replayIndex`, inserting `nil` wherever the recording has a
+    /// hole longer than 2.5 intervals (so a gap in the trace looks like a gap in live graphs).
     private func applyReplay() {
         guard let t = trace, !t.frames.isEmpty else { return }
         let idx = min(max(replayIndex, 0), t.frames.count - 1)
@@ -422,7 +524,8 @@ final class Engine: ObservableObject {
         window = Array(window.suffix(Self.historyLength))
         frames = Array(repeating: nil, count: Self.historyLength - window.count) + window
         current = t.frames[idx]
-        // Recompute findings as they would have looked at this moment.
+        // Recompute findings as they would have looked at this moment, by running a fresh Analyzer over up to the
+        // preceding 900 frames. This runs on the main actor on every scrub step.
         let a = Analyzer()
         for f in t.frames[max(0, idx - 900)...idx] { a.ingest(f) }
         replayFindings = a.findings

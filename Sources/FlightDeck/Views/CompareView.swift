@@ -1,3 +1,6 @@
+// Compare window: load two Flight Recorder recordings (.flightlog, legacy .mltrace, or saved black-box segments)
+// and show summary statistics, overlaid time graphs and per-app CPU changes. Statistics come from
+// `TraceStats.compute` in FlightDeckCore, which also replays the analyzer to count findings.
 import SwiftUI
 import UniformTypeIdentifiers
 import FlightDeckCore
@@ -6,11 +9,14 @@ import FlightDeckCore
 /// aligned by elapsed time, and how each app's CPU and memory changed.
 @MainActor
 final class CompareModel: ObservableObject {
+    /// One loaded recording: where it came from, its frames, and statistics precomputed once at load time
+    /// so re-renders don't walk every frame again.
     struct Side { var url: URL; var trace: Trace; var stats: TraceStats }
     @Published var a: Side?
     @Published var b: Side?
     @Published var error: String?
 
+    /// Shows an open panel for side `which` (0 = baseline A, 1 = comparison B) and loads the chosen file.
     func pick(_ which: Int) {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = ([Trace.fileExtension] + Trace.legacyFileExtensions).compactMap { UTType(filenameExtension: $0) }
@@ -19,6 +25,8 @@ final class CompareModel: ObservableObject {
         load(url, into: which)
     }
 
+    /// Reads and decodes a recording and computes its statistics synchronously on the main actor.
+    /// On failure the existing side is left untouched and `error` is set, which the view shows as an alert.
     func load(_ url: URL, into which: Int) {
         do {
             let t = try Trace.read(from: url)
@@ -28,6 +36,8 @@ final class CompareModel: ObservableObject {
     }
 }
 
+/// Root view of the Compare window. Until both sides are chosen it shows only the pickers and a hint;
+/// afterwards a scrolling report of statistics, overlay graphs and app changes.
 struct CompareView: View {
     @Environment(\.palette) var p
     @StateObject private var model = CompareModel()
@@ -57,6 +67,8 @@ struct CompareView: View {
         }
     }
 
+    /// Picker button for one side, with its colour dot (matching that side's graph trace) and, once loaded,
+    /// host name, start time and duration.
     func sideButton(_ i: Int, _ s: CompareModel.Side?) -> some View {
         Button { model.pick(i) } label: {
             HStack {
@@ -71,6 +83,9 @@ struct CompareView: View {
 
     /// Resample a trace onto `n` points by elapsed time, so recordings of different length/interval overlay.
     /// Each point takes the nearest sample within 1.5 sampling intervals; farther than that is a real gap.
+    // `j` only moves forward: target times increase monotonically, so a single pass finds each nearest frame.
+    // Points past the end of the shorter recording fall outside the tolerance and become nil (drawn as a gap),
+    // keeping with the "gaps, not interpolation" principle.
     func aligned(_ t: Trace, n: Int, span: TimeInterval, _ f: (Snapshot) -> Double?) -> [Double?] {
         guard let t0 = t.frames.first?.time, n > 1 else { return [] }
         let times = t.frames.map { $0.time.timeIntervalSince(t0) }
@@ -83,6 +98,8 @@ struct CompareView: View {
         }
     }
 
+    /// The comparison report. Both recordings are plotted against the longer one's duration so equal elapsed
+    /// times line up horizontally.
     @ViewBuilder func content(_ a: CompareModel.Side, _ b: CompareModel.Side) -> some View {
         let span = max(a.stats.end.timeIntervalSince(a.stats.start), b.stats.end.timeIntervalSince(b.stats.start))
         VStack(spacing: 12) {
@@ -108,6 +125,8 @@ struct CompareView: View {
                 overlay("Hottest sensor °C", a, b, span, max: 110) { $0.power.hottest.value }
             }
             Panel(title: "Apps: what changed", trailing: "average CPU over each recording") {
+                // Apps are matched by display name; if two entries share a name the larger average wins.
+                // Sorted by absolute change so the biggest movers (up or down) come first.
                 let ac = Dictionary(a.stats.topCPU.map { ($0.name, $0.avg) }, uniquingKeysWith: max)
                 let bc = Dictionary(b.stats.topCPU.map { ($0.name, $0.avg) }, uniquingKeysWith: max)
                 let names = Set(ac.keys).union(bc.keys).sorted { abs((bc[$0] ?? 0) - (ac[$0] ?? 0)) > abs((bc[$1] ?? 0) - (ac[$1] ?? 0)) }
@@ -118,6 +137,8 @@ struct CompareView: View {
                             Text(n).lineLimit(1)
                             Text(ac[n].map { String(format: "%.1f%%", $0) } ?? "—")
                             Text(bc[n].map { String(format: "%.1f%%", $0) } ?? "—")
+                            // Missing from one side counts as 0 for the change column, so an app that only just fell
+                            // out of a top-10 list can show a larger change than it really had.
                             let d = (bc[n] ?? 0) - (ac[n] ?? 0)
                             Text(String(format: "%+.1f", d)).foregroundStyle(abs(d) < 1 ? p.dim : d > 0 ? p.warn : p.accent)
                         }
@@ -128,6 +149,10 @@ struct CompareView: View {
         }
     }
 
+    /// One statistics row: averages, percentage change of the averages, and 95th percentiles; "—" when a side
+    /// never measured that metric. `lowerIsBetter` colours changes beyond ±5% as worse (warn) or better (accent);
+    /// nil means direction-neutral (e.g. network, GPU) and leaves the change uncoloured. No change is shown
+    /// when A's average is 0, since a percentage of zero is undefined.
     func statRow(_ k: String, _ a: TraceStats.Stat?, _ b: TraceStats.Stat?, lowerIsBetter: Bool?, _ f: (Double) -> String) -> some View {
         GridRow {
             Text(k).foregroundStyle(p.dim)
@@ -142,6 +167,8 @@ struct CompareView: View {
         }
     }
 
+    /// One overlay graph panel: A filled in its accent colour, B drawn as a line on top, resampled to 200 points.
+    /// `max` fixes the y-axis (e.g. 100 for percentages); nil lets the graph scale to the data.
     func overlay(_ title: String, _ a: CompareModel.Side, _ b: CompareModel.Side, _ span: TimeInterval, max: Double?, _ f: @escaping (Snapshot) -> Double?) -> some View {
         Panel(title: title, trailing: "0 – \(shortDuration(span))") {
             HistoryGraph(traces: [GraphTrace(name: "A", values: aligned(a.trace, n: 200, span: span, f), color: p.accent),

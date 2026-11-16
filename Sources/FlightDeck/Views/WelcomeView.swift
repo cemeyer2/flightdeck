@@ -1,15 +1,21 @@
 import SwiftUI
 import FlightDeckCore
+// First-run welcome sheet, presented by ContentView until "welcomed" is set in user defaults.
 
 /// First-run sheet: what FlightDeck does, what it records (locally), and the few choices that need consent.
+/// The toggles write the same user-defaults keys that Settings uses, so choices made here take effect immediately and
+/// can be changed later. Notification permission is only requested on "Get Started", and only if alerts are on, so
+/// macOS's prompt appears after the user has read why.
 struct WelcomeView: View {
     @EnvironmentObject var e: Engine
     @Environment(\.palette) var p
     @Environment(\.dismiss) private var dismiss
     @AppStorage("alertsEnabled") private var alertsEnabled = true
     @AppStorage("menuBarEnabled") private var menuBarEnabled = true
+    /// Mirrors the system login-item state; re-read after every change because registration can fail or need approval.
     @State private var loginItem = LoginItem.isEnabled
 
+    /// One explanatory row: icon, title and wrapping description.
     func row(_ icon: String, _ title: String, _ text: String) -> some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: icon).font(.system(size: 18)).foregroundStyle(p.accent).frame(width: 26)
@@ -23,6 +29,7 @@ struct WelcomeView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 12) {
+                // `NSApp` is nil when rendered off-screen by UIBench, hence the fallback to the bundle's Finder icon.
                 Image(nsImage: (NSApp?.applicationIconImage) ?? NSWorkspace.shared.icon(forFile: Bundle.main.bundlePath)).resizable().frame(width: 56, height: 56)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Welcome to FlightDeck").font(.system(size: 22, weight: .bold))

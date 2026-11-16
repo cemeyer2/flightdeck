@@ -1,6 +1,11 @@
 import SwiftUI
 import FlightDeckCore
+// Performance tabs Disk, Network, Energy, Thermals and GPU (CPU and Memory are in PerformanceView.swift), plus the
+// panels they embed: ConnectionQualityPanel, EnergyBudgetPanel (black box), DriveHealthPanel, ProcessMiniList and
+// GPUAppRow. Like the other tabs they read `e.current` and `e.series`, so they also work during replay.
 
+/// Disk tab: system-wide read/write rates (bytes/s), optional per-device graphs, NVMe health, volume capacity with the
+/// Engine's "disk full in N days" forecast, and the processes doing the most disk I/O.
 struct DiskPerf: View {
     @EnvironmentObject var e: Engine
     @Environment(\.palette) var p
@@ -25,6 +30,7 @@ struct DiskPerf: View {
                 ForEach(d?.devices ?? []) { dev in
                     Panel(title: dev.name, trailing: "total R \(Fmt.bytes(dev.totalRead)) · W \(Fmt.bytes(dev.totalWritten))") {
                         HistoryGraph(traces: [
+                            // Devices are matched by name in every frame; a frame without that device gives a gap.
                             GraphTrace(name: "r", values: e.series { s in s.disk.devices.first { $0.name == dev.name }?.readBps }, color: p.accent),
                             GraphTrace(name: "w", values: e.series { s in s.disk.devices.first { $0.name == dev.name }?.writeBps }, color: p.accent2)],
                                      minHeadroom: 1_048_576, format: Fmt.rate).frame(height: 120)
@@ -32,6 +38,7 @@ struct DiskPerf: View {
                 }
             }
             DriveHealthPanel()
+            // `diskFullDays` is nil unless the startup disk has a clear shrinking trend, which hides the forecast.
             Panel(title: "Capacity", trailing: e.diskFullDays.map { "startup disk full in ~\(max(Int($0.rounded()), 1)) days at the current rate" }) {
                 ForEach(d?.volumes ?? []) { v in VolumeRow(v: v) }
             }
@@ -42,6 +49,7 @@ struct DiskPerf: View {
     }
 }
 
+/// One mounted volume: name, file system, used/capacity/free and a usage meter.
 struct VolumeRow: View {
     @Environment(\.palette) var p
     var v: VolumeInfo
@@ -59,6 +67,8 @@ struct VolumeRow: View {
     }
 }
 
+/// Top `count` processes by `metric` with a meter relative to the busiest. Restricted processes (other users' without
+/// root) are left out, since their counters can't be read and would rank as 0.
 struct ProcessMiniList: View {
     @EnvironmentObject var e: Engine
     @Environment(\.palette) var p
@@ -82,6 +92,8 @@ struct ProcessMiniList: View {
     }
 }
 
+/// Network tab: connection quality, total bandwidth (bits/s readouts; bytes/s graph scale), per-app traffic and
+/// interfaces. Totals are interface counters since boot, unlike AppNetworkPanel's "since FlightDeck started".
 struct NetworkPerf: View {
     @EnvironmentObject var e: Engine
     @Environment(\.palette) var p
@@ -103,15 +115,18 @@ struct NetworkPerf: View {
             }
             AppNetworkPanel()
             Panel(title: "Interfaces") {
+                // Hide idle virtual interfaces (no traffic, no address), of which macOS has many (utun, awdl, bridge…).
                 let ifs = (n?.interfaces ?? []).filter { $0.totalIn + $0.totalOut > 0 || !$0.addresses.isEmpty }
                 Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 6) {
                     GridRow { ForEach(["Name", "Status", "Link", "↓ now", "↑ now", "↓ total", "↑ total", "Address", "MAC"], id: \.self) { Text($0).font(.meterLabel).foregroundStyle(p.dim) } }
                     ForEach(ifs) { i in
                         GridRow {
                             Text(i.name); Text(i.isUp ? "up" : "down").foregroundStyle(i.isUp ? p.accent : p.dim)
+                            // Link speed is reported in bits/s; Fmt.bits expects bytes/s, hence the division.
                             Text(i.linkSpeed > 0 ? Fmt.bits(Double(i.linkSpeed) / 8) : "—")
                             Text(Fmt.rate(i.inBps)); Text(Fmt.rate(i.outBps))
                             Text(Fmt.bytes(i.totalIn)); Text(Fmt.bytes(i.totalOut))
+                            // Prefer an IPv4 address for display; fall back to the first (IPv6) one.
                             Text(i.addresses.first { !$0.contains(":") } ?? i.addresses.first ?? "—").textSelection(.enabled)
                             Text(i.mac ?? "—").foregroundStyle(p.dim)
                         }.font(.system(size: 12, design: .monospaced))
@@ -122,6 +137,8 @@ struct NetworkPerf: View {
     }
 }
 
+/// Energy tab: system power draw and battery flow (W), battery state and health, the black-box energy budget, and
+/// the processes with the highest measured energy.
 struct EnergyPerf: View {
     @EnvironmentObject var e: Engine
     @Environment(\.palette) var p
@@ -131,6 +148,8 @@ struct EnergyPerf: View {
             Panel(title: "Power", trailing: pw?.powerSource) {
                 HStack(spacing: 28) {
                     Readout(label: "System draw", value: pw?.systemWatts.value.map { String(format: "%.2f", $0) }, unit: "W", color: p.accent)
+                    // Battery flow is signed (+ charging, - discharging); the graph below plots its magnitude so both directions
+                    // share the system-draw scale.
                     Readout(label: "Battery flow", value: pw?.batteryWatts.value.map { String(format: "%+.2f", $0) }, unit: "W", color: p.accent2)
                     Readout(label: "Low Power Mode", value: pw.map { $0.lowPowerMode ? "On" : "Off" })
                     Readout(label: "Adapter", value: pw?.battery?.adapterWatts.map { "\($0) W" })
@@ -146,6 +165,7 @@ struct EnergyPerf: View {
                         Readout(label: "Charge", value: String(format: "%.0f", b.percent), unit: "%")
                         Readout(label: "State", value: b.isCharging ? "Charging" : (b.externalConnected ? "On AC" : "Discharging"))
                         Readout(label: b.isCharging ? "Time to full" : "Time remaining",
+                                // `timeRemaining` is in minutes and nil while macOS is still estimating; 0 is treated the same way.
                                 value: b.isCharging && b.percent >= 99 ? "Charged" : b.timeRemaining.flatMap { $0 > 0 ? "\($0 / 60)h \($0 % 60)m" : nil })
                         Readout(label: "Health", value: b.health.map { String(format: "%.0f", $0) }, unit: "%")
                         Readout(label: "Cycles", value: b.cycleCount.map(String.init))
@@ -158,12 +178,15 @@ struct EnergyPerf: View {
             }
             EnergyBudgetPanel()
             Panel(title: "Top energy processes (measured energy)") {
+                // Processes without an energy reading count as 0 W for ranking only.
                 ProcessMiniList(metric: { $0.energyWatts ?? 0 }, format: { String(format: "%.2f W", $0) }, count: 10)
             }
         }
     }
 }
 
+/// Thermals tab: macOS thermal pressure state, the hottest sensor, fan speeds from the SMC, and a heatmap of every
+/// temperature sensor (read via IOHIDEventSystemClient, which is slow, so refreshed only every `PowerSampler.sensorInterval` s).
 struct ThermalPerf: View {
     @EnvironmentObject var e: Engine
     @Environment(\.palette) var p
@@ -177,10 +200,12 @@ struct ThermalPerf: View {
                     Readout(label: "Sensors", value: pw.map { "\($0.temperatures.count)" })
                     Spacer()
                 }
+                // Four-segment meter for thermal state 0–3 (nominal, fair, serious, critical); nominal lights one segment.
                 VFDMeter(fraction: pw.map { Double($0.thermalState + 1) / 4 }, segments: 4, height: 12)
                 HistoryGraph(traces: [GraphTrace(name: "hot", values: e.series { $0.power.hottest.value }, color: p.accent)],
                              maxValue: 110, format: { String(format: "%.0f °C", $0) }).frame(height: 180)
             }
+            // Fanless Macs (e.g. MacBook Air) report no fans, so the panel is omitted rather than showing 0 RPM.
             if let fans = pw?.fans, !fans.isEmpty {
                 Panel(title: "Fans", trailing: "from the SMC") {
                     HStack(spacing: 28) {
@@ -222,9 +247,13 @@ struct ThermalPerf: View {
     }
 }
 
+/// GPU tab: device/renderer/tiler utilisation, clocks, power and memory, P-state residency, per-app GPU time, CPU
+/// cluster clocks and Metal device facts. Live detail comes from `Snapshot.gpuDetail` (IOAccelerator statistics plus
+/// IOReport on Apple silicon); every field is optional and shows "—" where this Mac doesn't report it.
 struct GPUPerf: View {
     @EnvironmentObject var e: Engine
     @Environment(\.palette) var p
+    // Static facts about the GPU and its Metal device, gathered once on first use and never refreshed.
     static let info = GPUSampler.info()
     static let metal = MetalInfo.collect()
 
@@ -234,6 +263,7 @@ struct GPUPerf: View {
         VStack(spacing: 12) {
             Panel(title: info.model, trailing: [info.cores.map { "\($0) GPU cores" }, info.frequencyRange.map { String(format: "%.0f–%.0f MHz", $0.min, $0.max) }].compactMap { $0 }.joined(separator: " · ")) {
                 HStack(spacing: 24) {
+                    // Some Macs only expose the coarse snapshot-level GPU utilisation, used as a fallback.
                     Readout(label: "Utilization", value: (g?.deviceUtilization ?? e.current?.gpu.value).map { String(format: "%.0f", $0) }, unit: "%", color: p.accent)
                     Readout(label: "Active", value: g?.activeResidency.map { String(format: "%.0f", $0) }, unit: "%")
                     Readout(label: "Frequency", value: g?.frequencyMHz.map { String(format: "%.0f", $0) }, unit: "MHz")
@@ -246,6 +276,7 @@ struct GPUPerf: View {
                     MiniGauge(label: "RENDERER", value: g?.rendererUtilization.map { $0 / 100 }, text: g?.rendererUtilization.map { String(format: "%.0f%%", $0) })
                     MiniGauge(label: "TILER", value: g?.tilerUtilization.map { $0 / 100 }, text: g?.tilerUtilization.map { String(format: "%.0f%%", $0) })
                     MiniGauge(label: "THERMAL CAP", value: g?.thermalLimited.map { $0 / 100 }, text: g?.thermalLimited.map { String(format: "%.0f%%", $0) })
+                    // Fraction of Metal's recommended working-set size, the practical ceiling for GPU memory.
                     MiniGauge(label: "MEMORY", value: g?.memoryInUse.map { Double($0) / Double(max(Self.metal.workingSet ?? 1, 1)) },
                               text: Self.metal.workingSet.map { "of " + Fmt.bytes($0) })
                 }
@@ -270,6 +301,9 @@ struct GPUPerf: View {
                 }
             }
             Panel(title: "Performance states", trailing: "share of the last sample spent at each clock") {
+                // Bar heights are percentages drawn 1 pt per %, with a 1 pt minimum so empty states stay visible. The
+                // first bar is time powered off (100% minus active residency); the rest are the DVFS states, labelled
+                // with their MHz when known.
                 if let r = g?.stateResidency, !r.isEmpty {
                     HStack(alignment: .bottom, spacing: 6) {
                         VStack(spacing: 3) {
@@ -295,6 +329,8 @@ struct GPUPerf: View {
                 }
             }
             Panel(title: "GPU apps", trailing: "share of GPU time · total GPU time since each app started") {
+                // Per-app share of GPU time (from the sampler) joined with IOAccelerator client records for cumulative
+                // GPU time and the graphics APIs each process uses.
                 let apps = AppUsage.aggregate(e.current?.processes ?? []).filter { $0.gpu != nil }.sorted { ($0.gpu ?? 0) > ($1.gpu ?? 0) }
                 let clients = g?.clients ?? []
                 if apps.isEmpty && clients.isEmpty { Text("No process is using the GPU right now (or per-process GPU time isn't exposed).").foregroundStyle(p.dim) }
@@ -326,6 +362,9 @@ struct GPUPerf: View {
 }
 
 /// Wi-Fi link, router and DNS, and (opt-in) latency / loss to the router and the internet.
+/// Data: `e.current.wifi` (CoreWLAN) and `e.current.latency` (pings, only when the user enables the probe in Settings;
+/// off by default for privacy). The default route and DNS servers are re-read every 15 s on a detached task while the
+/// panel is visible.
 struct ConnectionQualityPanel: View {
     @EnvironmentObject var e: Engine
     @Environment(\.palette) var p
@@ -337,6 +376,7 @@ struct ConnectionQualityPanel: View {
         Panel(title: "Connection quality", trailing: route.map { "via \($0.interface)" }) {
             if let w = s?.wifi {
                 HStack(spacing: 24) {
+                    // Below -75 dBm RSSI or 20 dB SNR the link is usually unreliable, so those are highlighted.
                     Readout(label: "Wi-Fi signal", value: w.quality, color: w.rssi < -75 ? p.warn : p.accent)
                     Readout(label: "RSSI", value: "\(w.rssi)", unit: "dBm")
                     Readout(label: "Noise", value: "\(w.noise)", unit: "dBm")
@@ -344,9 +384,11 @@ struct ConnectionQualityPanel: View {
                     Readout(label: "Link rate", value: String(format: "%.0f", w.txRate), unit: "Mbps")
                     Spacer()
                 }
+                // dBm values are negative; shifted by +100 so the graph's 0-based fill works (0…80 = -100…-20 dBm).
                 HistoryGraph(traces: [GraphTrace(name: "rssi", values: e.series { $0.wifi.map { Double($0.rssi + 100) } }, color: p.accent),
                                       GraphTrace(name: "noise", values: e.series { $0.wifi.map { Double($0.noise + 100) } }, color: p.accent2, fill: false)],
                              maxValue: 80, format: { String(format: "%.0f dBm", $0 - 100) }).frame(height: 90)
+                // macOS hides the SSID unless the app has Location permission, so say so instead of showing nothing.
                 Text([w.phy, w.band, w.width, w.channel.map { "channel \($0)" }, w.security, "network name: " + (w.ssid ?? "hidden by macOS (needs Location permission)")]
                     .compactMap { $0 }.joined(separator: " · "))
                     .font(.system(size: 11, design: .monospaced)).foregroundStyle(p.dim)
@@ -360,6 +402,7 @@ struct ConnectionQualityPanel: View {
                 let lat = s?.latency ?? []
                 HStack(spacing: 24) {
                     ForEach(lat) { r in
+                        // Warn above 50 ms to the router or 150 ms to the internet; a missing average also warns.
                         Readout(label: "\(r.role) latency", value: r.avgMs.map { String(format: "%.0f", $0) }, unit: "ms",
                                 color: (r.avgMs ?? 999) > (r.role == "Router" ? 50 : 150) ? p.warn : nil)
                         Readout(label: "Jitter", value: r.jitterMs.map { String(format: "%.1f", $0) }, unit: "ms")
@@ -394,6 +437,8 @@ struct ConnectionQualityPanel: View {
 }
 
 /// Which apps used the most energy over the last hours, from the black box.
+/// Loaded once per chosen period (and when the panel appears) on a detached utility task: the 1 hour view uses the fine
+/// black-box tier, longer periods the 10 s coarse tier. It doesn't refresh while open.
 struct EnergyBudgetPanel: View {
     @EnvironmentObject var e: Engine
     @Environment(\.palette) var p
@@ -420,6 +465,7 @@ struct EnergyBudgetPanel: View {
                 Text("Turn on the black box (Settings) to see energy use over time.").foregroundStyle(p.dim)
             } else if let b = budget {
                 if b.apps.isEmpty { Text("No energy measurements recorded in this period yet.").foregroundStyle(p.dim) }
+                // Bars are relative to the top app; the floor avoids dividing by zero when every app used ~0 Wh.
                 let top = max(b.apps.first?.wattHours ?? 1, 0.001)
                 ForEach(b.apps.prefix(10)) { a in
                     HStack(spacing: 8) {
@@ -431,6 +477,8 @@ struct EnergyBudgetPanel: View {
                     }.font(.system(size: 12, design: .monospaced))
                 }
                 if b.charge.count > 2 {
+                    // Downsampled to at most ~240 points for drawing. Points are evenly spaced by index, not by time,
+                    // so periods with no recording (sleep) are compressed rather than shown as gaps.
                     let step = max(b.charge.count / 240, 1)
                     HistoryGraph(traces: [GraphTrace(name: "charge", values: stride(from: 0, to: b.charge.count, by: step).map { Optional(b.charge[$0].1) }, color: p.accent)],
                                  maxValue: 100, format: { String(format: "%.0f%%", $0) }).frame(height: 70)
@@ -454,6 +502,8 @@ struct EnergyBudgetPanel: View {
     }
 }
 
+/// NVMe SMART data per internal drive from `e.current.drives` (read by the sampler at most every 5 minutes). Hidden
+/// entirely when no drive reports SMART data (e.g. external or non-NVMe disks).
 struct DriveHealthPanel: View {
     @EnvironmentObject var e: Engine
     @Environment(\.palette) var p
@@ -484,7 +534,8 @@ struct DriveHealthPanel: View {
     }
 }
 
-/// Cool blue → amber → red for the heatmap; monochrome themes use the accent at varying strength.
+/// Heatmap colour for a 0…1 heat fraction: cool blue → teal → amber → red, linearly interpolated between fixed stops.
+/// The same colours are used in every theme.
 func heatColor(_ f: Double) -> Color {
     let stops: [(Double, (Double, Double, Double))] = [(0, (0.12, 0.25, 0.45)), (0.45, (0.20, 0.55, 0.65)), (0.7, (0.95, 0.70, 0.20)), (1, (0.95, 0.25, 0.20))]
     var lo = stops[0], hi = stops[stops.count - 1]
@@ -493,6 +544,8 @@ func heatColor(_ f: Double) -> Color {
     return Color(red: lo.1.0 + (hi.1.0 - lo.1.0) * t, green: lo.1.1 + (hi.1.1 - lo.1.1) * t, blue: lo.1.2 + (hi.1.2 - lo.1.2) * t)
 }
 
+/// One app in the GPU apps list: share of GPU time now (%), cumulative GPU time summed over its processes'
+/// IOAccelerator clients, and which graphics APIs (Metal, OpenGL…) they use.
 struct GPUAppRow: View {
     @Environment(\.palette) var p
     var app: AppUsage

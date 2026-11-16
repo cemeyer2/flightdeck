@@ -1,7 +1,12 @@
 import XCTest
 @testable import FlightDeckCore
+// Sampling cost budget: times each data source on the real machine (printed as COST lines for comparison between
+// builds) and fails if FlightDeck's own CPU cost per sample gets out of hand, since the app samples every second.
 /// Prints what each source costs and guards FlightDeck's own sampling overhead.
 final class PerformanceBudgetTests: XCTestCase {
+    /// Average wall-clock ms per call over `k` calls for each sampler, then the in-process CPU time (user + system)
+    /// of a full `Sampler.sample()`. Must stay under 100 ms of CPU per sample even in a debug build; the analyzer and
+    /// snapshot encoding (the black box's per-sample work) are timed too.
     func testCost() {
         func time(_ n: String, _ k: Int = 5, _ f: () -> Void) { let t = Date(); for _ in 0..<k { f() }; print("COST", n, String(format: "%.1f ms", Date().timeIntervalSince(t) / Double(k) * 1000)) }
         let ps = ProcessSampler(); _ = ps.sample()

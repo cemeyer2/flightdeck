@@ -1,7 +1,13 @@
+// Tests for the slower, on-demand readers behind the Process Inspector and the diagnostics pages: ProcessInspector
+// details and signatures, NVMe drive health, SMC fans, per-process counters and power assertions, diagnostic reports,
+// startup items, call-stack evidence and the pmset sleep log. Most run against this test process or the real Mac.
 import XCTest
 @testable import FlightDeckCore
 
+/// Process Inspector details.
 final class InspectorTests: XCTestCase {
+    /// Opens a listening socket and a file in this process, then checks the inspector sees them along with arguments,
+    /// environment, cwd, threads, nice value and an ancestry chain running from this process up to launchd (PID 1).
     func testOwnProcessDetails() throws {
         // open a listening TCP socket and a file so they show up
         let s = socket(AF_INET, SOCK_STREAM, 0); defer { close(s) }
@@ -26,6 +32,8 @@ final class InspectorTests: XCTestCase {
         XCTAssertNotNil(d.nice)
     }
 
+    /// Apple's own binaries verify as Apple-signed, and another user's process (launchd, unless running as root) must
+    /// report its environment as unavailable (nil), not as an empty list that would look like "no variables".
     func testSignatureAndRestricted() {
         let sig = ProcessInspector.signature("/usr/bin/yes")
         XCTAssertEqual(sig?.isApple, true)
@@ -37,7 +45,10 @@ final class InspectorTests: XCTestCase {
     }
 }
 
+/// NVMe SMART health.
 final class DriveHealthTests: XCTestCase {
+    /// On Macs that expose SMART data, the decoded values are plausible (non-zero writes and power-on hours, a sane
+    /// temperature); Macs without it must return an empty list rather than fabricated readings.
     func testReadsInternalSSD() {
         let d = DriveHealthReader.read()
         print("DRIVES", d)
@@ -48,7 +59,10 @@ final class DriveHealthTests: XCTestCase {
     }
 }
 
+/// SMC fan decoding.
 final class SMCTests: XCTestCase {
+    /// Fan RPMs decode to plausible numbers (a wrong SMC data-type decode shows up as absurd values). Fanless Macs pass
+    /// trivially with no fans.
     func testFansDecode() {
         let f = SMC.shared.fans()
         print("FANS", f)
@@ -57,7 +71,11 @@ final class SMCTests: XCTestCase {
 }
 
 import IOKit.pwr_mgt
+/// Per-process kernel counters, Rosetta detection and sleep-prevention assertions.
 final class ProcessExtrasTests: XCTestCase {
+    /// Task info and proc_pid_rusage counters are read for this process, a native test binary isn't reported as
+    /// translated, and a power assertion this process creates is attributed to its PID by name and type, end-to-end
+    /// through the Sampler.
     func testCountersKindAndAssertions() {
         let c = ProcessInspector.counters(getpid())
         XCTAssertNotNil(c); XCTAssertGreaterThan(c!.unixSyscalls, 0); XCTAssertGreaterThan(c!.peakFootprint ?? 0, 0)
@@ -74,9 +92,14 @@ final class ProcessExtrasTests: XCTestCase {
     }
 }
 
+/// DiagnosticReports parsing from synthetic files in a temporary directory.
 final class DiagnosticReportTests: XCTestCase {
+    /// Writes a report file with the given contents into `dir`.
     func write(_ name: String, _ s: String, in dir: URL) { try! s.write(to: dir.appendingPathComponent(name), atomically: true, encoding: .utf8) }
 
+    /// Covers both formats macOS writes: JSON `.ips` (crash, simulated user fault, jetsam) and text `.diag` (disk-write
+    /// limit). Checks kind classification, process attribution (jetsam reports belong to "System"), summaries, and
+    /// that of these only the repeated crash becomes a finding, counted per app.
     func testParsesKindsAndFindings() throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("dr-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -102,7 +125,10 @@ final class DiagnosticReportTests: XCTestCase {
     }
 }
 
+/// Startup items (launch agents and daemons).
 final class StartupItemTests: XCTestCase {
+    /// Every startup item whose program exists gets a signature verdict, so the Startup page never shows a blank
+    /// signer for a program it could have checked.
     func testSignersAndOrphans() {
         let items = Launchd.startupItems()
         print("STARTUP", items.count, "orphans", items.filter(\.orphaned).map(\.label), "unsigned", items.filter { $0.signer?.hasPrefix("Not signed") == true }.map(\.label))
@@ -110,7 +136,10 @@ final class StartupItemTests: XCTestCase {
     }
 }
 
+/// Call-stack evidence captured for hangs and hogs.
 final class EvidenceTests: XCTestCase {
+    /// Reduces a `/usr/bin/sample` call graph to one line: the heaviest main-thread path, leaf first, with the share of
+    /// samples in it and a "waiting" label when the leaf is a blocking call such as a mutex wait.
     func testSummarizesHeaviestMainThreadPath() {
         let text = """
         Call graph:
@@ -129,6 +158,7 @@ final class EvidenceTests: XCTestCase {
         XCTAssertEqual(s, "Main thread waiting (95% of samples) in __psynch_mutexwait (libsystem_kernel.dylib) ← -[Model sortItems:] (Busy) ← -[Model recompute] (Busy)")
     }
 
+    /// Captures evidence from a real child process (a same-user process can be sampled without root) and writes it to disk.
     func testRealCaptureOfAnotherProcess() throws {
         let p = Process(); p.executableURL = URL(fileURLWithPath: "/bin/sleep"); p.arguments = ["10"]
         try p.run(); defer { p.terminate() }
@@ -141,7 +171,11 @@ final class EvidenceTests: XCTestCase {
     }
 }
 
+/// Sleep log (`pmset -g log`) parsing.
 final class SleepLogTests: XCTestCase {
+    /// One clamshell sleep with two dark wakes, wake requests, the final lid-open wake and two overlapping assertions.
+    /// Checks the session's plain-English reasons, battery use (90% → 85%), time asleep summed over the sleep spells,
+    /// wake reason classification, wake requesters, and that overlapping assertion holds are merged, not double counted.
     func testParsesASessionWithDarkWakes() {
         let log = [
             "2026-11-16 00:10:00 -0600 Sleep               \tEntering Sleep state due to 'Clamshell Sleep':TCPKeepAlive=active Using BATT (Charge:90%) 600 secs  ",
@@ -167,6 +201,7 @@ final class SleepLogTests: XCTestCase {
         XCTAssertEqual(r.keptAwake.first?.process, "Google Chrome"); XCTAssertEqual(r.keptAwake.first?.seconds, 1025, "overlapping holds are merged: 06:47:55–07:05:00")
     }
 
+    /// Prints a summary of this Mac's real log for manual review; no assertions, since every Mac's history differs.
     func testRealLog() {
         guard let r = SleepLog.read(days: 3) else { return }
         print("SLEEP sessions", r.sessions.count, "darkwakes", r.events.filter { $0.kind == .darkWake }.count,

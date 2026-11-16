@@ -1,15 +1,23 @@
 import SwiftUI
 import FlightDeckCore
+// Tool destinations: Power & Freq (DVFS tables and pmset settings), Installed Apps, Disk Space (largest items) and
+// Benchmarks. Like the inventory views, each gathers its data on demand off the main thread, so nothing runs
+// while the page isn't open.
 
+/// Power & Freq: current power state from `e.current.power`, each cluster's DVFS frequency table (read once on appear
+/// from the IORegistry `pmgr` node, or Intel sysctls) with the live clock highlighted, and `pmset -g` settings.
 struct PowerView: View {
     @EnvironmentObject var e: Engine
     @Environment(\.palette) var p
     @StateObject var freq = Loader { Frequency.clusters() }
+    // Flattened to "key\tvalue" strings so the loaded value is Sendable and Hashable for ForEach.
     @StateObject var pm = Loader { Frequency.pmsetSettings().map { "\($0.0)\t\($0.1)" } }
     /// Live clock for a DVFS table: the matching CPU cluster average, or the GPU's.
     func liveMHz(_ table: String) -> Double? {
         guard let g = e.current?.gpuDetail else { return nil }
         if table == "GPU" { return g.frequencyMHz }
+        // DVFS tables are named after their cluster kind ("Efficiency…", "Performance…", "GPU"); live clocks come
+        // from IOReport via `gpuDetail.cpuClusters` and are only present on Apple silicon.
         let kind = table.hasPrefix("Efficiency") ? "E" : "P"
         let m = g.cpuClusters.filter { $0.name.hasPrefix(kind) }.compactMap(\.mhz)
         return m.isEmpty ? nil : m.max()
@@ -40,6 +48,8 @@ struct PowerView: View {
                                 Text(String(format: "%.0f – %.0f MHz · %d steps", c.minMHz, c.maxMHz, c.steps.count)).foregroundStyle(p.dim)
                             }.font(.system(size: 12, design: .monospaced))
                             HStack(alignment: .bottom, spacing: 2) {
+                                // Steps at or below the live clock are lit (1 MHz tolerance for rounding); with no
+                                // live clock every step is drawn lit. Bar height scales with frequency.
                                 ForEach(Array(c.steps.enumerated()), id: \.offset) { _, f in
                                     let lit = live.map { f <= $0 + 1 } ?? true
                                     RoundedRectangle(cornerRadius: 1.5).fill(lit ? p.accent.opacity(0.4 + 0.6 * f / max(c.maxMHz, 1)) : p.meterOff)
@@ -65,12 +75,15 @@ struct PowerView: View {
     }
 }
 
+/// Installed Apps: bundles found by `InstalledApps.scan()` with version, vendor, architectures and source. Sizes are
+/// opt-in ("Compute Sizes") because walking every bundle is slow; until computed a size shows "—", not 0.
 struct InstalledAppsView: View {
     @StateObject var loader = Loader { InstalledApps.scan() }
     @State private var filter = ""
     @State private var hideSystem = false
     @State private var sortOrder = [KeyPathComparator(\InstalledApp.name)]
     @State private var selection: InstalledApp.ID?
+    /// Allocated bytes per app path, filled in as each background size walk finishes.
     @State private var sizes: [String: UInt64] = [:]
     var body: some View {
         let items = (loader.value ?? []).filter { (filter.isEmpty || $0.name.localizedCaseInsensitiveContains(filter) || $0.bundleID.localizedCaseInsensitiveContains(filter)) && (!hideSystem || !$0.isSystem) }
@@ -102,6 +115,7 @@ struct InstalledAppsView: View {
         }
         .onAppear { loader.load() }
     }
+    /// Starts one detached utility task per app not yet sized (all at once); each result lands on the main actor.
     func computeSizes(_ apps: [InstalledApp]) {
         for a in apps where sizes[a.path] == nil {
             let path = a.path
@@ -113,11 +127,15 @@ struct InstalledAppsView: View {
     }
 }
 
+/// Disk Space scanner: sizes the immediate children of `path` recursively on a detached task, streaming each finished
+/// child into `entries` (kept sorted, largest first).
 @MainActor
 final class DiskScan: ObservableObject {
     @Published var path: String = FileManager.default.homeDirectoryForCurrentUser.path
     @Published var entries: [DirEntry] = []
     @Published var scanning = false
+    /// Bumped on every new scan. Results and the cancellation check compare against it, so navigating to another folder
+    /// abandons the old scan and its late results are dropped instead of mixing into the new list.
     private var generation = 0
 
     func scan(_ newPath: String? = nil) {
@@ -125,6 +143,7 @@ final class DiskScan: ObservableObject {
         generation += 1; let gen = generation
         entries = []; scanning = true
         let target = path
+        // Called from the scanning thread; hops to the main thread synchronously to read `generation`.
         let isCurrent: @Sendable () -> Bool = { [weak self] in
             DispatchQueue.main.sync { self?.generation == gen }
         }
@@ -137,6 +156,9 @@ final class DiskScan: ObservableObject {
     }
 }
 
+/// Disk Space: mounted volumes (click one to scan it) and a drill-down list of the largest items in the scanned folder,
+/// starting at the home folder. Without Full Disk Access protected folders can't be read and count as 0 bytes, which
+/// the footer states.
 struct DiskSpaceView: View {
     @EnvironmentObject var e: Engine
     @Environment(\.palette) var p
@@ -144,6 +166,7 @@ struct DiskSpaceView: View {
     var body: some View {
         VStack(spacing: 12) {
             Panel(title: "Volumes") {
+                // Falls back to a direct volume query before the first sample arrives.
                 ForEach(e.current?.disk.volumes ?? DiskSampler.volumes()) { v in
                     VolumeRow(v: v).contentShape(Rectangle()).onTapGesture { scan.scan(v.path) }
                 }
@@ -189,10 +212,13 @@ struct DiskSpaceView: View {
     }
 }
 
+/// Benchmarks: short synthetic CPU/memory/disk tests from FlightDeckCore/Benchmarks.swift, each run on a detached task.
+/// Only one runs at a time (all buttons disable while one is running) so they don't skew each other.
 struct BenchmarksView: View {
     @Environment(\.palette) var p
     @State private var results: [String: BenchmarkResult] = [:]
     @State private var running: String?
+    /// Best score per benchmark ever seen on this Mac, as JSON-encoded [name: score] in user defaults.
     @AppStorage("benchHistory") private var historyData: Data = Data()
     var body: some View {
         ScrollView {
@@ -221,6 +247,7 @@ struct BenchmarksView: View {
             }.padding(16)
         }
     }
+    /// Runs one benchmark, shows its result and updates the stored best score.
     func run(_ n: String) async {
         running = n
         let r = await Benchmarks.run(n)

@@ -1,7 +1,12 @@
+// Shared instrument-style building blocks used throughout the views: segmented bar meters, numeric readouts and the
+// titled Panel container, plus the off-screen rendering switch used by UIBench.
 import SwiftUI
 import FlightDeckCore
 
-/// Segmented VFD-style bar meter.
+/// Segmented VFD-style bar meter. `fraction` is 0…1; values above 1 light every segment. A nil fraction leaves every
+/// segment dark and overlays "UNAVAILABLE" (rather than showing an empty meter that would read as 0%).
+/// Unless `color` is given, each lit segment takes its colour from its position (`Palette.level`), so a full meter
+/// shades into warn/crit at the top end.
 struct VFDMeter: View {
     @Environment(\.palette) var p
     var fraction: Double?          // nil = unavailable (all segments dark, hatched)
@@ -14,6 +19,7 @@ struct VFDMeter: View {
         Canvas { ctx, size in
             let gap: CGFloat = 2
             let w = max((size.width - gap * CGFloat(segments - 1)) / CGFloat(segments), 1)
+            // Off segments are drawn first, then the lit ones in a layer so a single shadow filter gives the glow.
             let lit = fraction == nil ? 0 : Int(((fraction ?? 0) * Double(segments)).rounded())
             func rect(_ i: Int) -> Path { Path(roundedRect: CGRect(x: CGFloat(i) * (w + gap), y: 0, width: w, height: size.height), cornerRadius: 1.5) }
             for i in lit..<max(segments, lit) { ctx.fill(rect(i), with: .color(p.meterOff)) }
@@ -34,6 +40,7 @@ struct VFDMeter: View {
 }
 
 /// Glowing numeric readout. Shows "—" for unmeasured values; never a fake zero.
+/// `value` is pre-formatted by the caller; `unit` is hidden when the value is missing.
 struct Readout: View {
     @Environment(\.palette) var p
     var label: String
@@ -88,7 +95,7 @@ extension EnvironmentValues {
     var offscreen: Bool { get { self[OffscreenKey.self] } set { self[OffscreenKey.self] = newValue } }
 }
 
-/// A vertical ScrollView, except when rendering off-screen.
+/// A vertical ScrollView, except when rendering off-screen (ImageRenderer can't render scroll view contents).
 struct MaybeScroll<Content: View>: View {
     @Environment(\.offscreen) private var offscreen
     @ViewBuilder var content: Content

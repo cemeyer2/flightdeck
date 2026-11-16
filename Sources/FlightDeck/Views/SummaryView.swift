@@ -1,6 +1,10 @@
 import SwiftUI
 import FlightDeckCore
+// Summary destination, the app's front page: the annunciator panel, the diagnosis banner (analyzer findings),
+// one card per subsystem with a short history graph, and the top process per resource. Everything is read from
+// `e.current` / `e.series`, so the page also replays recordings.
 
+/// Wrapped in MaybeScroll so UIBench can render it off-screen (a ScrollView renders empty there).
 struct SummaryView: View {
     @EnvironmentObject var e: Engine
     @Environment(\.palette) var p
@@ -21,11 +25,14 @@ struct SummaryView: View {
                                 detail: s.map { "pressure " + ($0.memory.pressure.value.map { Fmt.pct($0) } ?? "—") + " · swap " + ($0.memory.swapUsed.value.map { Fmt.bytes($0) } ?? "—") },
                                 traces: [GraphTrace(name: "mem", values: e.series { Double($0.memory.used) / Double(max($0.memory.total, 1)) * 100 }, color: p.accent),
                                          GraphTrace(name: "pressure", values: e.series { $0.memory.pressure.value }, color: p.accent2, fill: false)], maxValue: 100)
+                    // Disk, Network and Energy have no natural 0–100% scale, so they show no meter; the value is "—"
+                    // unless both directions were measured, rather than adding a known half to an unknown one.
                     SummaryCard(title: "Disk", value: s?.disk.readBps.value.flatMap { r in s?.disk.writeBps.value.map { Fmt.rate(r + $0) } },
                                 fraction: nil, showMeter: false,
                                 detail: s.map { "R " + ($0.disk.readBps.value.map(Fmt.rate) ?? "—") + " · W " + ($0.disk.writeBps.value.map(Fmt.rate) ?? "—") },
                                 traces: [GraphTrace(name: "r", values: e.series { $0.disk.readBps.value }, color: p.accent),
                                          GraphTrace(name: "w", values: e.series { $0.disk.writeBps.value }, color: p.accent2)], minHeadroom: 1_048_576)
+                    // Network is shown in bits/s (as ISPs quote it); the detail line and graph stay in bytes/s.
                     SummaryCard(title: "Network", value: s?.network.inBps.value.flatMap { i in s?.network.outBps.value.map { Fmt.bits(i + $0) } },
                                 fraction: nil, showMeter: false,
                                 detail: s.map { "↓ " + ($0.network.inBps.value.map(Fmt.rate) ?? "—") + " · ↑ " + ($0.network.outBps.value.map(Fmt.rate) ?? "—") },
@@ -35,6 +42,7 @@ struct SummaryView: View {
                                 fraction: nil, showMeter: false,
                                 detail: s.map { pw in pw.power.powerSource + (pw.power.battery.map { String(format: " · battery %.0f%%", $0.percent) } ?? "") },
                                 traces: [GraphTrace(name: "w", values: e.series { $0.power.systemWatts.value }, color: p.accent)], minHeadroom: 10)
+                    // Hottest sensor on a 0–110 °C scale, matching the Thermals tab graph.
                     SummaryCard(title: "Thermals", value: s?.power.hottest.value.map { String(format: "%.0f °C", $0) },
                                 fraction: s?.power.hottest.value.map { $0 / 110 },
                                 detail: s.map { "thermal pressure: " + thermalName($0.power.thermalState) },
@@ -52,8 +60,11 @@ struct SummaryView: View {
     }
 }
 
+/// Display name for macOS thermal state 0–3 (ProcessInfo.ThermalState order); out-of-range values are clamped.
 func thermalName(_ s: Int) -> String { ["Nominal", "Fair", "Serious", "Critical"][min(max(s, 0), 3)] }
 
+/// One subsystem card: big current value ("—" when unmeasured), optional segmented meter, 70 pt history graph of
+/// Engine's rolling history (nil frames draw as gaps) and a one-line detail.
 struct SummaryCard: View {
     @Environment(\.palette) var p
     var title: String
@@ -78,6 +89,8 @@ struct SummaryCard: View {
     }
 }
 
+/// The single heaviest process for each resource in the current snapshot. Energy and network only consider processes
+/// where that metric was measured, so an unmeasured process never wins as "0 W".
 struct TopProcessesCard: View {
     @EnvironmentObject var e: Engine
     @Environment(\.palette) var p
@@ -106,6 +119,8 @@ struct TopProcessesCard: View {
 }
 
 /// Answers "why is my Mac slow?" from the current frame.
+/// Shows at most six findings (the rest via the Flight Log) on a background tinted by the worst severity. During replay
+/// `e.findings` are the findings recomputed for the replayed moment.
 struct DiagnosisBanner: View {
     @EnvironmentObject var e: Engine
     @Environment(\.palette) var p
@@ -134,10 +149,15 @@ struct DiagnosisBanner: View {
 }
 
 /// Cockpit annunciator: one labelled light per subsystem, lit by the worst finding in it.
+/// Each light matches findings by id prefix (the ids are assigned by the Analyzer and DiagnosticReports, e.g.
+/// "cpu:<app>", "leak:<app>", "report:Crash…"). A finding can light more than one lamp (e.g. "cpu-throttled" lights
+/// CPU and THERM). Caution/warning lights fill with their colour; info only tints. Clicking goes to the first matching
+/// finding's destination, or the light's default page.
 struct AnnunciatorPanel: View {
     @EnvironmentObject var e: Engine
     @Environment(\.palette) var p
 
+    // (label, finding-id prefixes, default navigation target as a Destination raw value or "Performance:<tab>")
     static let lights: [(label: String, match: [String], dest: String)] = [
         ("CPU", ["cpu:", "cpu-saturated", "unusual-cpu", "cpu-throttled", "wakeups:"], "Performance:CPU"),
         ("MEM", ["mem-pressure", "leak:"], "Performance:Memory"),

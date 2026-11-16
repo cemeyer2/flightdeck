@@ -1,16 +1,25 @@
+// Black box (always-on rolling recorder) tests: tiering into fine/coarse segment files, retrieval including frames not
+// yet flushed, gap preservation, retention and the size cap. Each test uses its own temporary directory.
 import XCTest
 @testable import FlightDeckCore
 
 final class BlackBoxTests: XCTestCase {
+    /// One real sample (taken after a warm-up sample so deltas exist), shared by the test files in this target as the
+    /// template for synthetic frames.
     static let base: Snapshot = { let s = Sampler(); _ = s.sample(); return s.sample() }()
+    /// A copy of `base` stamped at `t`.
     func frame(_ t: Date) -> Snapshot { var s = Self.base; s.time = t; return s }
 
+    /// A black box in a fresh temporary directory, with optional config tweaks.
     func makeBox(_ cfg: (inout BlackBox.Config) -> Void = { _ in }) -> BlackBox {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("bb-\(UUID().uuidString)")
         var c = BlackBox.Config(); cfg(&c)
         return BlackBox(dir: dir, config: c)
     }
 
+    /// With default config (60 s fine segments, 10 min coarse segments, one coarse frame per 10 s), 250 s of 1 Hz frames
+    /// produce four flushed fine segments, and reads must merge flushed and pending frames exactly, decimate the coarse
+    /// tier, honour [from, to] windows, trim processes to the configured count, and not duplicate frames after a flush.
     func testTiersSegmentsAndRetrieval() {
         let box = makeBox()
         let t0 = Date().addingTimeInterval(-300)
@@ -31,6 +40,8 @@ final class BlackBoxTests: XCTestCase {
         XCTAssertEqual(box.trace(.fine, from: t0)!.frames.count, 250, "flush must not duplicate or lose frames")
     }
 
+    /// A pause in sampling must stay a hole in the recording: no frames are interpolated across it, so replay and the
+    /// timeline can show it as a gap.
     func testGapIsPreserved() {
         let box = makeBox()
         let t0 = Date().addingTimeInterval(-200)
@@ -41,6 +52,8 @@ final class BlackBoxTests: XCTestCase {
         XCTAssertEqual(f[30].time.timeIntervalSince(f[29].time), 61, accuracy: 0.001)
     }
 
+    /// Pruning drops fine segments older than the fine retention, and the byte cap deletes oldest segments first (here,
+    /// all of them); `clear()` leaves nothing to read.
     func testRetentionAndSizeCap() {
         let box = makeBox { $0.fineRetention = 120; $0.coarseRetention = 100_000 }
         let now = Date()

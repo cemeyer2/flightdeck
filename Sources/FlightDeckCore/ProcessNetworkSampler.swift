@@ -1,5 +1,9 @@
 import Foundation
 
+// Per-process network rates for the process table. Sampler (Snapshot.swift) calls sample() every tick on the sampling
+// queue, gives every listed process a ProcessNetwork (0 when nettop saw no traffic for it), then calls retain(pids:).
+/// One process's network activity over the last interval. Rates are bytes/s; totals are bytes; `connections` is the
+/// number of flows nettop listed for it in this snapshot.
 public struct ProcessNetwork: Codable, Sendable, Hashable {
     public var inBps: Double
     public var outBps: Double
@@ -17,14 +21,22 @@ public struct ProcessNetwork: Codable, Sendable, Hashable {
 /// Limits: bytes a connection moves after the last snapshot before it closes, and connections that open
 /// and close entirely between two snapshots, are not counted.
 public final class ProcessNetworkSampler {
+    /// A flow is identified by its owning PID plus nettop's flow text ("tcp4 local<->remote"), which is unique per
+    /// connection while it lives. Substring keeps the parse allocation-free; it retains the whole output string.
     struct Key: Hashable { var pid: Int32; var flow: Substring }
+    /// Cumulative (in, out) bytes per flow from the previous snapshot.
     private var prev: [Key: (UInt64, UInt64)] = [:]
+    /// Running (in, out) bytes per PID since FlightDeck began observing; pruned by retain(pids:).
     private var totals: [Int32: (UInt64, UInt64)] = [:]
     private var lastTime: Date?
+    /// Set when nettop couldn't be run or produced unexpected output; nil after a good snapshot.
     public private(set) var lastError: String?
     public init() {}
 
     /// Parses `nettop -L 1 -x -n -J bytes_in,bytes_out` output into per-connection counters.
+    /// The CSV alternates a process line ("name.pid,in,out,") with that process's flow lines ("proto a<->b,in,out,").
+    /// The PID is taken after the last "." because process names may contain dots. Flow lines before any process line
+    /// are ignored, and duplicate flow texts for one PID are summed. -x prints raw byte counts; -n skips DNS lookups.
     static func parse(_ out: String) -> [Key: (UInt64, UInt64)] {
         var flows: [Key: (UInt64, UInt64)] = [:]
         var pid: Int32?
@@ -44,6 +56,8 @@ public final class ProcessNetworkSampler {
     }
 
     /// Returns nil when nettop is unavailable or still warming up (first snapshot has no deltas).
+    /// nettop always prints the ",bytes_in" header first; anything else (missing binary, timeout, sandbox denial) is a
+    /// failure. Dropping `prev` then makes the next good snapshot a fresh warm-up instead of diffing across a gap.
     public func sample() -> [Int32: ProcessNetwork]? {
         guard let out = Shell.run("/usr/bin/nettop", ["-L", "1", "-x", "-n", "-J", "bytes_in,bytes_out"], timeout: 3),
               out.hasPrefix(",bytes_in") else {
@@ -53,12 +67,14 @@ public final class ProcessNetworkSampler {
         lastError = nil
         let now = Date()
         let cur = Self.parse(out)
+        // The first good snapshot only primes `prev`: without a baseline there are no rates, so nil, never zeros.
         defer { prev = cur; lastTime = now }
         guard let lastTime, !prev.isEmpty else { return nil }
         let dt = max(now.timeIntervalSince(lastTime), 0.001)
         var delta: [Int32: (UInt64, UInt64, Int)] = [:]
         for (k, v) in cur {
             var d = v
+            // A flow absent from `prev` opened during this interval, so all of its bytes count toward this interval.
             if let p = prev[k] {
                 // counters only grow for a live connection; a smaller value means the tuple was reused
                 d = (v.0 >= p.0 ? v.0 - p.0 : v.0, v.1 >= p.1 ? v.1 - p.1 : v.1)
@@ -82,5 +98,7 @@ public final class ProcessNetworkSampler {
     }
 
     /// Drop totals for exited processes.
+    /// Totals are keyed by bare PID, so this runs every sample with the live PID set to stop a later process with a
+    /// reused PID from inheriting old totals.
     public func retain(pids: Set<Int32>) { totals = totals.filter { pids.contains($0.key) } }
 }

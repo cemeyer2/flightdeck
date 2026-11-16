@@ -1,18 +1,28 @@
+// The process table on the Processes screen: an NSOutlineView wrapped for SwiftUI. AppKit is used instead of a SwiftUI
+// List/Table because the table is refreshed every sample with hundreds of rows; the outline view can be updated in
+// place (rows keep their objects, expansion, selection and scroll position) at a fraction of the cost.
+// Three layouts: flat list (also used whenever a filter is typed), process tree (by parent PID), and app groups.
 import SwiftUI
 import AppKit
 import FlightDeckCore
 
+/// Reference-type row object. NSOutlineView tracks rows by object identity, so the same ProcItem is reused for a
+/// process across refreshes (looked up by ProcessIdentity) and only its sample `s` is replaced.
 final class ProcItem: NSObject {
     var s: ProcessSample
     var children: [ProcItem] = []
     init(_ s: ProcessSample) { self.s = s }
 }
 
+/// Table columns. The raw value is the column identifier, header title and sort-descriptor key all at once
+/// (and is persisted by column autosave), so renaming a case resets users' saved column layout.
 enum ProcColumn: String, CaseIterable, Equatable {
     case name = "Name", pid = "PID", cpu = "CPU %", gpu = "GPU %", memory = "Memory", disk = "Disk", netIn = "Net In", netOut = "Net Out", energy = "Energy", wakeups = "Wakeups", threads = "Threads", kind = "Kind", sleep = "Sleep", user = "User"
+    /// Initial width in points.
     var width: CGFloat { switch self { case .name: 240; case .user: 90; case .cpu, .memory, .disk, .netIn, .netOut: 84; default: 62 } }
     var hiddenByDefault: Bool { [.kind, .sleep, .threads, .wakeups].contains(self) }
     var numeric: Bool { self != .name && self != .user && self != .kind && self != .sleep }
+    /// Numeric sort key. Unavailable optional values sort as -1, i.e. below every measured value (including 0).
     func key(_ s: ProcessSample) -> Double {
         switch self {
         case .pid: Double(s.pid); case .cpu: s.cpu; case .memory: Double(s.memory)
@@ -21,6 +31,8 @@ enum ProcColumn: String, CaseIterable, Equatable {
         case .wakeups: s.wakeups; case .threads: Double(s.threads); case .gpu: s.gpu ?? -1; default: 0
         }
     }
+    /// Cell text. "—" means unavailable (e.g. `restricted`: owned by another user, so the sampler can't read it without
+    /// root) and is drawn dimmed; a measured zero is shown as "0". Group rows (negative PIDs) show no PID.
     func text(_ s: ProcessSample) -> String {
         switch self {
         case .name: s.notResponding == true ? "\(s.name) (Not Responding)" : s.name
@@ -42,6 +54,7 @@ enum ProcColumn: String, CaseIterable, Equatable {
 }
 
 /// AppKit outline view: stable row objects, preserved expansion/selection, cheap per-second refresh.
+/// Inputs are plain values from ProcessesView; `frameTime` (the snapshot's time) is what signals "new data".
 struct ProcessOutline: NSViewRepresentable {
     var frameTime: Date?
     var processes: [ProcessSample]
@@ -62,12 +75,14 @@ struct ProcessOutline: NSViewRepresentable {
         ov.intercellSpacing = NSSize(width: 6, height: 2)
         ov.rowHeight = 20
         ov.allowsMultipleSelection = false
+        // Expansion is tracked by the coordinator by ProcessIdentity (row objects don't survive relaunch).
         ov.autosaveExpandedItems = false
         // The last column absorbs spare width; columns beyond the window scroll horizontally instead of being cut off.
         ov.columnAutoresizingStyle = .lastColumnOnlyAutoresizingStyle
         for c in ProcColumn.allCases {
             let col = NSTableColumn(identifier: .init(c.rawValue))
             col.title = c.rawValue; col.width = c.width; col.minWidth = 40
+            // Numeric columns sort descending on first click (biggest first); text columns ascending.
             col.sortDescriptorPrototype = NSSortDescriptor(key: c.rawValue, ascending: !c.numeric)
             if c.numeric { col.headerCell.alignment = .right }
             if c == .netIn || c == .netOut {
@@ -84,6 +99,7 @@ struct ProcessOutline: NSViewRepresentable {
         ov.headerView?.menu = headerMenu
         ov.dataSource = context.coordinator
         ov.delegate = context.coordinator
+        // The row context menu is built on demand in menuNeedsUpdate (from the `menu` closure), for the clicked row.
         ov.menu = NSMenu(); ov.menu?.delegate = context.coordinator
         ov.target = context.coordinator
         ov.doubleAction = #selector(Coordinator.doubleClicked(_:))
@@ -92,9 +108,13 @@ struct ProcessOutline: NSViewRepresentable {
         return sv
     }
 
+    /// SwiftUI calls this on every re-evaluation of ProcessesView. A rebuild only happens when the cheap `key` changes
+    /// (new sample, layout mode, filter, theme); otherwise only a selection change is applied.
     func updateNSView(_ sv: NSScrollView, context: Context) {
         let c = context.coordinator
         let key = "\(frameTime?.timeIntervalSince1970 ?? 0)|\(tree)|\(byApp)|\(filter)|\(processes.count)|\(palette.id)"
+        // Compares the previous binding with the new one. Both read the same underlying state, so this can be false even
+        // when the selection did change; the selection is in any case re-applied at the end of every rebuild.
         let selChanged = c.parent.selection != selection
         c.parent = self
         // Don't rebuild a table nobody can see (window hidden, minimised or fully covered); catch up when visible.
@@ -102,22 +122,36 @@ struct ProcessOutline: NSViewRepresentable {
         if key != c.lastKey && visible { c.lastKey = key; c.rebuild() } else if selChanged { c.applySelection() }
     }
 
+    /// Owns the row model and acts as data source, delegate, target for double-click, and delegate of both menus.
+    /// All on the main thread.
     final class Coordinator: NSObject, NSOutlineViewDataSource, NSOutlineViewDelegate, NSMenuDelegate {
         var parent: ProcessOutline
         weak var outline: NSOutlineView?
+        /// Every row currently in the model (real processes and app group rows), by identity.
         var items: [ProcessIdentity: ProcItem] = [:]
+        /// Top-level rows in display order; children hang off `ProcItem.children`.
         var roots: [ProcItem] = []
+        /// User-expanded rows, by identity, so expansion survives full reloads and re-sorts. Programmatic changes are
+        /// ignored via `updating`.
         var expanded: Set<ProcessIdentity> = []
+        /// True while we change the outline view ourselves, so delegate callbacks don't feed back into `selection` or
+        /// `expanded`.
         var updating = false
+        /// See `ProcessOutline.updateNSView`.
         var lastKey = ""
+        /// Sort in effect at the last rebuild; a different sort forces a full reload rather than a long series of moves.
         var lastSort: (ProcColumn, Bool) = (.cpu, false)
         init(_ p: ProcessOutline) { parent = p }
 
         /// Stable synthetic identities for app group rows (negative PIDs never collide with real ones).
+        /// The same app always maps to the same negative PID for the coordinator's lifetime, so a group row keeps its
+        /// identity (and expansion/selection) across refreshes. Start time 0 marks it as synthetic; callers check
+        /// `pid > 0` before inspecting or signalling a row.
         var groupIDs: [String: Int32] = [:]
         var groupItems: [ProcessIdentity: ProcItem] = [:]
         /// Parent of every nested row at the last rebuild, to detect re-parenting.
         var lastParents: [ProcessIdentity: ProcessIdentity] = [:]
+        /// Identities present at the last rebuild (to tell "moved" from "new").
         var oldIDs: Set<ProcessIdentity> = []
         func groupIdentity(_ key: String) -> ProcessIdentity {
             if groupIDs[key] == nil { groupIDs[key] = -Int32(groupIDs.count + 1) }
@@ -125,6 +159,9 @@ struct ProcessOutline: NSViewRepresentable {
         }
 
         /// One row per app summing its processes; the processes become its children.
+        /// Apps with a single process aren't grouped: the process itself becomes the root row. The group row is a copy of
+        /// the first member's sample with summed metrics; optional metrics (energy, GPU, network) stay nil unless at
+        /// least one member reported them, so a group never shows an invented 0. The caller sorts the result.
         func appGroups(_ all: [ProcItem]) -> [ProcItem] {
             var buckets: [String: [ProcItem]] = [:]
             var order: [String] = []
@@ -138,7 +175,10 @@ struct ProcessOutline: NSViewRepresentable {
                 guard members.count > 1 else { return members[0] }
                 var g = members[0].s
                 g.identity = groupIdentity(k)
+                // Note: groupKeys on a single process skips the name recovery done for the whole list, so a restricted
+                // first member can give the group its process name instead of the app name.
                 g.name = "\(AppUsage.groupKeys([members[0].s]).first!.name) (\(members.count))"
+                // A trailing slash after the bundle path lets the icon lookup (which searches for ".app/") find the app icon.
                 g.path = k.hasPrefix("proc:") ? g.path : k + "/"
                 g.ppid = 0
                 g.cpu = members.reduce(0) { $0 + $1.s.cpu }
@@ -155,6 +195,7 @@ struct ProcessOutline: NSViewRepresentable {
                                                              connections: n.reduce(0) { $0 + $1.connections })
                 g.restricted = members.allSatisfy(\.s.restricted)
                 g.notResponding = members.contains { $0.s.notResponding == true } ? true : nil
+                // Reuse the group's ProcItem so NSOutlineView sees the same row object.
                 let item = groupItems[g.identity] ?? ProcItem(g)
                 item.s = g; item.children = sorted(members)
                 groupItems[g.identity] = item; items[g.identity] = item
@@ -169,6 +210,7 @@ struct ProcessOutline: NSViewRepresentable {
             parent.onOpen?(it.s)
         }
 
+        /// Mirrors `parent.selection` into the outline view (deselecting if that process is gone or not displayed).
         func applySelection() {
             guard let ov = outline else { return }
             updating = true; defer { updating = false }
@@ -179,11 +221,14 @@ struct ProcessOutline: NSViewRepresentable {
             ov.deselectAll(nil)
         }
 
+        /// Current sort column and direction from the outline view's sort descriptors (CPU descending if none).
         func sortKey() -> (ProcColumn, Bool) {
             let d = outline?.sortDescriptors.first
             return (ProcColumn(rawValue: d?.key ?? "") ?? .cpu, d?.ascending ?? false)
         }
 
+        /// Sorts rows by the current column; ties break by PID so the order is stable between refreshes (otherwise equal
+        /// rows would swap places every second).
         func sorted(_ a: [ProcItem]) -> [ProcItem] {
             let (col, asc) = sortKey()
             if !col.numeric {
@@ -196,18 +241,25 @@ struct ProcessOutline: NSViewRepresentable {
             }
         }
 
+        /// Rebuilds the row model from `parent.processes` and brings the outline view up to date: a full `reloadData` when
+        /// the sort changed, the table is empty, or any row changed parent; otherwise an incremental structural sync
+        /// followed by a reload of the visible cells' contents.
         func rebuild() {
             guard let ov = outline else { return }
             updating = true; defer { updating = false }
+            // Snapshot the old structure first: `sync` needs each item's previous children, and children are reset below.
             let oldRoots = roots
             var oldChildren: [ObjectIdentifier: [ProcItem]] = [:]
             for it in items.values where !it.children.isEmpty { oldChildren[ObjectIdentifier(it)] = it.children }
             var next: [ProcessIdentity: ProcItem] = [:]
+            // Reuse each process's row object (by identity, so a recycled PID gets a new row), refresh its sample, and
+            // clear its children; they are rebuilt below for the current layout.
             for s in parent.processes {
                 let it = items[s.identity] ?? ProcItem(s)
                 it.s = s; it.children = []; next[s.identity] = it
             }
             items = next
+            // Layout: app groups (only without a filter), flat (filter typed or list mode), otherwise the process tree.
             let f = parent.filter.trimmingCharacters(in: .whitespaces).lowercased()
             if f.isEmpty && parent.byApp {
                 roots = sorted(appGroups(Array(next.values)))
@@ -215,6 +267,8 @@ struct ProcessOutline: NSViewRepresentable {
                 let q = ProcessQuery(f)
                 roots = sorted(next.values.filter { q.isEmpty || q.matches($0.s) })
             } else {
+                // Tree by parent PID. Processes whose parent is launchd (1) or the kernel, or isn't in this sample, are roots.
+                // ppid is a bare PID, so parent lookup is by PID rather than identity.
                 let byPID = Dictionary(next.values.map { ($0.s.pid, $0) }, uniquingKeysWith: { a, _ in a })
                 var r: [ProcItem] = []
                 for it in next.values {
@@ -225,6 +279,8 @@ struct ProcessOutline: NSViewRepresentable {
             }
             // Incremental sync (cheap: reuses cells, animates moves) assumes rows keep their parent. When any row
             // changed parent (e.g. a process joins a new app group, or is re-parented to launchd), reload instead.
+            // A row counts as re-parented if (a) it had a different parent last time, (b) it was a root last time and is
+            // now nested, or (c) it was nested and is now a root (or hidden) while still existing. New rows don't count.
             var parents: [ProcessIdentity: ProcessIdentity] = [:]
             func walk(_ items: [ProcItem], _ parentID: ProcessIdentity?) {
                 for it in items { if let parentID { parents[it.s.identity] = parentID }; walk(it.children, it.s.identity) }
@@ -235,32 +291,43 @@ struct ProcessOutline: NSViewRepresentable {
             lastParents = parents; oldIDs = Set(items.keys)
             if lastSort != sortKey() || ov.numberOfRows == 0 || reparented {
                 ov.reloadData()
+                // reloadData collapses everything; restore the user's expansions (ignored by the expand callbacks while
+                // `updating`, so `expanded` isn't disturbed).
                 for id in expanded { if let it = items[id] { ov.expandItem(it) } }
                 lastSort = sortKey()
             } else {
                 // No animation: rows re-sort every second, and animated moves both overlap visually and cost a
-                // full layout pass per frame.
+                // full layout pass per frame. Duration 0 plus empty animation options on every insert/remove/move make the
+                // changes take effect immediately.
                 NSAnimationContext.runAnimationGroup { ctx in
                     ctx.duration = 0; ctx.allowsImplicitAnimation = false
                     ov.beginUpdates()
                     sync(ov, parent: nil, old: oldRoots, new: roots, oldChildren: oldChildren)
                     ov.endUpdates()
                 }
+                // sync only fixes structure; values change every sample, so refresh the cells actually on screen.
                 let visible = ov.rows(in: ov.visibleRect)
                 if visible.length > 0 {
                     ov.reloadData(forRowIndexes: IndexSet(integersIn: visible.location..<(visible.location + visible.length)),
                                   columnIndexes: IndexSet(integersIn: 0..<ov.numberOfColumns))
                 }
             }
+            // applySelection sets and clears `updating` itself, so it is cleared first and set back afterwards; the defer at
+            // the top then clears it for good.
             updating = false; applySelection(); updating = true
         }
 
         /// Applies the minimal remove/move/insert operations turning `old` into `new` under `parent`.
+        /// Removals happen first (indices refer to `old`), then a single pass places each new row at its index by moving
+        /// or inserting, while `cur` mirrors what the outline view now holds. Then recurses into expanded rows only:
+        /// NSOutlineView hasn't loaded children of collapsed rows, so for those it's enough to reload the row when it
+        /// gains or loses children (to update its disclosure triangle).
         func sync(_ ov: NSOutlineView, parent: ProcItem?, old: [ProcItem], new: [ProcItem], oldChildren: [ObjectIdentifier: [ProcItem]]) {
             let newSet = Set(new.map(ObjectIdentifier.init))
             let removed = IndexSet(old.indices.filter { !newSet.contains(ObjectIdentifier(old[$0])) })
             if !removed.isEmpty { ov.removeItems(at: removed, inParent: parent, withAnimation: []) }
             var cur = old.enumerated().filter { !removed.contains($0.offset) }.map(\.element)
+            // Note: `pos` is filled but not used below.
             var pos: [ObjectIdentifier: Int] = [:]
             for (i, it) in cur.enumerated() { pos[ObjectIdentifier(it)] = i }
             for (i, it) in new.enumerated() {
@@ -284,21 +351,26 @@ struct ProcessOutline: NSViewRepresentable {
         }
 
         // data source
+        // `nil` item means the root; children come straight from the model built in rebuild().
         func outlineView(_ ov: NSOutlineView, numberOfChildrenOfItem item: Any?) -> Int { (item as? ProcItem)?.children.count ?? roots.count }
         func outlineView(_ ov: NSOutlineView, child index: Int, ofItem item: Any?) -> Any { (item as? ProcItem)?.children[index] ?? roots[index] }
         func outlineView(_ ov: NSOutlineView, isItemExpandable item: Any) -> Bool { !((item as? ProcItem)?.children.isEmpty ?? true) }
+        // Clicking a column header changes the sort descriptors; rebuild immediately (a sort change forces a full reload).
         func outlineView(_ ov: NSOutlineView, sortDescriptorsDidChange old: [NSSortDescriptor]) { rebuild() }
         func outlineViewItemDidExpand(_ n: Notification) { if !updating, let it = n.userInfo?["NSObject"] as? ProcItem { expanded.insert(it.s.identity) } }
         func outlineViewItemDidCollapse(_ n: Notification) { if !updating, let it = n.userInfo?["NSObject"] as? ProcItem { expanded.remove(it.s.identity) } }
         func outlineViewSelectionDidChange(_ n: Notification) {
             guard !updating, let ov = outline else { return }
             let it = ov.item(atRow: ov.selectedRow) as? ProcItem
+            // Deferred: the outline view can call this during a SwiftUI update, and writing a binding then is not allowed.
             DispatchQueue.main.async { self.parent.selection = it?.s.identity }
         }
 
+        /// Cells are recycled via makeView(withIdentifier:); the CPU column uses a bar cell, every other column a FrameCell.
         func outlineView(_ ov: NSOutlineView, viewFor col: NSTableColumn?, item: Any) -> NSView? {
             guard let col, let c = ProcColumn(rawValue: col.identifier.rawValue), let it = item as? ProcItem else { return nil }
             let font = Self.cellFont
+                // CPU is % of one core, so the bar is full at 100% (one core) or more.
             if c == .cpu {
                 let v = (ov.makeView(withIdentifier: col.identifier, owner: nil) as? BarCellView) ?? BarCellView()
                 v.identifier = col.identifier
@@ -330,12 +402,15 @@ struct ProcessOutline: NSViewRepresentable {
         }
 
         static let gear = NSImage(systemSymbolName: "gearshape", accessibilityDescription: nil)
+        /// App processes get their bundle icon (cached); everything else a gear.
         func icon(for path: String) -> NSImage? {
             if let r = path.range(of: ".app/") { return IconCache.icon(String(path[..<r.lowerBound]) + ".app") }
             return Self.gear
         }
 
         // context menu
+        // One delegate serves two menus: the header menu (column visibility, persisted by column autosave) and the row
+        // menu, which is filled for the clicked row from the SwiftUI side's `menu` closure.
         func menuNeedsUpdate(_ menu: NSMenu) {
             menu.removeAllItems()
             if menu.identifier?.rawValue == "header", let ov = outline {
@@ -349,12 +424,14 @@ struct ProcessOutline: NSViewRepresentable {
             }
             guard let ov = outline, ov.clickedRow >= 0, let it = ov.item(atRow: ov.clickedRow) as? ProcItem else { return }
             let m = parent.menu(it.s)
+            // An NSMenuItem can belong to only one menu, so items are detached from the built menu before being added.
             for i in m.items { m.removeItem(i); menu.addItem(i) }
         }
     }
 }
 
 /// CPU cell: a CALayer bar behind a right-aligned label (no custom drawing).
+/// Implicit layer animations are disabled, so the bar jumps to its new width instead of animating on every refresh.
 final class BarCellView: NSTableCellView {
     private let bar = CALayer()
     var fraction: Double = 0 { didSet { if fraction != oldValue { needsLayout = true } } }
@@ -380,7 +457,8 @@ final class BarCellView: NSTableCellView {
     }
 }
 
-/// NSMenuItem that runs a closure.
+/// NSMenuItem that runs a closure. The item is its own target, so it works in menus built outside a responder chain
+/// (Dock menu, outline header and row menus).
 final class ClosureMenuItem: NSMenuItem {
     private let action_: () -> Void
     init(_ title: String, enabled: Bool = true, _ action: @escaping () -> Void) {
@@ -393,6 +471,7 @@ final class ClosureMenuItem: NSMenuItem {
 }
 
 /// Cell laid out with frames (no Auto Layout) for cheap per-second refresh.
+/// Optional 16 pt icon at the left, then the label, both vertically centred.
 final class FrameCell: NSTableCellView {
     override func layout() {
         super.layout()

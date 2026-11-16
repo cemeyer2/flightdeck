@@ -1,8 +1,11 @@
+// Offline rendering of Dock artwork via command-line flags (checked first in `FlightDeckApp.init`). Uses the same
+// DockTileView that draws the live Dock tile, so the static icon and previews match what users see.
 import AppKit
 
 /// `FlightDeck --render-iconset <dir>` writes the static app icon PNGs (used by scripts/bundle.sh).
 /// `FlightDeck --render-dock-previews <dir>` writes one PNG per live Dock mode with demo data.
 enum IconRenderer {
+    /// Runs and exits if one of the render flags is present; otherwise returns and the app launches normally.
     static func handleCommandLine() {
         let args = CommandLine.arguments
         if let i = args.firstIndex(of: "--render-iconset"), i + 1 < args.count {
@@ -13,6 +16,7 @@ enum IconRenderer {
         }
     }
 
+    /// Draws `view` into a square `px`×`px` RGBA bitmap (resolution independent: DockTileView scales to its bounds).
     static func png(_ view: DockTileView, px: Int) -> Data? {
         guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: px, pixelsHigh: px, bitsPerSample: 8, samplesPerPixel: 4,
                                          hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0) else { return nil }
@@ -24,6 +28,7 @@ enum IconRenderer {
         return rep.representation(using: .png, properties: [:])
     }
 
+    /// Writes the 10 PNGs an .iconset needs (16–512 pt at 1x and 2x); `iconutil` turns the folder into the .icns.
     static func renderIconset(to dir: String) {
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         let v = DockTileView(); v.mode = .appIcon
@@ -35,6 +40,8 @@ enum IconRenderer {
         }
     }
 
+    /// One 256 px PNG per theme × Dock mode, filled with synthetic data: a CPU wave with a two-sample gap (to show
+    /// how gaps are drawn), two E-cores and eight P-cores, 70% memory, 58 °C and the recording badge.
     static func renderPreviews(to dir: String) {
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         var d = DockData()

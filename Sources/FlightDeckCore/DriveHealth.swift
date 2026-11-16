@@ -1,6 +1,8 @@
 import Foundation
 import IOKit
 
+// Read every 5 minutes by Sampler (Snapshot.drives) and shown in the storage views; Analyzer can raise findings from
+// `healthy`/`warnings`. Values are decoded straight from the 512-byte NVMe "SMART / Health Information" log page (02h).
 /// NVMe SMART / health log of internal SSDs via Apple's NVMeSMARTLib plugin (no root needed).
 public struct DriveHealth: Codable, Sendable, Hashable, Identifiable {
     public var id: String { serial ?? model }
@@ -11,15 +13,19 @@ public struct DriveHealth: Codable, Sendable, Hashable, Identifiable {
     public var availableSpare: Int         // %
     public var spareThreshold: Int         // %
     public var percentUsed: Int            // wear estimate, can exceed 100
+    /// Host bytes read / written over the drive's life. Double because the NVMe counters are 128-bit.
     public var bytesRead: Double
     public var bytesWritten: Double
+    // Lifetime counters from the log page; they persist across reboots and only reset if the drive is replaced.
     public var powerOnHours: UInt64
     public var powerCycles: UInt64
     public var unsafeShutdowns: UInt64
     public var mediaErrors: UInt64
     public var errorLogEntries: UInt64
 
+    /// Overall verdict: no critical-warning bits, no media errors, spare at or above threshold, and under 90% wear.
     public var healthy: Bool { criticalWarning == 0 && mediaErrors == 0 && availableSpare >= spareThreshold && percentUsed < 90 }
+    /// Human-readable reasons behind `healthy` being false; the bit meanings are from the NVMe spec's Critical Warning byte.
     public var warnings: [String] {
         var w: [String] = []
         if criticalWarning & 0x01 != 0 { w.append("spare capacity below threshold") }
@@ -33,6 +39,10 @@ public struct DriveHealth: Codable, Sendable, Hashable, Identifiable {
     }
 }
 
+/// Mirrors the C IONVMeSMARTInterface vtable (IOKit's NVMeSMARTLib plugin): the IUnknown "guts" (reserved,
+/// QueryInterface, AddRef, Release), then version/revision and SMARTReadData. Field order and types must match the C
+/// header exactly; after the two UInt16s the next function pointer is 8-byte aligned in both languages, so the implicit
+/// 4 bytes of padding agree. Entries after SMARTReadData are omitted since only the struct's prefix is ever read.
 private struct SMARTVTable {
     var reserved: UnsafeMutableRawPointer?
     var QueryInterface: @convention(c) (UnsafeMutableRawPointer?, REFIID, UnsafeMutablePointer<LPVOID?>?) -> HRESULT
@@ -43,12 +53,15 @@ private struct SMARTVTable {
     var SMARTReadData: @convention(c) (UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> IOReturn
 }
 
+/// Enumerates NVMe drives and reads their SMART log through the NVMeSMARTLib CFPlugIn. No root needed; drives the
+/// plugin can't open are skipped, and the result is [] on Macs without NVMe storage (e.g. SATA-based Intel Macs).
 public enum DriveHealthReader {
     // kIONVMeSMARTUserClientTypeID, kIONVMeSMARTInterfaceID, kIOCFPlugInInterfaceID
     static let typeID = CFUUIDGetConstantUUIDWithBytes(nil, 0xAA, 0x0F, 0xA6, 0xF9, 0xC2, 0xD6, 0x45, 0x7F, 0xB1, 0x0B, 0x59, 0xA1, 0x32, 0x53, 0x29, 0x2F)
     static let interfaceID = CFUUIDGetConstantUUIDWithBytes(nil, 0xCC, 0xD1, 0xDB, 0x19, 0xFD, 0x9A, 0x4D, 0xAF, 0xBF, 0x95, 0x12, 0x45, 0x4B, 0x23, 0x0A, 0xB6)
     static let plugInID = CFUUIDGetConstantUUIDWithBytes(nil, 0xC2, 0x44, 0xE8, 0x58, 0x10, 0x9C, 0x11, 0xD4, 0x91, 0xD4, 0x00, 0x50, 0xE4, 0xC6, 0x42, 0x6F)
 
+    /// Blocking IOKit calls; Sampler calls it from the sampling queue only every 5 minutes.
     public static func read() -> [DriveHealth] {
         var iter: io_iterator_t = 0
         guard IOServiceGetMatchingServices(kIOMainPortDefault, IOServiceMatching("IONVMeBlockStorageDevice"), &iter) == KERN_SUCCESS else { return [] }
@@ -59,6 +72,10 @@ public enum DriveHealthReader {
             guard (IORegistryEntryCreateCFProperty(svc, "NVMe SMART Capable" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? Bool) == true,
                   let log = smartLog(svc) else { continue }
             let chars = IORegistryEntryCreateCFProperty(svc, "Device Characteristics" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? [String: Any]
+            // Log page fields are little-endian. Offsets: 0 critical warning, 1-2 composite temperature (kelvin), 3 available
+            // spare %, 4 spare threshold %, 5 percentage used, 32/48 data units read/written (128-bit), 112 power cycles,
+            // 128 power-on hours, 144 unsafe shutdowns, 160 media errors, 176 error-log entries (the 128-bit counters are read as
+            // their low 64 bits except where u128 is used).
             func u64(_ o: Int) -> UInt64 { (0..<8).reduce(0) { $0 | UInt64(log[o + $1]) << (8 * UInt64($1)) } }
             func u128(_ o: Int) -> Double { Double(u64(o)) + Double(u64(o + 8)) * 18_446_744_073_709_551_616.0 }
             let kelvin = Int(log[1]) | Int(log[2]) << 8
@@ -74,6 +91,8 @@ public enum DriveHealthReader {
         return out
     }
 
+    /// The CFPlugIn dance: create the plugin for the service, QueryInterface for the SMART interface, call SMARTReadData
+    /// into a 512-byte buffer, then Release the interface and destroy the plugin. nil on any failure.
     static func smartLog(_ svc: io_service_t) -> [UInt8]? {
         var plugin: UnsafeMutablePointer<UnsafeMutablePointer<IOCFPlugInInterface>?>?
         var score: Int32 = 0

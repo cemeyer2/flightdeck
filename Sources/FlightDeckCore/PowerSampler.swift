@@ -2,7 +2,13 @@ import Foundation
 import IOKit
 import IOKit.ps
 
+// Power, battery and thermal readings for each snapshot. Battery data comes from the AppleSmartBattery IORegistry node
+// (public, no root), the power source from IOPowerSources, temperatures from the private IOHIDEventSystemClient API
+// and fans from SMC.swift. PowerSampler is called once per tick on the sampling queue.
+/// AppleSmartBattery state. Optional fields are nil when this Mac's battery firmware doesn't publish the key.
 public struct BatteryInfo: Codable, Sendable {
+    /// Charge in %. On Apple silicon CurrentCapacity/MaxCapacity are already percentages (MaxCapacity 100); on Intel they
+    /// are mAh. The ratio works for both.
     public var percent: Double
     public var isCharging: Bool
     public var externalConnected: Bool
@@ -13,13 +19,17 @@ public struct BatteryInfo: Codable, Sendable {
     public var voltage: Double?       // V
     public var amperage: Double?      // A (negative = discharging)
     public var timeRemaining: Int?    // minutes
+    /// Rated wattage of the connected power adapter, if one is connected and reports it.
     public var adapterWatts: Int?
+    /// Full-charge capacity as % of design capacity (the "Maximum Capacity" figure); nil if either is missing.
     public var health: Double? {
         guard let m = maxCapacity, let d = designCapacity, d > 0 else { return nil }
         return Double(m) / Double(d) * 100
     }
 }
 
+/// One power/thermal reading. Watts are Measured: unavailable on desktops without a battery or when the firmware
+/// doesn't report system load, never 0.
 public struct PowerSample: Codable, Sendable {
     public var batteryWatts: Measured<Double>   // + charging, - draining
     public var systemWatts: Measured<Double>
@@ -27,18 +37,22 @@ public struct PowerSample: Codable, Sendable {
     public var powerSource: String
     public var lowPowerMode: Bool
     public var thermalState: Int      // ProcessInfo.ThermalState rawValue
+    /// HID temperature sensors, refreshed only every `sensorInterval` seconds (between reads the last values repeat).
     public var temperatures: [SensorReading]
+    /// Highest sensor temperature in °C; unavailable when no sensors could be read.
     public var hottest: Measured<Double>
     /// Fan speeds from the SMC (empty on fanless Macs; nil in traces recorded before fans were read).
     public var fans: [FanReading]? = nil
 }
 
+/// One named temperature sensor in °C.
 public struct SensorReading: Codable, Sendable, Identifiable, Hashable {
     public var id: String { name }
     public var name: String
     public var celsius: Double
 }
 
+/// Stateful (sensor cache); confined to the sampling queue.
 public final class PowerSampler {
     private let thermal = ThermalSensors()
     /// Reading every HID sensor costs ~70 ms, so sensors refresh on their own slower cadence.
@@ -51,6 +65,7 @@ public final class PowerSampler {
         var battery: BatteryInfo?
         var batteryW: Measured<Double> = .unavailable("no battery")
         var systemW: Measured<Double> = .unavailable("not reported by this Mac")
+        // Desktops have no AppleSmartBattery node, which leaves battery nil and both wattages unavailable.
         let svc = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("AppleSmartBattery"))
         if svc != 0 {
             defer { IOObjectRelease(svc) }
@@ -61,6 +76,10 @@ public final class PowerSampler {
                 let bd = d["BatteryData"] as? [String: Any] ?? [:]
                 func i(_ k: String) -> Int? { (d[k] as? NSNumber)?.intValue ?? (bd[k] as? NSNumber)?.intValue }
                 let cur = i("CurrentCapacity") ?? 0, mx = i("MaxCapacity") ?? 100
+                // Voltage is in mV. Amperage is in mA but published as an unsigned 64-bit two's-complement value, so it is
+                // reinterpreted as Int64 to recover the sign (negative = discharging). InstantAmperage is preferred over
+                // the averaged
+                // Amperage because it tracks load changes within one sample.
                 let volt = i("Voltage").map { Double($0) / 1000 }
                 let amp = (d["InstantAmperage"] as? NSNumber ?? d["Amperage"] as? NSNumber).map { Double(Int64(truncatingIfNeeded: $0.int64Value)) / 1000 }
                 let tr = i("TimeRemaining")
@@ -72,11 +91,16 @@ public final class PowerSampler {
                     // NominalChargeCapacity matches the "Maximum Capacity" macOS shows in Battery settings
                     maxCapacity: i("NominalChargeCapacity") ?? i("AppleRawMaxCapacity"),
                     designCapacity: i("DesignCapacity"),
+                    // Temperature is in hundredths of a degree C. TimeRemaining 65535 means "still calculating", reported as nil.
                     temperature: i("Temperature").map { Double($0) / 100 },
                     voltage: volt, amperage: amp,
                     timeRemaining: (tr ?? 65535) < 65535 ? tr : nil,
                     adapterWatts: (d["AdapterDetails"] as? [String: Any]).flatMap { ($0["Watts"] as? NSNumber)?.intValue })
+                // Battery power is V × A, signed like the amperage: positive while charging, negative while draining.
                 if let volt, let amp { batteryW = .value(volt * amp) }
+                // Whole-system power: Apple silicon laptops publish SystemLoad (mW) in PowerTelemetryData. Without it,
+                // while running
+                // on battery the system draw equals the battery's discharge power; on AC with no telemetry it stays unavailable.
                 if let tel = d["PowerTelemetryData"] as? [String: Any],
                    let sl = (tel["SystemLoad"] as? NSNumber)?.doubleValue, sl > 0 {
                     systemW = .value(sl / 1000)
@@ -85,6 +109,7 @@ public final class PowerSampler {
                 }
             }
         }
+        // IOPSCopyPowerSourcesInfo follows the Copy rule (retained); IOPSGetProvidingPowerSourceType follows the Get rule.
         var source = "Unknown"
         if let info = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
            let t = IOPSGetProvidingPowerSourceType(info)?.takeUnretainedValue() as String? {
@@ -104,6 +129,9 @@ public final class PowerSampler {
 }
 
 /// Reads temperature sensors via IOHIDEventSystemClient (resolved dynamically; unavailable if symbols missing).
+/// IOHIDEventSystemClient and friends are private IOKit SPI (no headers), so they are resolved with dlsym from IOKit
+/// and the client is typed as AnyObject (it is a CF type). Every reading degrades to an empty list if a symbol is
+/// missing. Not thread-safe; used only by PowerSampler on the sampling queue.
 final class ThermalSensors {
     typealias CreateFn = @convention(c) (CFAllocator?) -> Unmanaged<AnyObject>?
     typealias SetMatchingFn = @convention(c) (AnyObject, CFDictionary) -> Int32
@@ -128,10 +156,13 @@ final class ThermalSensors {
         copyEvent = sym("IOHIDServiceClientCopyEvent", CopyEventFn.self)
         getFloat = sym("IOHIDEventGetFloatValue", GetFloatFn.self)
         guard let c = create(kCFAllocatorDefault)?.takeRetainedValue() else { return }
+        // Usage page 0xff00 (Apple vendor) with usage 5 selects the temperature sensor services.
         _ = setMatching(c, ["PrimaryUsagePage": 0xff00, "PrimaryUsage": 5] as CFDictionary)
         client = c
     }
 
+    /// Matched sensor services and their "Product" names, enumerated once on first read and then reused, since the
+    /// per-read cost is dominated by event copies (sensors that appear later are not picked up).
     private var services: [(AnyObject, String)]?
 
     func read() -> [SensorReading] {
@@ -142,6 +173,9 @@ final class ThermalSensors {
         }
         var byName: [String: Double] = [:]
         for (s, name) in services ?? [] {
+            // 15 is kIOHIDEventTypeTemperature; event fields are addressed as (type << 16) | index, so 15 << 16 is the
+            // temperature level. Readings outside 0...150 °C are sensor errors/placeholders and dropped. Several services can
+            // share a Product name; the hottest one is kept.
             guard let ev = copyEvent(s, 15, 0, 0)?.takeRetainedValue() else { continue }
             let t = getFloat(ev, 15 << 16)
             if t > 0 && t < 150 { byName[name] = max(byName[name] ?? 0, t) }

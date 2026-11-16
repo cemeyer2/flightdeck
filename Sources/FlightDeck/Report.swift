@@ -1,13 +1,19 @@
+// The PDF "Flight Report" and the CSV/PDF export actions. Used from the Recorder menu (via the Engine extension below)
+// and by the CLI's `--report`. The report is a SwiftUI view rendered to a single PDF page with ImageRenderer.
 import SwiftUI
 import UniformTypeIdentifiers
 import FlightDeckCore
 
 /// One-page "flight report" for a trace: what the Mac did, the peaks, what went wrong and who was responsible.
+/// Always uses the light palette on white, whatever the app theme, because it's meant to be printed or shared.
 struct FlightReportView: View {
     let trace: Trace
     let stats: TraceStats
     let p = Palette.of(.light)
 
+    /// Reduces a metric to at most ~300 points by averaging consecutive frames (enough for a 540 pt wide graph).
+    /// Frames where the metric is unavailable are left out of the average; a chunk with no measured frames becomes nil
+    /// (a gap). Chunks are by frame index, not by time.
     func downsample(_ f: (Snapshot) -> Double?) -> [Double?] {
         let step = max(trace.frames.count / 300, 1)
         return stride(from: 0, to: trace.frames.count, by: step).map { i in
@@ -16,6 +22,7 @@ struct FlightReportView: View {
         }
     }
 
+    /// One stats table row: average, 95th percentile and peak, or "—" for a metric the trace never measured.
     func row(_ k: String, _ s: TraceStats.Stat?, _ fmt: (Double) -> String) -> some View {
         GridRow {
             Text(k).foregroundStyle(.secondary)
@@ -30,6 +37,7 @@ struct FlightReportView: View {
                 Spacer()
                 Text("FlightDeck").font(.system(size: 12, weight: .semibold, design: .monospaced)).foregroundStyle(.secondary)
             }
+            // Note: the OS version shown is that of the Mac generating the report, not necessarily the one recorded.
             Text("\(trace.host) · \(trace.model) · \(ProcessInfo.processInfo.operatingSystemVersionString)")
                 .font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary)
             Text("\(stats.start.formatted(date: .abbreviated, time: .standard)) – \(stats.end.formatted(date: .omitted, time: .standard)) · \(shortDuration(stats.end.timeIntervalSince(stats.start))) · \(stats.frames) samples")
@@ -98,6 +106,8 @@ struct FlightReportView: View {
         .environment(\.colorScheme, .light)
     }
 
+    /// Renders the report as a single US-Letter-width (612 pt) PDF page as tall as its content. Returns nil if
+    /// rendering produced nothing. Main actor because ImageRenderer is.
     @MainActor static func pdf(_ t: Trace) -> Data? {
         let r = ImageRenderer(content: FlightReportView(trace: t, stats: TraceStats.compute(t)))
         r.proposedSize = ProposedViewSize(width: 612, height: nil)
@@ -113,6 +123,8 @@ struct FlightReportView: View {
 
 extension Engine {
     /// What exports cover: the replayed trace, or the last hour of the black box when live.
+    /// Sets `lastError` and returns nil when the black box has nothing yet. Reads the black box directly (not via
+    /// `blackBoxQueue` as Engine's other black box reads do).
     func exportTrace() -> Trace? {
         if mode == .replay, let trace { return trace }
         let t = blackBox.trace(.fine, from: Date().addingTimeInterval(-3600))
@@ -120,6 +132,7 @@ extension Engine {
         return t
     }
 
+    /// Renders the report first, then asks where to save it and opens the saved PDF.
     func exportReport() {
         guard let t = exportTrace(), let pdf = FlightReportView.pdf(t) else { return }
         let panel = NSSavePanel(); panel.allowedContentTypes = [.pdf]
@@ -129,6 +142,7 @@ extension Engine {
         }
     }
 
+    /// System metrics (one row per sample) or per-process metrics (one row per process per sample), as CSV.
     func exportCSV(processes: Bool) {
         guard let t = exportTrace() else { return }
         let panel = NSSavePanel(); panel.allowedContentTypes = [.commaSeparatedText]

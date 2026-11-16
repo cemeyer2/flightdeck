@@ -1,8 +1,13 @@
 import SwiftUI
 import FlightDeckCore
 import Combine
+// Inventory destinations that list things on demand rather than every sample: System Info, Startup Apps, Users,
+// Services (launchd) and Connections. Each owns a `Loader` that runs a FlightDeckCore collector off the main thread
+// when the view appears, so none of this costs anything while the page isn't open.
 
 /// Loads data off the main thread and optionally refreshes it.
+/// Publishes the result on the main actor. `load()` is ignored while a load is already running, so repeated
+/// Refresh clicks or timer ticks never stack up concurrent collectors. `value` stays nil until the first load ends.
 @MainActor
 final class Loader<T: Sendable>: ObservableObject {
     @Published var value: T?
@@ -17,6 +22,7 @@ final class Loader<T: Sendable>: ObservableObject {
     }
 }
 
+/// The dim one-line description bar across the top of a table page, with trailing controls (e.g. Refresh).
 struct ViewHeader<Trailing: View>: View {
     @Environment(\.palette) var p
     var text: String
@@ -26,6 +32,8 @@ struct ViewHeader<Trailing: View>: View {
     }
 }
 
+/// System Info: hardware/OS facts from `SystemInfo.collect()` (sysctl, IORegistry), grouped into panels by section
+/// in the order the collector produced them. Keys with no value are omitted by the collector rather than shown empty.
 struct SystemInfoView: View {
     @Environment(\.palette) var p
     @StateObject var loader = Loader { SystemInfo.collect() }
@@ -49,6 +57,7 @@ struct SystemInfoView: View {
                 if loader.loading && items.isEmpty { ProgressView() }
                 HStack {
                     Spacer()
+                    // Tab-separated so the copy pastes cleanly into a spreadsheet.
                     Button("Copy All") {
                         let text = items.map { "\($0.section)\t\($0.key)\t\($0.value)" }.joined(separator: "\n")
                         NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string)
@@ -60,12 +69,15 @@ struct SystemInfoView: View {
     }
 }
 
+/// Startup Apps: launch agents/daemons from the user and system LaunchAgents/LaunchDaemons folders, with their
+/// loaded state, signer and whether the program they point at still exists ("orphaned" leftovers of removed apps).
 struct StartupView: View {
     @StateObject var loader = Loader { Launchd.startupItems() }
     @State private var selection: StartupItem.ID?
     @State private var sortOrder = [KeyPathComparator(\StartupItem.label)]
     var body: some View {
         VStack(spacing: 0) {
+            // Header counts: items not signed by Apple (signer known), unsigned programs, and orphans.
             let items = loader.value ?? []
             let orphans = items.filter(\.orphaned).count
             let unsigned = items.filter { $0.signer?.hasPrefix("Not signed") == true }.count
@@ -75,6 +87,7 @@ struct StartupView: View {
                           + (unsigned > 0 ? " · \(unsigned) unsigned" : "") + (orphans > 0 ? " · \(orphans) point to missing programs (leftovers from removed apps)" : ""))) {
                 Button("Refresh") { loader.load() }
             }
+            // Row IDs are plist paths, so the context menu's "Reveal in Finder" selects the plist itself.
             Table((loader.value ?? []).sorted(using: sortOrder), selection: $selection, sortOrder: $sortOrder) {
                 TableColumn("Name", value: \.label) { Text($0.label).lineLimit(1) }.width(min: 200, ideal: 280)
                 TableColumn("Kind", value: \.kind).width(160)
@@ -103,15 +116,20 @@ struct StartupView: View {
     }
 }
 
+/// Users: login sessions (utmpx, loaded once on appear) and per-user resource totals summed live from `e.current`.
+/// Processes of other users are usually `restricted` without root, so totals only include readable processes, and a
+/// user with none readable shows "—" instead of a misleading 0.
 struct UsersView: View {
     @EnvironmentObject var e: Engine
     @Environment(\.palette) var p
     @StateObject var loader = Loader { Connections.sessions() }
+    /// Per-user totals: `procs` is every process, `measured` the readable ones that the CPU/memory/energy sums cover.
     struct Agg: Identifiable { var id: String { user }; var user: String; var procs: Int; var measured: Int; var cpu: Double; var mem: UInt64; var energy: Double }
     var body: some View {
         let aggs: [Agg] = Dictionary(grouping: e.current?.processes ?? [], by: \.user).map { u, all in
             let ps = all.filter { !$0.restricted }
             return Agg(user: u, procs: all.count, measured: ps.count, cpu: ps.reduce(0) { $0 + $1.cpu }, mem: ps.reduce(0) { $0 + $1.memory }, energy: ps.reduce(0) { $0 + ($1.energyWatts ?? 0) })
+        // Users with nothing readable sort to the bottom rather than ranking as 0% CPU.
         }.sorted { ($0.measured > 0 ? $0.cpu : -1) > ($1.measured > 0 ? $1.cpu : -1) }
         ScrollView {
             VStack(spacing: 12) {
@@ -135,6 +153,7 @@ struct UsersView: View {
                                 let ok = a.measured > 0
                                 Text(a.user); Text(a.measured == a.procs ? "\(a.procs)" : "\(a.procs) (\(a.measured) readable)")
                                 Text(ok ? Fmt.pct(a.cpu) : "—")
+                                // Process CPU is % of one core, so the meter is scaled against all logical cores.
                                 VFDMeter(fraction: ok ? min(a.cpu / Double(100 * ProcessInfo.processInfo.activeProcessorCount), 1) : nil, segments: 20, height: 6).frame(width: 140)
                                 Text(ok ? Fmt.bytes(a.mem) : "—"); Text(ok ? String(format: "%.2f W", a.energy) : "—")
                             }.font(.system(size: 12, design: .monospaced))
@@ -147,6 +166,8 @@ struct UsersView: View {
     }
 }
 
+/// Services: the jobs `launchctl list` shows for the user's GUI domain, filterable, with PID, running state and last
+/// exit status (non-zero exits highlighted, often a crash-looping agent).
 struct ServicesView: View {
     @StateObject var loader = Loader { Launchd.services() }
     @State private var filter = ""
@@ -173,6 +194,7 @@ struct ServicesView: View {
             .contextMenu(forSelectionType: ServiceItem.ID.self) { ids in
                 if let id = ids.first {
                     Button("Copy Label") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(id, forType: .string) }
+                    // Restarts the job in the user's GUI domain, then reloads the list to pick up its new PID.
                     Button("Restart (kickstart -k)") {
                         _ = Shell.run("/bin/launchctl", ["kickstart", "-k", "gui/\(getuid())/\(id)"]); loader.load()
                     }
@@ -184,6 +206,8 @@ struct ServicesView: View {
     }
 }
 
+/// Connections: sockets of the user's own processes from `lsof -i` (other users' need root), refreshed every 3 s
+/// while "Auto refresh" is on. The timer only lives as long as this view, so a closed page stops polling.
 struct ConnectionsView: View {
     @StateObject var loader = Loader { Connections.list() }
     @State private var filter = ""

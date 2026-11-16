@@ -1,6 +1,10 @@
 import Foundation
 import Darwin
 
+// The Connections tool: open internet sockets per process via lsof, and logged-in user sessions from utmpx. Both are
+// loaded on demand by the UI (not per tick), since lsof can take seconds.
+/// One open internet socket. `local`/`remote` are lsof's numeric "host:port" strings; `remote` is "" when unconnected.
+/// `state` is the TCP state (ESTABLISHED, LISTEN, ...), "—" for UDP (stateless).
 public struct ConnectionItem: Identifiable, Hashable, Sendable {
     public var id: String { "\(pid)-\(proto)-\(local)-\(remote)" }
     public var pid: Int32
@@ -11,6 +15,7 @@ public struct ConnectionItem: Identifiable, Hashable, Sendable {
     public var state: String
 }
 
+/// One login session (Terminal tty, SSH, console) from the utmpx database, as shown by `who`.
 public struct UserSession: Identifiable, Hashable, Sendable {
     public var id: String { user + tty }
     public var user: String
@@ -21,10 +26,15 @@ public struct UserSession: Identifiable, Hashable, Sendable {
 
 public enum Connections {
     /// Parses `lsof -F` output. Only the current user's processes are visible without root.
+    /// lsof is used because libproc only enumerates sockets one process at a time and needs per-process access, whereas
+    /// lsof does the whole walk in one call. -n/-P skip DNS and port-name lookups; -F emits machine-readable field lines
+    /// (p pid, c command, f fd, P protocol, n name, T TCP info). Returns [] if lsof can't run.
     public static func list() -> [ConnectionItem] {
         guard let out = Shell.run("/usr/sbin/lsof", ["-nP", "-i", "-FpcPnT"], timeout: 15) else { return [] }
         var items: [ConnectionItem] = []
         var pid: Int32 = 0, cmd = "", proto = "", name = "", state = ""
+        // Fields arrive as a stream: a "p" line starts a process, an "f" line starts each of its files, and the following lines
+        // describe that file. A pending socket is therefore emitted whenever the next file or process begins (and at the end).
         func flush() {
             guard !name.isEmpty else { return }
             let parts = name.components(separatedBy: "->")
@@ -41,6 +51,7 @@ public enum Connections {
             case "f": flush()
             case "P": proto = v
             case "n": name = v
+            // T lines carry several TCP/TPI values (ST=state, QR=/QS= queue sizes); only the state is kept.
             case "T": if v.hasPrefix("ST=") { state = String(v.dropFirst(3)) }
             default: break
             }
@@ -49,6 +60,7 @@ public enum Connections {
         return items
     }
 
+    /// USER_PROCESS entries from utmpx. The fixed-size C char arrays are read up to their first NUL.
     public static func sessions() -> [UserSession] {
         var out: [UserSession] = []
         setutxent()

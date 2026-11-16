@@ -1,5 +1,10 @@
 import Foundation
 
+// The Startup Items and Services tools: what launchd has loaded for this user, and what is configured to start
+// automatically (LaunchAgents/LaunchDaemons plists and login items), with code-signature checks to spot orphans and
+// unsigned programs. Loaded on demand from the UI, never per tick.
+/// One job from `launchctl list`. `pid` is nil when the job is loaded but not running; `lastExit` is its last exit
+/// status (negative values are the signal that killed it).
 public struct ServiceItem: Identifiable, Hashable, Sendable {
     public var id: String { label }
     public var label: String
@@ -9,6 +14,8 @@ public struct ServiceItem: Identifiable, Hashable, Sendable {
     public var isRunning: Bool { pid != nil }
 }
 
+/// One thing configured to start automatically. `loaded` means launchd currently lists the label; `vendor` is guessed
+/// from the reverse-DNS label ("com.google.keystone" -> "Google").
 public struct StartupItem: Identifiable, Hashable, Sendable {
     public var id: String { path }
     public var label: String
@@ -25,10 +32,13 @@ public struct StartupItem: Identifiable, Hashable, Sendable {
     /// Code-signature summary of the program ("Signed by Apple", "Signed: Developer ID Application: …", "Not signed…").
     public var signer: String? = nil
     public var signedByApple = false
+    /// The plist points at a program file that no longer exists (typically left behind by an uninstalled app).
     public var orphaned: Bool { programExists == false }
 }
 
 public enum Launchd {
+    /// Parses the tab-separated `launchctl list` table (PID, Status, Label; "-" for no PID / status). Run as a normal user
+    /// this lists only the user's own gui/<uid> domain, not system daemons, so `domain` is always the user domain.
     public static func services() -> [ServiceItem] {
         guard let out = Shell.run("/bin/launchctl", ["list"]) else { return [] }
         return out.split(separator: "\n").dropFirst().compactMap { line in
@@ -38,6 +48,8 @@ public enum Launchd {
         }.sorted { $0.label.lowercased() < $1.label.lowercased() }
     }
 
+    /// Reads the plists in the three standard launchd folders plus login items, then checks each absolute program path
+    /// for existence and signature. Blocking (signature checks, launchctl, osascript); call off the main thread.
     public static func startupItems() -> [StartupItem] {
         let loaded = Set(services().map(\.label))
         let home = FileManager.default.homeDirectoryForCurrentUser.path
@@ -53,17 +65,25 @@ public enum Launchd {
                 let path = "\(dir)/\(f)"
                 guard let d = NSDictionary(contentsOfFile: path) as? [String: Any] else { continue }
                 let label = d["Label"] as? String ?? (f as NSString).deletingPathExtension
+                // launchd runs `Program` if present, otherwise ProgramArguments[0]. BundleProgram (SMAppService-registered
+                // items) is
+                // relative to the owning app bundle, which isn't known from the plist, so it is shown but not checked.
                 let program = (d["Program"] as? String) ?? ((d["ProgramArguments"] as? [String])?.first
                     ?? (d["BundleProgram"] as? String).map { "(in app bundle) " + $0 } ?? "")
+                // KeepAlive may be a Bool or a dictionary of conditions; a dictionary means "keep alive under some conditions".
                 let keep: Bool = (d["KeepAlive"] as? Bool) ?? (d["KeepAlive"] is [String: Any])
                 out.append(StartupItem(label: label, path: path, program: program, kind: kind,
                                        runAtLoad: d["RunAtLoad"] as? Bool ?? false, keepAlive: keep,
+                                       // Only the plist's own Disabled key is read; `launchctl disable` overrides live in
+                                       // launchd's database and aren't seen.
                                        disabled: d["Disabled"] as? Bool ?? false,
                                        loaded: loaded.contains(label), vendor: vendor(label)))
             }
         }
         out.append(contentsOf: loginItems())
         // Who signed what starts automatically, and which items point at programs that no longer exist
+        // A bare command name (no leading "/") is resolved by launchd at run time, so existence can't be judged here and
+        // programExists stays nil. An existing file without a readable code object is reported as not signed.
         for i in out.indices where !out[i].program.isEmpty && out[i].program.hasPrefix("/") {
             out[i].programExists = FileManager.default.fileExists(atPath: out[i].program)
             if out[i].programExists == true, let sig = ProcessInspector.signature(out[i].program) {
@@ -75,11 +95,15 @@ public enum Launchd {
         return out.sorted { $0.label.lowercased() < $1.label.lowercased() }
     }
 
+    /// The second component of a reverse-DNS label, capitalised; the whole label if it has no dots.
     static func vendor(_ label: String) -> String {
         let parts = label.split(separator: ".")
         return parts.count >= 2 ? String(parts[1]).capitalized : label
     }
 
+    /// Classic login items via System Events AppleScript (the only non-private way to list them). The first call triggers
+    /// macOS's Automation permission prompt; if denied, osascript prints nothing and the list is empty. The output is a
+    /// ", "-separated list of paths. Items registered as background items through SMAppService are not included.
     static func loginItems() -> [StartupItem] {
         let script = "tell application \"System Events\" to get the path of every login item"
         guard let out = Shell.run("/usr/bin/osascript", ["-e", script], timeout: 5) else { return [] }

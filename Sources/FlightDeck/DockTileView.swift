@@ -1,8 +1,12 @@
+// AppKit drawing for the Dock tile (live, via DockIconController) and the static app icon (via IconRenderer).
+// Drawn with Core Graphics rather than SwiftUI because NSDockTile needs an NSView.
 import AppKit
 import SwiftUI
 import FlightDeckCore
 
 /// Draws the Dock tile / app icon in the VFD instrument style. Resolution-independent (unit = width/128).
+/// Layout: a dark rounded body with bezel, an inset "screen" whose content depends on `mode`, then the caution and
+/// recording lights on top (not drawn for the static app icon).
 final class DockTileView: NSView {
     var mode: DockMode = .cpuHistory
     var palette = Palette.of(.dark)
@@ -30,6 +34,7 @@ final class DockTileView: NSView {
         // screen
         let screen = tile.insetBy(dx: 9 * u, dy: 9 * u)
         let screenPath = NSBezierPath(roundedRect: screen, xRadius: radius * 0.5, yRadius: radius * 0.5)
+        // Light theme still gets a near-black screen: the tile is an instrument, and lit traces need a dark ground.
         (palette.scheme == .light ? NSColor(white: 0.04, alpha: 1) : c(palette.background).blended(withFraction: 0.5, of: .black) ?? .black).setFill()
         screenPath.fill()
         NSColor.white.withAlphaComponent(0.06).setStroke(); screenPath.lineWidth = 1 * u; screenPath.stroke()
@@ -70,20 +75,25 @@ final class DockTileView: NSView {
     }
 
     // MARK: helpers
+    // The light theme's own accents are tuned for a light background, so on the dark screen it uses the dark theme's
+    // colours instead.
     private var lit: NSColor { palette.scheme == .light ? NSColor(red: 0.25, green: 0.78, blue: 1, alpha: 1) : c(palette.accent) }
     private var lit2: NSColor { palette.scheme == .light ? NSColor(red: 1, green: 0.55, blue: 0.25, alpha: 1) : c(palette.accent2) }
     private func pColor() -> NSColor { palette.scheme == .light ? lit : c(palette.pCore) }
     private func eColor() -> NSColor { palette.scheme == .light ? NSColor(red: 0.4, green: 0.9, blue: 0.5, alpha: 1) : c(palette.eCore) }
+    /// Same thresholds as `Palette.level` (warn above 75%, crit above 90%), as NSColors.
     private func level(_ f: Double) -> NSColor {
         if palette.mono { return lit }
         return f > 0.9 ? NSColor(red: 1, green: 0.3, blue: 0.3, alpha: 1) : f > 0.75 ? .orange : lit
     }
 
+    /// Wide translucent stroke under a thin solid one, to fake a phosphor glow without a blur filter.
     private func glowStroke(_ path: NSBezierPath, _ color: NSColor, _ width: CGFloat, _ u: CGFloat) {
         color.withAlphaComponent(0.30).setStroke(); path.lineWidth = width + 3.5 * u; path.stroke()
         color.setStroke(); path.lineWidth = width; path.stroke()
     }
 
+    /// Faint 4×6 background grid.
     private func grid(_ r: NSRect, _ u: CGFloat) {
         let g = NSBezierPath()
         for i in 1..<4 { let y = r.minY + r.height * CGFloat(i) / 4; g.move(to: .init(x: r.minX, y: y)); g.line(to: .init(x: r.maxX, y: y)) }
@@ -91,7 +101,8 @@ final class DockTileView: NSView {
         lit.withAlphaComponent(0.10).setStroke(); g.lineWidth = 0.6 * u; g.stroke()
     }
 
-    /// Segmented VFD bar; vertical or horizontal.
+    /// Segmented VFD bar; vertical (filling upward) or horizontal (filling rightward). Without `color`, each segment
+    /// takes its colour from its position. A nil fraction draws all segments unlit.
     private func segBar(_ r: NSRect, _ fraction: Double?, segments: Int, vertical: Bool, color: NSColor?, _ u: CGFloat) {
         let gap = 1.2 * u
         let len = ((vertical ? r.height : r.width) - gap * CGFloat(segments - 1)) / CGFloat(segments)
@@ -114,6 +125,7 @@ final class DockTileView: NSView {
     }
 
     // MARK: modes
+    /// Converts 0–100 values to points, split into runs at nil entries so gaps are left blank, never bridged.
     private func path(_ values: [Double?], in r: NSRect) -> [[NSPoint]] {
         guard values.count > 1 else { return [] }
         let dx = r.width / CGFloat(values.count - 1)
@@ -126,9 +138,12 @@ final class DockTileView: NSView {
         return runs
     }
 
+    /// CPU History mode: total CPU as a filled area with a glowing line, system CPU as a second line, and the
+    /// current value top right ("—" when the latest sample is a gap or unavailable).
     private func drawHistory(_ r: NSRect, _ u: CGFloat) {
         let graph = NSRect(x: r.minX, y: r.minY, width: r.width, height: r.height - 15 * u)
         grid(graph, u)
+        // Single-point runs are skipped: a lone sample between two gaps can't form a line.
         for run in path(data.cpu, in: graph) where run.count > 1 {
             let area = NSBezierPath(); area.move(to: NSPoint(x: run[0].x, y: graph.minY))
             run.forEach { area.line(to: $0) }; area.line(to: NSPoint(x: run.last!.x, y: graph.minY)); area.close()
@@ -146,6 +161,7 @@ final class DockTileView: NSView {
         text(now.map { String(format: "%.0f%%", $0) } ?? "—", at: NSPoint(x: r.maxX, y: r.maxY - 13 * u), size: 13 * u, color: now == nil ? lit.withAlphaComponent(0.5) : lit, weight: .bold, align: .right)
     }
 
+    /// CPU Cores mode: one vertical segmented bar per core, coloured by P/E kind; "—" when per-core data is missing.
     private func drawCores(_ r: NSRect, _ u: CGFloat) {
         let cores = data.cores
         guard !cores.isEmpty else { text("—", at: NSPoint(x: r.midX, y: r.midY - 8 * u), size: 16 * u, color: lit, align: .center); return }
@@ -160,6 +176,7 @@ final class DockTileView: NSView {
         }
     }
 
+    /// System Gauges mode: CPU %, memory used (fraction of RAM) and hottest temperature against a 110 °C full scale.
     private func drawGauges(_ r: NSRect, _ u: CGFloat) {
         let rows: [(String, Double?)] = [("CPU", (data.cpu.last ?? nil).map { $0 / 100 }),
                                          ("MEM", data.mem),

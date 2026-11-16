@@ -1,7 +1,12 @@
+// GPU sampler smoke test against the real GPU (IOAccelerator statistics plus IOReport on Apple silicon). It prints
+// every reading for manual review and asserts only invariants that must hold on any Mac with a GPU.
 import XCTest
 @testable import FlightDeckCore
 
 final class GPUTests: XCTestCase {
+    /// After a warm-up sample: device utilisation is measured, the clock lies within the GPU's own DVFS range, the
+    /// per-state residencies add up to the active residency (so the P-state chart is consistent), and per-client
+    /// GPU shares are real percentages. Needs a real GPU with at least one client (e.g. WindowServer).
     func testGPUSample() {
         let g = GPUSampler()
         _ = g.sample(); Thread.sleep(forTimeInterval: 1)

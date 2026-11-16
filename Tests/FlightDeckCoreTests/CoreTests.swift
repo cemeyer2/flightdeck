@@ -1,7 +1,11 @@
+// Tests of the core sampling primitives against the real machine: Series gaps, sampler warm-up, the PID identity guard,
+// trace file round trips, data providers, per-process energy and nettop parsing. Some tests need a live system and
+// network (marked below); fixture and accuracy tests only run when their environment variable is set.
 import XCTest
 @testable import FlightDeckCore
 
 final class CoreTests: XCTestCase {
+    /// Graph history must keep nil entries as gaps, not drop or zero them.
     func testSeriesKeepsGaps() {
         var s = Series(capacity: 3)
         s.append(1.0); s.append(nil as Double?); s.append(3.0)
@@ -10,6 +14,8 @@ final class CoreTests: XCTestCase {
         XCTAssertEqual(s.latest, 3)
     }
 
+    /// The first sample has no previous counters to diff against, so CPU must be reported unavailable rather than 0%;
+    /// the second must be fully measured, including this test process itself.
     func testSamplerProducesMeasuredValuesAfterWarmup() throws {
         let sampler = Sampler()
         let first = sampler.sample()
@@ -23,6 +29,8 @@ final class CoreTests: XCTestCase {
         XCTAssertTrue(s.processes.contains { $0.pid == getpid() })
     }
 
+    /// Signals are only delivered when PID and start time both match, so a recycled PID is never hit: a forged identity
+    /// with a different start time must throw, the real one (signal 0, an existence check) must succeed.
     func testIdentityGuard() {
         let me = ProcessSampler.identity(of: getpid())!
         var fake = me; fake.startTime += 1
@@ -30,6 +38,7 @@ final class CoreTests: XCTestCase {
         XCTAssertNoThrow(try ProcessSampler.send(0, to: me))
     }
 
+    /// A trimmed snapshot survives write/read through the .flightlog format (zlib-compressed JSON) intact.
     func testTraceRoundTrip() throws {
         let sampler = Sampler(); _ = sampler.sample(); Thread.sleep(forTimeInterval: 0.2)
         let t = Trace(host: "h", model: "m", interval: 1, frames: [Trace.trimmed(sampler.sample())])
@@ -40,6 +49,8 @@ final class CoreTests: XCTestCase {
         XCTAssertEqual(back.frames[0].cpu.cores.count, t.frames[0].cpu.cores.count)
     }
 
+    /// Smoke test that each on-demand provider (sysctl/IORegistry, launchctl, app scan, utmpx) returns something on a
+    /// real Mac. Frequency and power are only printed, since they legitimately vary or are absent between Macs.
     func testProviders() {
         XCTAssertFalse(SystemInfo.collect().isEmpty)
         XCTAssertFalse(Launchd.services().isEmpty)
@@ -51,7 +62,10 @@ final class CoreTests: XCTestCase {
     }
 }
 
+/// Per-process energy accounting.
 final class EnergyTests: XCTestCase {
+    /// A process burning CPU must show a positive measured energy (from the kernel's billed-energy counter), so
+    /// energy readings aren't silently 0 or missing for busy processes.
     func testBusyProcessReportsEnergy() {
         let s = ProcessSampler(); _ = s.sample()
         let end = Date().addingTimeInterval(0.6); var x = 0.0
@@ -63,6 +77,7 @@ final class EnergyTests: XCTestCase {
     }
 }
 
+/// Writes a sample recording for manual UI testing; skipped unless FD_WRITE_TRACE is set.
 final class TraceFixture: XCTestCase {
     /// Writes /tmp/flightdeck-sample.flightlog (set FD_WRITE_TRACE=1) with a sampling gap in the middle.
     func testWriteSampleTrace() throws {
@@ -77,7 +92,10 @@ final class TraceFixture: XCTestCase {
     }
 }
 
+/// Per-process network via nettop.
 final class ProcessNetworkTests: XCTestCase {
+    /// nettop's CSV lists a process line ("name.pid") followed by its connections; bytes must be attributed to the
+    /// right PID, and connections with empty counters (listening sockets) count as 0 rather than breaking the parse.
     func testParse() {
         let out = """
         ,bytes_in,bytes_out,
@@ -93,6 +111,8 @@ final class ProcessNetworkTests: XCTestCase {
         XCTAssertEqual(f.filter { $0.key.pid == 1 }.values.map(\.0).reduce(0, +), 0)
     }
 
+    /// End-to-end against the real nettop (needs network access): the first snapshot is unavailable (no deltas yet),
+    /// and after a real download this process must appear with the bytes it received.
     func testSeesOwnDownload() throws {
         let s = ProcessNetworkSampler()
         XCTAssertNil(s.sample(), "first snapshot must be unavailable, not zero")
@@ -113,6 +133,7 @@ final class ProcessNetworkTests: XCTestCase {
     }
 }
 
+/// Accuracy check of nettop byte counts against a known payload; skipped unless FD_NET_ACCURACY is set.
 final class ProcessNetworkAccuracy: XCTestCase {
     /// FD_NET_ACCURACY=1: download 5 MB with curl and compare counted bytes.
     func testCountsKnownDownload() throws {

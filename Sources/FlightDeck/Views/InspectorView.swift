@@ -1,19 +1,32 @@
 import SwiftUI
 import Combine
 import FlightDeckCore
+// Process Inspector window (opened via AppActions.openInspector from Processes, findings and the menu bar).
+// `InspectorModel` tracks one process across live samples; `InspectorView` shows its graphs (from Engine's
+// ProcessHistory), kernel details from ProcessInspector (open files, sockets, threads, environment, signature),
+// on-demand call-stack sampling, and identity-checked actions.
 
 /// Follows one process (by identity, so a recycled PID is never confused with it) across live samples.
+/// Always follows `engine.liveSnapshot`, never the replayed snapshot: the inspector is about a process running now,
+/// so it keeps updating even while the main window replays a recording.
 @MainActor
 final class InspectorModel: ObservableObject {
+    /// Intended graph length in samples. The graphs actually use ProcessHistory's own `capacity` (also 300).
     static let length = 300
     let identity: ProcessIdentity
+    /// Latest sample of the process; keeps the last value seen after the process exits so the window stays readable.
     @Published private(set) var sample: ProcessSample?
+    /// True once the process is gone from samples and its PID now has a different (or no) identity.
     @Published private(set) var exited = false
+    /// One slot per sample tick from Engine.processHistory; nil slots are ticks with no data (gaps).
     @Published private(set) var history: [ProcessHistory.Point?] = []
+    /// Slow-to-gather details (files, threads, environment, signature, counters); nil until the first load finishes.
     @Published private(set) var details: ProcessDetails?
     /// Previous counters, for per-second rates.
     @Published private(set) var previousCounters: ProcessDetails.Counters?
+    /// Direct children of this process in the latest snapshot.
     @Published private(set) var children: [ProcessSample] = []
+    /// Output of the last `/usr/bin/sample` run, if any.
     @Published var stacks: String?
     @Published var sampling = false
     private var bag: AnyCancellable?
@@ -28,15 +41,24 @@ final class InspectorModel: ObservableObject {
         refreshDetails()
     }
 
+    /// Called for every live snapshot on the main actor (via the Combine sink in init).
     private func ingest(_ s: Snapshot) {
         let p = s.processes.first { $0.identity == identity }
+        // Missing from one snapshot isn't proof of exit, so confirm by re-reading the PID's identity: only a different
+        // start time (PID recycled) or no process at all counts as exited.
         if p == nil && sample != nil { exited = ProcessSampler.identity(of: identity.pid) != identity }
         if let p { sample = p; exited = false }
         history = engine?.processHistory.series(identity) ?? []
+        // A child must have started after this process; an older process with the same ppid would be a leftover from a
+        // previous owner of the PID.
         children = s.processes.filter { $0.ppid == identity.pid && $0.identity.startTime >= identity.startTime }
+        // Details are relatively expensive (proc_pidinfo over every fd and thread, codesign check), so refresh at most
+        // every 3 s rather than every sample.
         if Date().timeIntervalSince(lastDetails) >= 3 { refreshDetails() }
     }
 
+    /// Gathers ProcessDetails on a detached utility task and publishes it on the main actor. The previous counters are
+    /// kept so StatisticsPanel can show per-second rates. Skipped once the process has exited.
     func refreshDetails() {
         lastDetails = Date()
         guard !exited else { return }
@@ -47,6 +69,8 @@ final class InspectorModel: ObservableObject {
         }
     }
 
+    /// Runs `/usr/bin/sample` for `seconds` off the main actor; the result lands in `stacks`. Without root this only
+    /// works for the user's own processes; otherwise `stacks` holds an explanation rather than a report.
     func sampleStacks(seconds: Int) {
         sampling = true
         let pid = identity.pid
@@ -56,14 +80,17 @@ final class InspectorModel: ObservableObject {
         }
     }
 
+    /// Projects one metric out of the history into graph values, preserving nil gaps.
     func series(_ f: (ProcessHistory.Point) -> Float?) -> [Double?] { history.map { $0.flatMap(f).map(Double.init) } }
 }
 
+/// Lower tabs of the inspector; only the selected one is built.
 enum InspectorTab: String, CaseIterable, Identifiable {
     case overview = "Overview", files = "Open Files", network = "Network", threads = "Threads", environment = "Environment", stacks = "Stacks"
     var id: String { rawValue }
 }
 
+/// Window-group root: builds the model for the identity the window was opened with.
 struct InspectorWindow: View {
     @EnvironmentObject var e: Engine
     var identity: ProcessIdentity?
@@ -73,12 +100,15 @@ struct InspectorWindow: View {
     }
 }
 
+/// The inspector UI: header with actions, five history graphs, then the selected detail tab. Fields the process
+/// doesn't expose (other users' or protected processes) show "—" or an explanation instead of a guessed value.
 struct InspectorView: View {
     @EnvironmentObject var e: Engine
     @Environment(\.palette) var p
     @StateObject var model: InspectorModel
     @State private var tab: InspectorTab = .overview
     @State private var filter = ""
+    /// Pending confirmation for a destructive signal: (signal, verb shown in the alert).
     @State private var confirm: (Int32, String)?
     @State private var error: String?
 
@@ -86,6 +116,7 @@ struct InspectorView: View {
         let s = model.sample
         VStack(spacing: 0) {
             header(s)
+            // MaybeScroll so the window still renders in off-screen captures, where a ScrollView draws empty.
             MaybeScroll {
                 VStack(spacing: 12) {
                     graphs
@@ -112,6 +143,7 @@ struct InspectorView: View {
         .alert("Action failed", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) { Button("OK") {} } message: { Text(error ?? "") }
     }
 
+    /// Sends a signal via ProcessSampler.send, which re-checks PID + start time first so a recycled PID is never hit.
     func send(_ sig: Int32) { do { try ProcessSampler.send(sig, to: model.identity) } catch { self.error = error.localizedDescription } }
 
     @ViewBuilder func header(_ s: ProcessSample?) -> some View {
@@ -130,6 +162,8 @@ struct InspectorView: View {
                     .foregroundStyle(p.dim).lineLimit(1).truncationMode(.middle).textSelection(.enabled)
             }
             Spacer()
+            // Quit and Force Quit ask for confirmation; Suspend/Resume and renice are reversible so they act at once.
+            // The whole menu is disabled once the process has exited.
             Menu("Actions") {
                 Button("Quit") { confirm = (SIGTERM, "Quit") }
                 Button("Force Quit") { confirm = (SIGKILL, "Force Quit") }
@@ -148,11 +182,14 @@ struct InspectorView: View {
         .padding(14).background(p.panel).overlay(alignment: .bottom) { Divider() }
     }
 
+    /// Raises the nice value (lower priority). Lowering it again, or touching another user's process, needs root.
     func renice(_ v: Int32) {
         do { try ProcessInspector.setNice(pid: model.identity.pid, v); model.refreshDetails() }
         catch { self.error = "Couldn't change priority: \(error.localizedDescription). Other users' processes need root." }
     }
 
+    /// CPU (% of one core), memory (bytes), GPU (% of GPU time), disk and network (bytes/s) over the inspector history.
+    /// `minHeadroom` keeps a near-idle process from filling the graph with noise (e.g. at least 10% or 1 MB of y-range).
     var graphs: some View {
         let s = model.sample
         return LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
@@ -181,6 +218,8 @@ struct InspectorView: View {
         }
     }
 
+    /// Overview tab: identity and totals from the sample, plus details (nice, cwd, arguments), kernel statistics,
+    /// code signature and the process tree.
     @ViewBuilder func overview(_ s: ProcessSample?) -> some View {
         let d = model.details
         Panel(title: "Process") {
@@ -191,6 +230,7 @@ struct InspectorView: View {
                 row("CPU time", s.map { Fmt.duration($0.cpuTime) })
                 row("Energy", s?.energyWatts.map { String(format: "%.2f W", $0) })
                 row("Idle wake-ups", s.map { String(format: "%.0f /s", $0.wakeups) })
+                // Disk counters of restricted (other-user/protected) processes can't be read, so show "—" rather than 0.
                 row("Disk total", s.map { $0.restricted ? nil : "read \(Fmt.bytes($0.diskRead)) · written \(Fmt.bytes($0.diskWritten))" } ?? nil)
                 row("Network total", s?.network.map { "↓ \(Fmt.bytes($0.totalIn)) · ↑ \(Fmt.bytes($0.totalOut)) · \($0.connections) connections" })
                 row("Priority (nice)", d?.nice.map { "\($0)" })
@@ -212,6 +252,8 @@ struct InspectorView: View {
         }
         Panel(title: "Ancestry and children") {
             VStack(alignment: .leading, spacing: 4) {
+                // ProcessDetails lists ancestry from this process up to launchd; reversed, launchd prints first and each
+                // generation is indented one step. Children are clickable and open their own inspector.
                 ForEach(Array((d?.ancestry ?? []).reversed().enumerated()), id: \.offset) { i, a in
                     Text(String(repeating: "  ", count: i) + "└ \(a.name) (\(a.pid))").foregroundStyle(a.pid == model.identity.pid ? p.text : p.dim)
                 }
@@ -224,6 +266,7 @@ struct InspectorView: View {
         }
     }
 
+    /// Label/value grid row; nil values render as "—" (unavailable), never as an empty or zero value.
     func row(_ k: String, _ v: String?) -> some View {
         GridRow {
             Text(k).foregroundStyle(p.dim)
@@ -231,6 +274,7 @@ struct InspectorView: View {
         }
     }
 
+    /// Explanation shown when a detail list couldn't be read, instead of an empty table.
     func unavailable(_ what: String) -> some View {
         Text("\(what) can't be read for this process: it belongs to another user or is protected by macOS. Nothing is guessed.")
             .foregroundStyle(p.dim).fixedSize(horizontal: false, vertical: true)
@@ -240,6 +284,8 @@ struct InspectorView: View {
         TextField("Filter", text: $filter).textFieldStyle(.roundedBorder).frame(maxWidth: 280)
     }
 
+    // The tabs below share one pattern: data present → table; details loaded but this field unavailable →
+    // explanation; details not loaded yet → spinner.
     @ViewBuilder var filesTab: some View {
         if let files = model.details?.files.value {
             let shown = files.filter { filter.isEmpty || $0.description.localizedCaseInsensitiveContains(filter) }
@@ -255,6 +301,7 @@ struct InspectorView: View {
     }
 
     @ViewBuilder func networkTab(_ s: ProcessSample?) -> some View {
+        // Sockets are derived from the same file-descriptor scan, so they are only trustworthy when that scan succeeded.
         if let socks = model.details?.sockets, model.details?.files.isAvailable == true {
             Panel(title: "Sockets", trailing: "\(socks.count) open") {
                 Table(socks) {
@@ -271,6 +318,7 @@ struct InspectorView: View {
     @ViewBuilder var threadsTab: some View {
         if let threads = model.details?.threads.value {
             Panel(title: "Threads", trailing: "\(threads.count) threads · refreshed every 3 s") {
+                // Busiest threads first; thread IDs are shown in hex as in `sample` and Instruments output.
                 Table(threads.sorted { $0.cpu > $1.cpu }) {
                     TableColumn("ID") { Text(String($0.id, radix: 16)).monospacedDigit() }.width(80)
                     TableColumn("Name") { Text($0.name.isEmpty ? "—" : $0.name) }
@@ -325,6 +373,7 @@ struct InspectorView: View {
         }
     }
 
+    /// Plain-text summary for the clipboard (Actions › Copy Summary).
     func summaryText(_ s: ProcessSample?) -> String {
         guard let s else { return "" }
         var out = "\(s.name) (PID \(s.pid), parent \(s.ppid), user \(s.user))\n\(s.path)\n"
@@ -336,6 +385,9 @@ struct InspectorView: View {
 }
 
 /// Activity Monitor-style statistics with rates (per second, over the last refresh).
+/// Rates are per second between the two most recent detail refreshes (≈3 s apart); blank on the first refresh or if a
+/// counter went backwards. Optional counters (peak footprint, instructions/cycles, logical writes) show "—" when the
+/// kernel didn't report them.
 struct StatisticsPanel: View {
     @Environment(\.palette) var p
     var c: ProcessDetails.Counters

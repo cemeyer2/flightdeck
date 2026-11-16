@@ -1,28 +1,37 @@
 import Foundation
 import IOKit
 
+// GPU detail for each snapshot (Snapshot.gpuDetail) plus per-process GPU share. Combines the accelerator's public
+// IORegistry PerformanceStatistics, per-client accumulated GPU time from the accelerator's user clients, and private
+// IOReport channels (P-state residency, energy, thermal capping) via IOReportSampler. Runs on the sampling queue.
+/// One process using the GPU, aggregated over all of its accelerator user clients (Metal/OpenGL/CoreML contexts).
 public struct GPUClient: Codable, Sendable, Hashable, Identifiable {
     public var id: Int32 { pid }
     public var pid: Int32
     public var name: String
     public var percent: Double          // share of GPU time over the last sample
     public var totalSeconds: Double     // accumulated GPU time
+    /// API names the driver reports for its clients, e.g. "Metal".
     public var apis: [String]
 }
 
+/// Live average frequency of one CPU cluster or the GPU, estimated from IOReport P-state residency and the DVFS table.
 public struct ClusterFrequency: Codable, Sendable, Hashable, Identifiable {
     public var id: String { name }
     public var name: String             // "E-cluster", "P-cluster 0", "GPU"
     public var mhz: Double?             // residency-weighted average while active; nil if idle
     public var active: Double           // % of time not idle/off
+    /// Top of the cluster's DVFS table, for scaling gauges.
     public var maxMHz: Double
 }
 
 /// Everything about the GPU for one sample. Fields the hardware/driver doesn't expose are nil (shown "—").
 public struct GPUDetail: Codable, Sendable {
+    /// Utilisation %, from PerformanceStatistics (device = any engine busy; renderer/tiler = those pipeline stages).
     public var deviceUtilization: Double?
     public var rendererUtilization: Double?
     public var tilerUtilization: Double?
+    /// Bytes of system (unified) memory the GPU driver has in use / has allocated.
     public var memoryInUse: UInt64?
     public var memoryAllocated: UInt64?
     public var recoveryCount: Int?          // GPU restarts after a hang (driver recovery)
@@ -30,6 +39,8 @@ public struct GPUDetail: Codable, Sendable {
     public var frequencyMHz: Double?        // average while active
     public var stateResidency: [Double]?    // % per P-state (P1 … Pn), lowest first
     public var stateMHz: [Double]?          // frequency of each P-state
+    /// GPU power in W from the IOReport Energy Model; the cpu/ane/dram variants are the matching CPU, Neural Engine and
+    /// memory channels. Without IOReport (Intel, or channels missing) all stay nil.
     public var powerWatts: Double?
     public var thermalLimited: Double?      // % of time the GPU was frequency-capped for temperature (CLTM)
     public var clients: [GPUClient]
@@ -40,6 +51,8 @@ public struct GPUDetail: Codable, Sendable {
 }
 
 /// Static GPU facts (read once).
+/// Vendor is decoded from the low byte of the little-endian PCI vendor-id (0x1002 AMD, 0x8086 Intel, 0x10de NVIDIA);
+/// Apple's own GPUs (0x106b) fall through to the "Apple" default.
 public struct GPUInfo: Sendable {
     public var model: String
     public var cores: Int?
@@ -48,10 +61,13 @@ public struct GPUInfo: Sendable {
     public var metal: [(String, String)]    // filled by the app (Metal is an app-level framework here)
 }
 
+/// Stateful (IOReport baseline, previous per-client GPU time); confined to the sampling queue. Only the first
+/// IOAccelerator is read, so on Macs with two GPUs the second is not reported.
 public final class GPUSampler: @unchecked Sendable {
     private let report = IOReportSampler()
     private var lastClientTime: [Int32: UInt64] = [:]
     private var lastClientSample: Date?
+    /// DVFS tables keyed "E", "P", "GPU" (MHz), read once from Frequency.clusters(); used to turn state residency into MHz.
     private let freqs: [String: [Double]]
 
     public init() {
@@ -62,6 +78,7 @@ public final class GPUSampler: @unchecked Sendable {
         freqs = f
     }
 
+    /// Model, core count, vendor and frequency range for the GPU header. Static; called on demand by the UI.
     public static func info() -> GPUInfo {
         var model = "GPU", cores: Int?, vendor = "Apple"
         let svc = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("IOAccelerator"))
@@ -77,6 +94,7 @@ public final class GPUSampler: @unchecked Sendable {
         return GPUInfo(model: model, cores: cores, vendor: vendor, frequencyRange: g.map { ($0.minMHz, $0.maxMHz) }, metal: [])
     }
 
+    /// Builds one GPUDetail. Each field is filled only if its source answered, so a missing source leaves nil (never 0).
     public func sample() -> GPUDetail {
         var d = GPUDetail(clients: [], cpuClusters: [])
         // Accelerator performance statistics (all Macs)
@@ -96,10 +114,13 @@ public final class GPUSampler: @unchecked Sendable {
         }
         // IOReport: residency, frequency, power, thermal capping
         if let (chans, dt) = report.sample(), dt > 0 {
+            // Energy channels report energy used during the interval in the channel's unit; dividing by dt gives watts.
             func watts(_ c: IOReportSampler.Channel) -> Double {
                 let scale: Double = c.unit == "mJ" ? 1e-3 : c.unit == "uJ" ? 1e-6 : 1e-9   // nJ default
                 return Double(c.value) * scale / dt
             }
+            // CPU energy is published per cluster ("ECPU... CPU Energy", "PCPU... CPU Energy") and summed. otherEnergy tracks
+            // whether any non-GPU energy channel moved at all (see the check after the loop).
             var cpuW = 0.0, cpuSeen = false, otherEnergy: Int64 = 0
             for c in chans {
                 switch (c.group, c.subgroup) {
@@ -109,6 +130,11 @@ public final class GPUSampler: @unchecked Sendable {
                     else if c.name.hasPrefix("ANE") { d.anePowerWatts = (d.anePowerWatts ?? 0) + watts(c) }
                     else if c.name.hasPrefix("DRAM") { d.dramPowerWatts = (d.dramPowerWatts ?? 0) + watts(c) }
                     else if c.name.hasSuffix("CPU Energy") || c.name == "CPU Energy" { cpuW += watts(c); cpuSeen = true }
+                // GPUPH is the GPU's power/performance-state residency: OFF, IDLE, then P1...Pn from slowest to fastest. Active
+                // residency is everything but OFF/IDLE; the average frequency weights each active state's DVFS-table
+                // frequency by its
+                // residency (the table's zero "off" entries were already filtered, so index i of `active` matches index i
+                // of the table).
                 case ("GPU Stats", "GPU Performance States") where c.name == "GPUPH":
                     let total = Double(c.states.reduce(0) { $0 + $1.residency })
                     guard total > 0 else { break }
@@ -126,9 +152,15 @@ public final class GPUSampler: @unchecked Sendable {
                         let knownTotal = Double(known.reduce(0) { $0 + $1.0.residency })
                         if knownTotal > 0 { d.frequencyMHz = known.reduce(0) { $0 + Double($1.0.residency) * $1.1 } / knownTotal }
                     }
+                // CLTM (closed-loop thermal management) residency: any state other than NO_CLTM means the GPU was capped
+                // for heat.
                 case ("GPU Stats", let sg) where sg.contains("CLTM"):
                     let total = Double(c.states.reduce(0) { $0 + $1.residency })
                     if total > 0 { d.thermalLimited = Double(c.states.filter { $0.name != "NO_CLTM" }.reduce(0) { $0 + $1.residency }) / total * 100 }
+                // Per-cluster CPU residency (ECPU, PCPU, PCPU1, ...); the CPM channels are complex-level duplicates and skipped.
+                // The MHz estimate is nil when the cluster was fully idle or the DVFS table is shorter than the state list,
+                // rather
+                // than mapping states to the wrong frequencies.
                 case ("CPU Stats", "CPU Complex Performance States") where !c.name.hasSuffix("CPM") && !c.name.contains("CPM"):
                     let kind = c.name.hasPrefix("E") ? "E" : "P"
                     let total = Double(c.states.reduce(0) { $0 + $1.residency })
@@ -150,6 +182,10 @@ public final class GPUSampler: @unchecked Sendable {
     }
 
     /// Per-process GPU time from the accelerator's user clients ("AppUsage" → accumulatedGPUTime, ns).
+    /// Each user client's IOUserClientCreator reads "pid 123, AppName". Clients are summed per PID. The share is the GPU-time
+    /// delta divided by wall time, so it can exceed 100 when work overlaps on several GPU queues; it is clamped to 100.
+    /// A PID seen for the first time reports 0 until the next sample, and history is keyed by bare PID; the `e.ns >= prev`
+    /// check makes a recycled PID with a smaller counter read 0 instead of a bogus spike.
     private func clients(_ accel: io_service_t) -> [GPUClient] {
         var iter: io_iterator_t = 0
         guard IORegistryEntryGetChildIterator(accel, kIOServicePlane, &iter) == KERN_SUCCESS else { return [] }

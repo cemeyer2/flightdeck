@@ -1,11 +1,17 @@
 import SwiftUI
 import FlightDeckCore
+// Sleep & Wake destination: sleep sessions, dark wakes, wake requesters and sleep-prevention assertions parsed from
+// `pmset -g log` by FlightDeckCore/SleepLog.swift. Independent of the black box: the log is macOS's own history,
+// so it covers times FlightDeck wasn't running.
 
 /// "Why did my Mac wake at 3 am? Where did my battery go overnight?" From the power management log.
+/// Reads the log on a detached utility task when the view appears, when the period changes, and on Refresh;
+/// there is no periodic refresh. A nil report (pmset failed or produced nothing parseable) shows a message.
 struct SleepView: View {
     @Environment(\.palette) var p
     @State private var report: SleepReport?
     @State private var loading = false
+    /// Start time of the session expanded in the list (sessions are identified by their start).
     @State private var selected: Date?
     @AppStorage("sleepDays") private var days = 3
 
@@ -20,6 +26,8 @@ struct SleepView: View {
                     Button("Refresh") { Task { await load() } }
                 }
                 if let r = report {
+                    // Sessions are newest first; "Last sleep" prefers the latest one longer than an hour, so a short nap
+                    // after a long night doesn't hide the night.
                     if let last = r.sessions.first(where: { $0.duration > 3600 }) ?? r.sessions.first { lastNight(last) }
                     sessions(r)
                     HStack(alignment: .top, spacing: 12) {
@@ -44,12 +52,15 @@ struct SleepView: View {
         .task(id: days) { await load() }
     }
 
+    /// `SleepLog.read` shells out to pmset (can take seconds on a long log), so it runs off the main actor.
     func load() async {
         loading = true; defer { loading = false }
         let d = Double(days)
         report = await Task.detached(priority: .utility) { SleepLog.read(days: d) }.value
     }
 
+    /// Summary of one session: time asleep, dark wakes (over 30 is flagged), battery used ("on AC" when it charged
+    /// or was plugged in; "—" when on battery but the drop couldn't be measured), why it slept and what woke it.
     func lastNight(_ s: SleepSession) -> some View {
         Panel(title: "Last sleep", trailing: "\(s.start.formatted(date: .abbreviated, time: .shortened)) – \(s.end.formatted(date: .omitted, time: .shortened))") {
             HStack(spacing: 28) {
@@ -68,6 +79,8 @@ struct SleepView: View {
     /// Asleep (dim bar) with dark wakes as ticks coloured by reason.
     func strip(_ s: SleepSession) -> some View {
         Canvas { ctx, size in
+            // Ticks are placed by time within the session; a wake of unknown length is drawn as if 10 s, and every tick is
+            // at least 2 pt wide so short wakes stay visible. Colour is chosen from the reason's plain-English explanation.
             let span = max(s.duration, 1)
             ctx.fill(Path(roundedRect: CGRect(x: 0, y: size.height * 0.3, width: size.width, height: size.height * 0.4), cornerRadius: 3), with: .color(p.accent.opacity(0.25)))
             for d in s.darkWakes {
@@ -79,6 +92,7 @@ struct SleepView: View {
         .help("Asleep (bar) and dark wakes (ticks): orange-red for network/Bluetooth/notifications, amber for scheduled maintenance")
     }
 
+    /// Up to 20 sessions; clicking one expands its wake strip and its first 40 dark wakes.
     func sessions(_ r: SleepReport) -> some View {
         Panel(title: "Sleep sessions", trailing: "\(r.sessions.count) in this period") {
             ForEach(r.sessions.prefix(20)) { s in
@@ -110,6 +124,7 @@ struct SleepView: View {
         }
     }
 
+    /// A ranked list of (label, value, display text) rows with meters relative to the first (largest) row.
     func ranked(_ rows: [(String, Double, String)]) -> some View {
         let top = max(rows.first?.1 ?? 1, 1)
         return VStack(alignment: .leading, spacing: 4) {
@@ -124,12 +139,14 @@ struct SleepView: View {
     }
 }
 
+// (SleepPreview is used by UIBench's PNG rendering, where `.task` never runs before the image is captured.)
 /// Off-screen review: SleepView loads asynchronously, so render its parts from a synchronous read.
 struct SleepPreview: View {
     var body: some View {
         if let r = SleepLog.read(days: 3) { SleepContentPreview(report: r) } else { Text("no log") }
     }
 }
+/// Renders the SleepView sections for a report that is already loaded, by calling the view's builder methods.
 struct SleepContentPreview: View {
     var report: SleepReport
     var body: some View {

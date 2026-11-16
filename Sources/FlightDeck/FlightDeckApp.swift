@@ -1,9 +1,15 @@
+// App entry point: declares every scene (main window, process inspector windows, Compare Recordings, the menu bar
+// extra and Settings), the app menus, the AppDelegate, and the Settings form. The single Engine created here is shared
+// with all scenes through the environment.
 import SwiftUI
 import FlightDeckCore
 
+/// Before any scene is built, `init` gives the command-line modes (icon rendering, CLI, UI bench) a chance to run and
+/// exit, so they never start the GUI or the Engine's sampling (the @StateObject is only created when `body` is first used).
 @main
 struct FlightDeckApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
+    /// The one Engine for the whole app; all windows and the menu bar extra observe the same instance.
     @StateObject private var engine = Engine()
     @AppStorage("theme") private var theme: ThemeID = .dark
     @AppStorage("dockMode") private var dockMode: DockMode = .cpuHistory
@@ -12,6 +18,7 @@ struct FlightDeckApp: App {
     init() { IconRenderer.handleCommandLine(); CLI.handle() }
 
     var body: some Scene {
+        // The main window is a single `Window` (not a WindowGroup), so there is only ever one; reopening focuses it.
         Window("FlightDeck", id: "main") {
             ContentView()
                 .environmentObject(engine)
@@ -19,16 +26,20 @@ struct FlightDeckApp: App {
                 .preferredColorScheme(Palette.of(theme).scheme)
                 .frame(minWidth: 980, minHeight: 640)
                 .onOpenURL { engine.open($0) }
+                // The Dock tile is drawn by AppKit outside SwiftUI, so it must be told to redraw on theme/mode changes.
                 .onChange(of: theme) { DockIconController.shared.refresh() }
                 .onChange(of: dockMode) { DockIconController.shared.refresh() }
+                // Files opened from Finder arrive at the AppDelegate, which forwards them here as notifications.
                 .onReceive(NotificationCenter.default.publisher(for: .openTraceFile)) { n in
                     if let u = n.object as? URL { engine.open(u) }
                 }
         }
         .windowToolbarStyle(.unified(showsTitle: false))
         .commands {
+            // No "New Window": there is one main window and documents are traces opened for replay.
             CommandGroup(replacing: .newItem) {}
             CommandMenu("Go") {
+                // ⌘1…⌘9 jump to the first nine sidebar destinations.
                 ForEach(Array(Destination.allCases.prefix(9).enumerated()), id: \.offset) { i, d in
                     Button(d.rawValue) { AppActions.showMain(navigate: d.rawValue, engine: engine) }
                         .keyboardShortcut(KeyEquivalent(Character("\(i + 1)")), modifiers: .command)
@@ -67,6 +78,8 @@ struct FlightDeckApp: App {
                 Picker("Dock Icon", selection: $dockMode) { ForEach(DockMode.allCases) { Text($0.rawValue).tag($0) } }
             }
         }
+        // One inspector window per process identity (PID + start time), so reopening for the same process reuses its
+        // window and a recycled PID gets a new one.
         WindowGroup("Inspector", id: "inspector", for: ProcessIdentity.self) { $id in
             InspectorWindow(identity: id)
                 .environmentObject(engine)
@@ -78,6 +91,7 @@ struct FlightDeckApp: App {
             CompareView().environment(\.palette, Palette.of(theme)).preferredColorScheme(Palette.of(theme).scheme)
         }
         .defaultSize(width: 980, height: 820)
+        // The menu bar extra uses the `.window` style (a panel, not a menu) and can be turned off in Settings.
         MenuBarExtra(isInserted: $menuBarEnabled) {
             MenuBarPanel().environmentObject(engine).environment(\.palette, Palette.of(theme))
         } label: {
@@ -90,6 +104,7 @@ struct FlightDeckApp: App {
     }
 }
 
+/// Black-box time ranges offered in the Recorder menu; the raw value is the length in minutes.
 enum BlackBoxRange: Int, CaseIterable, Identifiable {
     case m5 = 5, m15 = 15, h1 = 60, h6 = 360, h24 = 1440
     var id: Int { rawValue }
@@ -97,11 +112,14 @@ enum BlackBoxRange: Int, CaseIterable, Identifiable {
     var title: String { minutes < 60 ? "\(minutes) Minutes" : minutes == 60 ? "Hour" : "\(minutes / 60) Hours" }
 }
 
+/// Posted by the AppDelegate for each file opened via Finder/Dock; the object is the file URL.
 extension Notification.Name { static let openTraceFile = Notification.Name("openTraceFile") }
 
+/// Handles app-lifecycle events SwiftUI doesn't expose: activation, Dock reopen and Dock menu, opening files, quitting.
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ n: Notification) {
+        // Activation policy is set explicitly so the app gets a Dock icon and menus even when launched as a bare binary.
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         Alerts.shared.start()
@@ -114,13 +132,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         urls.forEach { NotificationCenter.default.post(name: .openTraceFile, object: $0) }
     }
     func applicationDockMenu(_ sender: NSApplication) -> NSMenu? { DockIconController.shared.dockMenu() }
+    // Remove the custom Dock tile view on quit so the Dock doesn't keep showing a stale live graph after we exit.
     func applicationWillTerminate(_ n: Notification) { NSApp.dockTile.contentView = nil; NSApp.dockTile.display() }
     /// With the menu bar item on, closing the window keeps FlightDeck running (black box and alerts continue).
     func applicationShouldTerminateAfterLastWindowClosed(_ s: NSApplication) -> Bool {
+        // Reads UserDefaults directly (the delegate has no @AppStorage); the default matches `menuBarEnabled` above.
         !(UserDefaults.standard.object(forKey: "menuBarEnabled") as? Bool ?? true)
     }
 }
 
+/// The Settings window (⌘,). Most options are @AppStorage keys read elsewhere (Engine, Alerts, DockIconController,
+/// MenuBarLabel); a few bind straight to Engine properties whose didSet applies the change.
 struct SettingsView: View {
     @EnvironmentObject var engine: Engine
     @AppStorage("theme") private var theme: ThemeID = .dark
@@ -130,6 +152,7 @@ struct SettingsView: View {
     @AppStorage("alertsEnabled") private var alertsEnabled = true
     @AppStorage("alertMinSeverity") private var alertMinSeverity = 2
     @AppStorage("alertAfterMinutes") private var alertAfterMinutes = 2.0
+    // Login item state is read from the system (SMAppService), not stored, so it reflects changes made in System Settings.
     @State private var loginItem = LoginItem.isEnabled
     @State private var mutedCount = 0
     @AppStorage("autoEvidence") private var autoEvidence = true
@@ -167,6 +190,7 @@ struct SettingsView: View {
                 HStack {
                     Text("Muted alerts: \(mutedCount)").font(.caption)
                     Spacer()
+                    // `muted` holds finding keys the user silenced from a finding's context menu.
                     Button("Unmute All") { Alerts.shared.muted = []; mutedCount = 0 }.disabled(mutedCount == 0)
                 }.onAppear { mutedCount = Alerts.shared.muted.count }
                 Toggle("Capture call stacks automatically when an app hangs or hogs the CPU", isOn: $autoEvidence)
@@ -199,6 +223,7 @@ struct SettingsView: View {
                 .font(.caption).foregroundStyle(.secondary)
         }
         .padding(20).frame(width: 480)
+        // Poll black box disk usage while Settings is open; it changes as samples are written.
         .task { while !Task.isCancelled { blackBoxBytes = engine.blackBox.diskUsage; try? await Task.sleep(for: .seconds(5)) } }
         .confirmationDialog("Delete all black box data?", isPresented: $confirmClear) {
             Button("Delete", role: .destructive) { engine.clearBlackBox(); blackBoxBytes = 0 }
@@ -206,6 +231,7 @@ struct SettingsView: View {
     }
 }
 
+/// Opens the Compare Recordings window; a separate view because `openWindow` is only available from the environment.
 struct OpenCompareButton: View {
     @Environment(\.openWindow) private var openWindow
     var body: some View { Button("Compare Recordings…") { openWindow(id: "compare") } }

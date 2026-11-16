@@ -1,12 +1,16 @@
+// Command-line modes of the app binary. `FlightDeckApp.init` calls `CLI.handle()`; every recognised mode prints its
+// output and exits before any window or the Engine is created. With no recognised flag, `handle()` returns and the GUI
+// starts normally (so does a mode whose arguments are missing or incomplete).
 import Foundation
 import FlightDeckCore
 
 /// Command-line interface of the app binary (FlightDeck.app/Contents/MacOS/FlightDeck):
 ///   --snapshot [--json] [--top N]   one warmed-up sample: summary + findings (or full JSON)
-///   --findings                      current findings only
+///   --findings [--json]             current findings only
 ///   --csv <trace> <out.csv> [--processes]
 ///   --report <trace> <out.pdf>
 ///   --stats <trace>                 summary statistics of a recording
+/// Developer-only (not in `usage`): --render-views <dir> and --bench-ui [renders], see UIBench.
 @MainActor
 enum CLI {
     static let usage = """
@@ -19,8 +23,10 @@ enum CLI {
       --help
     """
 
+    /// Parses `CommandLine.arguments` and runs the first matching mode. Does not return if a mode ran.
     static func handle() {
         let a = CommandLine.arguments
+        // The `n` arguments following `flag`, or nil if the flag is absent or too few arguments follow it.
         func value(_ flag: String, _ n: Int = 1) -> [String]? {
             guard let i = a.firstIndex(of: flag), i + n < a.count else { return nil }
             return Array(a[(i + 1)...(i + n)])
@@ -29,6 +35,8 @@ enum CLI {
         if let v = value("--render-views") { UIBench.renderViews(to: v[0]) }
         if a.contains("--bench-ui") { UIBench.run(renders: Int(value("--bench-ui")?.first ?? "") ?? 20) }
         if a.contains("--snapshot") || a.contains("--findings") {
+            // CLI findings come from a single sample, so only instantaneous conditions are found; "sustained for N
+            // minutes" findings need the long-running app.
             let s = warmSample()
             let findings = Analyzer().ingest(s)
             if a.contains("--json") {
@@ -63,22 +71,27 @@ enum CLI {
         }
     }
 
+    /// Two samples a second apart: delta-based values (CPU %, disk/network rates) are unavailable in the first one.
     static func warmSample() -> Snapshot {
         let sampler = Sampler(); _ = sampler.sample(); Thread.sleep(forTimeInterval: 1); return sampler.sample()
     }
 
+    /// Reads a trace file, exiting with an error message if it can't be read.
     static func load(_ path: String) -> Trace? {
         do { return try Trace.read(from: URL(fileURLWithPath: path)) } catch { fail("can't read \(path): \(error.localizedDescription)") }
     }
 
+    /// Writes the output file and exits (0 on success, 1 with a message on failure).
     static func write(_ d: Data, to path: String) -> Never {
         do { try d.write(to: URL(fileURLWithPath: path)); print("wrote \(path)"); exit(0) } catch { fail(error.localizedDescription) }
     }
 
     static func fail(_ msg: String) -> Never { FileHandle.standardError.write(Data("flightdeck: \(msg)\n".utf8)); exit(1) }
 
+    /// Human-readable one-sample summary plus the top apps by CPU. Unmeasured values print as "—", never as 0.
     static func printSummary(_ s: Snapshot, top: Int) {
         func m(_ v: Double?, _ f: String) -> String { v.map { String(format: f, $0) } ?? "—" }
+        // CPU % is "% of all cores" here; per-app CPU below is "% of one core" (can exceed 100).
         print("CPU \(m(s.cpu.total.value, "%.1f%%"))  load \(s.cpu.loadAverage.map { String(format: "%.2f", $0) }.joined(separator: " "))")
         print("Memory \(Fmt.bytes(s.memory.used)) of \(Fmt.bytes(s.memory.total))  pressure \(m(s.memory.pressure.value, "%.0f%%"))  swap \(s.memory.swapUsed.value.map(Fmt.bytes) ?? "—")")
         print("Disk R \(s.disk.readBps.value.map(Fmt.rate) ?? "—")  W \(s.disk.writeBps.value.map(Fmt.rate) ?? "—")   Net ↓ \(s.network.inBps.value.map(Fmt.rate) ?? "—")  ↑ \(s.network.outBps.value.map(Fmt.rate) ?? "—")")
@@ -99,6 +112,7 @@ enum CLI {
     }
 }
 
+/// Type-erases an Encodable so `--json` can encode either the findings array or the snapshot+findings struct.
 struct AnyEncodable: Encodable {
     let value: Encodable
     init(_ v: Encodable) { value = v }
