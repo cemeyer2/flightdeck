@@ -168,7 +168,7 @@ final class PaletteModel: ObservableObject {
         for s in procs {
             out.append(PaletteItem(id: "proc:\(s.pid)-\(s.identity.startTime)", kind: .process, title: s.name,
                                    subtitle: "PID \(s.pid) · \(s.user) · \(String(format: "%.0f%%", s.cpu)) CPU · \(s.restricted ? "—" : Fmt.bytes(s.memory))",
-                                   icon: "gearshape", iconPath: s.path, actions: processActions(name: s.name, identity: s.identity, path: s.path, demo: demo, engine: e),
+                                   icon: "gearshape", iconPath: s.path, actions: processActions(name: s.name, identity: s.identity, path: s.path, demo: demo, engine: e, ownedByUser: s.uid == getuid()),
                                    keywords: "\(s.pid) \(s.user) \(s.path)"))
         }
         return out
@@ -177,7 +177,9 @@ final class PaletteModel: ObservableObject {
     /// Inspect, sample stacks, reveal, quit and force quit for one process. Disabled in demo mode (the PIDs are
     /// invented and could match real processes), as `AppActions.openInspector` is. Signals go through
     /// ProcessSampler.send, which re-checks PID + start time; failures land in the main window's error alert.
-    static func processActions(name: String, identity: ProcessIdentity?, path: String, demo: Bool, engine: Engine) -> [PaletteAction] {
+    /// `ownedByUser: false` disables Quit/Force Quit: macOS refuses to signal other users' (e.g. root) processes anyway.
+    static func processActions(name: String, identity: ProcessIdentity?, path: String, demo: Bool, engine: Engine,
+                               ownedByUser: Bool = true) -> [PaletteAction] {
         let live = !demo && identity != nil
         let inspect = AppActions.openInspector
         func send(_ sig: Int32) {
@@ -194,9 +196,9 @@ final class PaletteModel: ObservableObject {
             PaletteAction(title: "Reveal in Finder", icon: "folder", enabled: !demo && !path.isEmpty) {
                 NSWorkspace.shared.selectFile(path, inFileViewerRootedAtPath: "")
             },
-            PaletteAction(title: "Quit…", icon: "xmark.circle", enabled: live,
+            PaletteAction(title: "Quit…", icon: "xmark.circle", enabled: live && ownedByUser,
                           confirm: .init(title: "Quit “\(name)”?", message: "PID \(pid). Unsaved work in this process may be lost.", button: "Quit")) { send(SIGTERM) },
-            PaletteAction(title: "Force Quit…", icon: "xmark.octagon", enabled: live,
+            PaletteAction(title: "Force Quit…", icon: "xmark.octagon", enabled: live && ownedByUser,
                           confirm: .init(title: "Force Quit “\(name)”?", message: "PID \(pid). Unsaved work in this process may be lost.", button: "Force Quit")) { send(SIGKILL) },
         ]
     }
@@ -266,11 +268,13 @@ struct CommandPaletteView: View {
             VStack(spacing: 0) { ForEach(Array(rows.prefix(12).enumerated()), id: \.element.id) { i, r in row(r, i) } }
         } else {
             ScrollViewReader { proxy in
+                // Rows are identified by the item, not by position: with `.id(index)` the lazy stack kept drawing the
+                // previous rows after the query changed, so the list looked unfiltered and the highlight never moved.
                 ScrollView {
-                    LazyVStack(spacing: 0) { ForEach(Array(rows.enumerated()), id: \.element.id) { i, r in row(r, i).id(i) } }
+                    LazyVStack(spacing: 0) { ForEach(Array(rows.enumerated()), id: \.element.id) { i, r in row(r, i) } }
                 }
                 .frame(maxHeight: 420)
-                .onChange(of: model.selection) { proxy.scrollTo(model.selection) }
+                .onChange(of: model.selection) { if model.selection < rows.count { proxy.scrollTo(rows[model.selection].id) } }
             }
         }
     }

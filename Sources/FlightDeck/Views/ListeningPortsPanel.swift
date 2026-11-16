@@ -36,7 +36,9 @@ struct ListeningPortsPanel: View {
 
     @ViewBuilder var content: some View {
         if let s = loader.value {
-            Text(coverageText(s.coverage)).font(.system(size: 11)).foregroundStyle(p.dim).fixedSize(horizontal: false, vertical: true)
+            // No `fixedSize(vertical:)`: inside the DisclosureGroup that let a near-zero width measurement report a huge
+            // minimum height, which pushed the whole window's content (sidebar included) off screen.
+            Text(coverageText(s.coverage)).font(.system(size: 11)).foregroundStyle(p.dim).lineLimit(3)
                 .frame(maxWidth: .infinity, alignment: .leading)
             // A fixed-height scrolling grid so the sockets table below keeps most of the window.
             MaybeScroll {
@@ -55,7 +57,10 @@ struct ListeningPortsPanel: View {
                         }.font(.system(size: 11, design: .monospaced))
                     }
                 }.frame(maxWidth: .infinity, alignment: .leading)
-            }.frame(maxHeight: 220)
+            }
+            // An explicit height (rows × ~19 pt, capped at 220) rather than `maxHeight`: a ScrollView with only a maximum
+            // inside a DisclosureGroup above the sockets Table made the page's VStack overflow the window when expanded.
+            .frame(height: min(CGFloat(s.sockets.count + 1) * 19 + 8, 220))
         } else {
             ProgressView().controlSize(.small)
         }

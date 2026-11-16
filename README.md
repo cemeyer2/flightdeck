@@ -200,7 +200,9 @@ system extensions. Each row is OK, needs attention or unknown (with the reason),
 
 **Peripherals**: the USB tree (speed, power drawn), Thunderbolt/USB4, displays (resolution, refresh, HDR), Bluetooth
 devices with battery levels, audio devices and the power adapter. **Connections** adds **listening ports**: which
-process listens on which port, flagging services open on all interfaces.
+process listens on which port, flagging services open on all interfaces. It uses `netstat` (every process) when macOS
+gives the app the socket table, and otherwise falls back to `lsof` (your own processes only) and says so; on macOS 27,
+netstat launched from an app returns no Internet sockets even though it works in Terminal.
 
 ## Measurement principles
 
