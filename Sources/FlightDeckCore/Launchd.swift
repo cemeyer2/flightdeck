@@ -50,7 +50,9 @@ public enum Launchd {
 
     /// Reads the plists in the three standard launchd folders plus login items, then checks each absolute program path
     /// for existence and signature. Blocking (signature checks, launchctl, osascript); call off the main thread.
-    public static func startupItems() -> [StartupItem] {
+    /// `includeLoginItems: false` skips the System Events query, which can raise an Automation permission prompt
+    /// (Checkup uses this so opening it never prompts).
+    public static func startupItems(includeLoginItems: Bool = true) -> [StartupItem] {
         // `launchctl list` as a normal user only covers this user's gui domain; Launch Daemons live in the system domain,
         // which `launchctl print system` lists (label in the last column) without root.
         let loaded = Set(services().map(\.label)).union(systemDomainLabels())
@@ -84,7 +86,7 @@ public enum Launchd {
                                        loaded: loaded.contains(label), vendor: vendor(label)))
             }
         }
-        out.append(contentsOf: loginItems())
+        if includeLoginItems { out.append(contentsOf: loginItems()) }
         // Who signed what starts automatically, and which items point at programs that no longer exist
         // A bare command name (no leading "/") is resolved by launchd at run time, so existence can't be judged here and
         // programExists stays nil. An existing file without a readable code object is reported as not signed.

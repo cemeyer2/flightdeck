@@ -229,6 +229,7 @@ struct ConnectionsView: View {
                 Text("\(items.count) sockets · \(est) established · \(listen) listening (your processes)").font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary)
                 Button("Refresh") { loader.load() }
             }.padding(10)
+            ListeningPortsPanel()   // every process's listeners (netstat), above this user's sockets
             Table(items.sorted(using: sortOrder), sortOrder: $sortOrder) {
                 TableColumn("Process", value: \.process).width(min: 120, ideal: 160)
                 TableColumn("PID", value: \.pid) { Text("\($0.pid)").monospacedDigit() }.width(60)
