@@ -27,7 +27,8 @@ final class Alerts: NSObject, UNUserNotificationCenterDelegate {
     func start() {
         guard let center else { return }   // not running from an app bundle (e.g. `swift run`)
         center.delegate = self
-        if enabled { center.requestAuthorization(options: [.alert, .sound]) { _, _ in } }
+        // First launch asks from the welcome sheet, with context, instead of a bare prompt at startup.
+        if enabled && UserDefaults.standard.bool(forKey: "welcomed") { center.requestAuthorization(options: [.alert, .sound]) { _, _ in } }
     }
 
     func requestPermission() { center?.requestAuthorization(options: [.alert, .sound]) { _, _ in } }

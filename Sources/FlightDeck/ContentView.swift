@@ -32,6 +32,7 @@ struct ContentView: View {
     @SceneStorage("perfTab") private var perfTab: PerfTab = .cpu
     @EnvironmentObject var engine: Engine
     @Environment(\.openWindow) private var openWindow
+    @State private var showWelcome = !UserDefaults.standard.bool(forKey: "welcomed") && !UserDefaults.standard.bool(forKey: "skipWelcome")
 
     var body: some View {
         NavigationSplitView {
@@ -51,6 +52,7 @@ struct ContentView: View {
         }
         .toolbar { ToolbarItemGroup(placement: .primaryAction) { ToolbarControls() } }
         .modifier(ErrorAlert())
+        .sheet(isPresented: $showWelcome) { WelcomeView().environmentObject(engine).environment(\.palette, p) }
         .onChange(of: engine.navigationRequest) {
             guard let r = engine.navigationRequest else { return }
             engine.navigationRequest = nil

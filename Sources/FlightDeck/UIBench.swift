@@ -22,6 +22,7 @@ enum UIBench {
             }
         }
         out("summary", SummaryView())
+        out("welcome", height: 640, WelcomeView())
         out("flightlog", FlightLogView())
         out("cpu", VStack { CPUPerf() })
         out("memory", height: 1900, VStack { MemoryPerf() })
