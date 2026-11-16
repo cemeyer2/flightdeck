@@ -34,7 +34,8 @@ warnings. Without them the app is ad-hoc signed, which is fine for your own Mac.
 
 Summary · Performance (CPU per core with P/E colouring, overall/logical/cluster modes; Memory; Disk; Network with per-app traffic;
 Energy; Thermals; GPU) · Processes (live tree, sort/filter, Quit/Force Quit/Suspend/Resume) · System Info ·
-Startup Apps · Users · Services (launchd) · Power & Freq · Connections · Installed Apps · Disk Space · Benchmarks · Console
+Startup Apps · Users · Services (launchd) · Power & Freq · Connections · Installed Apps · Disk Space · Benchmarks · Launches ·
+Console · Trends · Checkup · Peripherals
 
 **Flight Recorder:** Record (⇧⌘R) captures every telemetry frame and saves it as a `.flightlog` file
 (zlib-compressed JSON). Open it (⌘O, or double-click in Finder) to scrub or replay it through the same views. Older `.mltrace` recordings from before the rename still open.
@@ -177,6 +178,29 @@ terminals, the app you're using, or FlightDeck itself; app rules quit through th
 destructive rules always wait at least a minute, and a match-everything destructive rule must be explicitly confirmed;
 suspended apps resume automatically (and when FlightDeck quits); commands time out after 60 s with their output logged.
 "Test Against the Last 24 Hours" dry-runs a rule on the black box before you save it.
+
+**Command palette** (⌘K, View › Command Palette…): type to jump to any view or Performance tab, find a running app or
+process (then inspect, sample its stacks, reveal it in Finder, quit or force quit, with the usual confirmations), or run a
+command (record, save or replay the black box, open a flight log, capture diagnostics, Settings).
+
+**Capture Diagnostics…** (Help menu, or the palette) writes one folder or zip for a bug report: the black box's last
+10 minutes, a text summary (system, findings, top processes; no serial number or hardware UUID), macOS crash and hang
+reports from the last 24 hours, 2-second stack samples of the busiest and any hung app of yours, and recent unified-log
+errors. It may contain personal paths and names, so review it before sharing.
+
+**Launches** lists process launches and exits seen between samples (name, PID, parent, user, lifetime), with
+"launched N× in the last 10 minutes" grouping, and raises a finding when something respawns over and over. Processes that
+live less than one sample interval are missed. The inspector also gains a **Memory** tab that breaks a process's memory
+into heap, graphics, mapped files, code, stacks and so on (via `footprint`/`vmmap`; your own processes only).
+
+**Checkup** is a one-page health and security checklist: SIP, FileVault, Gatekeeper, firewall, Startup Security,
+automatic and pending updates (the network check runs only when you press Check Now), Time Machine, free space, drive
+and battery health, crashes and hangs this week, uptime, swap trend, login and background items, third-party kernel and
+system extensions. Each row is OK, needs attention or unknown (with the reason), and links to the setting that fixes it.
+
+**Peripherals**: the USB tree (speed, power drawn), Thunderbolt/USB4, displays (resolution, refresh, HDR), Bluetooth
+devices with battery levels, audio devices and the power adapter. **Connections** adds **listening ports**: which
+process listens on which port, flagging services open on all interfaces.
 
 ## Measurement principles
 
