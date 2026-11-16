@@ -3,7 +3,7 @@ import FlightDeckCore
 
 enum Destination: String, CaseIterable, Identifiable, Hashable {
     case summary = "Summary", flightLog = "Flight Log", performance = "Performance", processes = "Processes", systemInfo = "System Info",
-         startup = "Startup Apps", users = "Users", services = "Services", power = "Power & Freq",
+         startup = "Startup Apps", users = "Users", services = "Services", power = "Power & Freq", sleep = "Sleep & Wake",
          connections = "Connections", apps = "Installed Apps", diskSpace = "Disk Space", benchmarks = "Benchmarks"
     var id: String { rawValue }
     var icon: String {
@@ -17,6 +17,7 @@ enum Destination: String, CaseIterable, Identifiable, Hashable {
         case .users: "person.2"
         case .services: "gearshape.2"
         case .power: "bolt"
+        case .sleep: "moon.zzz"
         case .connections: "network"
         case .apps: "square.grid.2x2"
         case .diskSpace: "internaldrive"
@@ -86,6 +87,7 @@ struct ContentView: View {
         case .users: UsersView()
         case .services: ServicesView()
         case .power: PowerView()
+        case .sleep: SleepView()
         case .connections: ConnectionsView()
         case .apps: InstalledAppsView()
         case .diskSpace: DiskSpaceView()

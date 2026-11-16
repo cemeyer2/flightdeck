@@ -117,6 +117,10 @@ Flight Recorder is recording. The static `AppIcon.icns` is rendered by the same 
 **Startup Apps** shows who signed every launch agent, daemon and login item, flags unsigned ones, and marks items
 whose program no longer exists (leftovers from removed apps), with a summary at the top.
 
+**Sleep & Wake** reads the power-management log (no root): every sleep session with why it slept, what woke it,
+each dark wake (screen-off wakes for network upkeep, Power Nap, Bluetooth) in plain English, battery used overnight,
+which processes scheduled wakes, and which apps kept the Mac awake and for how long.
+
 ## Measurement principles
 
 - **No invented zeros.** Every value is `Measured<T>`, either `.value` or `.unavailable(reason)`. Unmeasured

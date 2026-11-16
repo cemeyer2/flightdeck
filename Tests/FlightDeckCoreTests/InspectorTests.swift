@@ -140,3 +140,38 @@ final class EvidenceTests: XCTestCase {
         if let u = r?.0 { try? FileManager.default.removeItem(at: u) }
     }
 }
+
+final class SleepLogTests: XCTestCase {
+    func testParsesASessionWithDarkWakes() {
+        let log = [
+            "2026-11-16 00:10:00 -0600 Sleep               \tEntering Sleep state due to 'Clamshell Sleep':TCPKeepAlive=active Using BATT (Charge:90%) 600 secs  ",
+            "2026-11-16 00:20:00 -0600 DarkWake            \tDarkWake from Deep Idle [CDNPB] : due to smc.sysState.Wake(0x70070000) wifibt SMC.OutboxNotEmpty E_RX_IP_PACKET ARPT/ Using BATT (Charge:89%) 30 secs",
+            "2026-11-16 00:20:02 -0600 Wake Requests       \t[process=mDNSResponder request=Maintenance deltaSecs=7198 wakeAt=2026-11-16 02:20:00 info=\"upkeep wake\"] [process=dasd request=SleepService deltaSecs=999]",
+            "2026-11-16 00:20:30 -0600 Sleep               \tEntering Sleep state due to 'Maintenance Sleep':TCPKeepAlive=active Using BATT (Charge:89%) 3000 secs",
+            "2026-11-16 01:10:30 -0600 DarkWake            \tDarkWake from Deep Idle [CDNPB] : due to NUB.SPMISw3IRQ nub-spmi0.0x02 rtc/Maintenance Using BATT (Charge:88%) 10 secs",
+            "2026-11-16 01:10:40 -0600 Sleep               \tEntering Sleep state due to 'Maintenance Sleep':TCPKeepAlive=active Using BATT (Charge:88%) 20000 secs",
+            "2026-11-16 06:44:00 -0600 Wake                \tDarkWake to FullWake from Deep Idle [CDNVA] : due to EC.LidOpen/Lid Open Using BATT (Charge:85%)",
+            "2026-11-16 07:00:00 -0600 Assertions          \tPID 883(Google Chrome) Released NoDisplaySleepAssertion \"Video Wake Lock\" 00:12:05 id:0x1 [System: x]",
+            "2026-11-16 07:05:00 -0600 Assertions          \tPID 883(Google Chrome) Released NoDisplaySleepAssertion \"Video Wake Lock\" 00:10:00 id:0x2 [System: x]",
+        ].joined(separator: "\n")
+        let r = SleepLog.parse(log, since: .distantPast)
+        XCTAssertEqual(r.sessions.count, 1)
+        let s = r.sessions[0]
+        XCTAssertEqual(s.why, "Lid closed")
+        XCTAssertEqual(s.wokeBy, "Lid opened")
+        XCTAssertEqual(s.darkWakes.count, 2)
+        XCTAssertEqual(s.batteryUsed, 5)
+        XCTAssertEqual(s.asleepSeconds, 23_600)
+        XCTAssertEqual(r.darkWakeReasons.map(\.reason).sorted(), ["Network traffic arrived (Wi-Fi)", "Scheduled maintenance (network upkeep, Power Nap)"])
+        XCTAssertEqual(r.wakeRequesters.map(\.process).sorted(), ["dasd", "mDNSResponder"])
+        XCTAssertEqual(r.keptAwake.first?.process, "Google Chrome"); XCTAssertEqual(r.keptAwake.first?.seconds, 1025, "overlapping holds are merged: 06:47:55–07:05:00")
+    }
+
+    func testRealLog() {
+        guard let r = SleepLog.read(days: 3) else { return }
+        print("SLEEP sessions", r.sessions.count, "darkwakes", r.events.filter { $0.kind == .darkWake }.count,
+              "reasons", r.darkWakeReasons.prefix(4).map { "\($0.reason) ×\($0.count)" }, "requesters", r.wakeRequesters.prefix(3).map(\.process),
+              "awake", r.keptAwake.prefix(3).map { "\($0.process) \($0.seconds / 60)m" })
+        if let s = r.sessions.first { print("LAST", s.start, "→", s.end, s.why, "woke by", s.wokeBy, "dark", s.darkWakes.count, "battery", s.batteryUsed as Any) }
+    }
+}
