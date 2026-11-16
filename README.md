@@ -1,4 +1,4 @@
-# Flightdeck
+# FlightDeck
 
 A native macOS task manager and system monitor (Swift, SwiftUI + AppKit). It answers "why is my Mac slow?"
 by showing which process and which subsystem is responsible.
@@ -6,8 +6,8 @@ by showing which process and which subsystem is responsible.
 ## Build & run
 
 ```sh
-./scripts/bundle.sh          # universal (arm64 + x86_64) release → build/Flightdeck.app
-open build/Flightdeck.app
+./scripts/bundle.sh          # universal (arm64 + x86_64) release → build/FlightDeck.app
+open build/FlightDeck.app
 swift test                   # core sampler tests
 ```
 
@@ -40,7 +40,7 @@ more goes into the **Flight Log** (kept 7 days) with a one-click replay of that 
 
 **Master caution:** a menu bar instrument strip (caution light, CPU and memory bars; or CPU % or the light alone)
 opens a panel with the caution status, gauges, findings, top apps and quick actions. With it on, closing the window
-keeps Flightdeck running, so the black box and alerts continue (Settings › Open at login). Sustained cautions and
+keeps FlightDeck running, so the black box and alerts continue (Settings › Open at login). Sustained cautions and
 warnings also post a notification (after 2 minutes by default, once per occurrence, at most every 30 minutes per
 problem; click to jump to the right view), and light an amber or red caution lamp on the Dock icon.
 
@@ -54,7 +54,7 @@ Anything macOS doesn't let a normal user read for other users' processes is show
 
 **Connection quality** (Performance › Network): Wi-Fi signal, noise, SNR, link rate, channel, band, width, PHY and
 security from CoreWLAN, plus router and DNS servers, all local. An opt-in probe (off by default) pings the router and
-an internet host every 10 s, so Flightdeck can tell "your Wi-Fi is the problem" from "your internet provider is".
+an internet host every 10 s, so FlightDeck can tell "your Wi-Fi is the problem" from "your internet provider is".
 
 **Processes** can be shown as a parent/child **Tree**, grouped by **Apps** (every helper rolled into its app, with
 app-level Quit / Force Quit), or **Flat**. The filter understands queries: `cpu>50 mem>1g user:root app:chrome kind:intel gpu>0 wakeups>500 sleep hung` (terms combine; plain text matches name, path, user or PID). Right-click the column header to choose columns; layout persists. ⌘1–⌘9 jump between sections (Go menu). The **Kind** column shows Apple-silicon or Intel (Rosetta) binaries, and **Sleep** shows who is keeping the Mac or display awake (also a finding, with the reason the app gave). Apps the window server considers hung are marked **Not Responding** in red
@@ -87,7 +87,7 @@ and after an update. Shows average and 95th-percentile statistics with the chang
 elapsed time, and which apps' CPU use changed.
 
 **Command line:** the app binary doubles as a CLI
-(`alias flightdeck=/Applications/Flightdeck.app/Contents/MacOS/Flightdeck`):
+(`alias flightdeck=/Applications/FlightDeck.app/Contents/MacOS/FlightDeck`):
 
 ```sh
 flightdeck --snapshot [--top N]     # summary, top apps and findings after a 1 s warm-up
@@ -106,7 +106,7 @@ Six themes: Light, Dark, Green, Amber, Blue, Mono.
 CPU History (scrolling graph), CPU Cores (one VFD column per core, coloured by P/E), System Gauges (CPU, memory
 and temperature), or the static App Icon. It follows the current theme and shows a red tally light while the
 Flight Recorder is recording. The static `AppIcon.icns` is rendered by the same code at build time
-(`Flightdeck --render-iconset <dir>`); `--render-dock-previews <dir>` writes every mode × theme as a PNG.
+(`FlightDeck --render-iconset <dir>`); `--render-dock-previews <dir>` writes every mode × theme as a PNG.
 
 ## Measurement principles
 
@@ -114,14 +114,14 @@ Flight Recorder is recording. The static `AppIcon.icns` is rendered by the same 
   values show "—". Examples: other users' processes without root, the first sample before deltas exist,
   Macs without sensors.
 - **Gaps, not interpolation.** Pausing or missed samples are stored as `nil` and drawn as line breaks, both live and in replay.
-- **Self-monitoring.** Flightdeck appears in its own process list by default (Settings → toggle).
+- **Self-monitoring.** FlightDeck appears in its own process list by default (Settings → toggle).
 - **Identity-safe actions.** Signals are sent only if the PID still has the same start time (`ProcessIdentity`).
-- **Private by design.** Flightdeck sends no data anywhere. By default it makes no network requests at all; the only exception is the opt-in latency probe (Settings › Network quality), which pings your router and one host you choose.
+- **Private by design.** FlightDeck sends no data anywhere. By default it makes no network requests at all; the only exception is the opt-in latency probe (Settings › Network quality), which pings your router and one host you choose.
 
 ## Known limits
 
 - Per-process network traffic comes from `/usr/bin/nettop`. Only that Apple binary holds the private
-  network-statistics entitlement, so Flightdeck runs it once per sample (about 18 ms CPU) and diffs per-connection
+  network-statistics entitlement, so FlightDeck runs it once per sample (about 18 ms CPU) and diffs per-connection
   counters. A connection that opens and closes between two samples isn't counted. Against a 5 MB curl download
   the count came out at 5.01 MB (the extra is TLS overhead).
 - Live CPU clock frequency needs private IOReport access, so it isn't shown. Power & Freq shows the DVFS tables instead.
@@ -130,9 +130,9 @@ Flight Recorder is recording. The static `AppIcon.icns` is rendered by the same 
 
 ## Layout
 
-- `Sources/FlightdeckCore`: samplers (CPU, memory, disk, network, power/thermal, processes), providers
+- `Sources/FlightDeckCore`: samplers (CPU, memory, disk, network, power/thermal, processes), providers
   (system info, launchd, connections, apps, disk usage, frequency, benchmarks), and `Snapshot`/`Trace`.
-- `Sources/Flightdeck`: the SwiftUI app. `Engine` owns sampling, history and recording/replay. The process
+- `Sources/FlightDeck`: the SwiftUI app. `Engine` owns sampling, history and recording/replay. The process
   table is an AppKit `NSOutlineView` updated by diffing, for low overhead.
 
-Automation hooks: `open build/Flightdeck.app --args -destination "Processes" -theme green -replayIndex 10`.
+Automation hooks: `open build/FlightDeck.app --args -destination "Processes" -theme green -replayIndex 10`.
