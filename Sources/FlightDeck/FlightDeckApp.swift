@@ -143,6 +143,11 @@ struct SettingsView: View {
                 Text("0.5 s").tag(0.5); Text("1 s").tag(1.0); Text("2 s").tag(2.0); Text("5 s").tag(5.0)
             }
             Toggle("Include FlightDeck in measurements (self-monitoring)", isOn: $engine.includeSelf)
+            Picker("When no window is open, sample every", selection: $engine.backgroundInterval) {
+                Text("1 s (same as visible)").tag(1.0); Text("2 s").tag(2.0); Text("5 s").tag(5.0)
+            }
+            Text("Keeps FlightDeck light in the background. The black box, findings and alerts keep running.")
+                .font(.caption).foregroundStyle(.secondary)
             Section("Menu bar and alerts") {
                 Toggle("Show in menu bar (keeps running when the window is closed)", isOn: $menuBarEnabled)
                 Picker("Menu bar shows", selection: $menuBarStyle) { ForEach(MenuBarStyle.allCases) { Text($0.rawValue).tag($0) } }

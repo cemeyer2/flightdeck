@@ -17,6 +17,8 @@ public struct Finding: Identifiable, Sendable, Hashable, Codable {
     public var destination: String?
     /// Processes responsible (busiest first), for "Inspect" / "Quit" actions.
     public var pids: [Int32]? = nil
+    /// What a viewer would see change (identity, severity, wording).
+    public var signature: String { "\(id)|\(severity.rawValue)|\(title)|\(detail ?? "")" }
 }
 
 public struct Thresholds: Sendable, Codable, Equatable {

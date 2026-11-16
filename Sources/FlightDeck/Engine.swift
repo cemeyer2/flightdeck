@@ -17,6 +17,9 @@ final class Engine: ObservableObject {
     @Published var paused = false { didSet { if !paused { pushGap() } else { queue.async { [incidentLog] in incidentLog.closeAll(at: Date()) } } } }
     @AppStorage("interval") var interval: Double = 1.0 { didSet { restartTimer() } }
     @AppStorage("includeSelf") var includeSelf = true
+    /// Sample interval while no FlightDeck window is visible (menu bar / background only).
+    @AppStorage("backgroundInterval") var backgroundInterval: Double = 2.0
+    private var lastTick = Date.distantPast
     @AppStorage("blackBoxEnabled") var blackBoxEnabled = true
     @AppStorage("appCPUThreshold") var appCPUThreshold = 80.0 { didSet { applyThresholds() } }
     /// Opt-in: pings the router and `netProbeHost` every 10 s. Off by default (privacy).
@@ -87,6 +90,7 @@ final class Engine: ObservableObject {
         }
         applyThresholds()
         applyProbe()
+        startVisibilityTracking()
         NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: nil) { [blackBox, blackBoxQueue, queue, incidentLog] _ in
             blackBoxQueue.sync { blackBox.flush() }
             queue.sync { incidentLog.closeAll(at: Date()); incidentLog.save() }
@@ -117,6 +121,8 @@ final class Engine: ObservableObject {
 
     private func tick() {
         guard !paused, !inFlight else { return }
+        if !uiVisible, Date().timeIntervalSince(lastTick) < max(backgroundInterval, interval) - interval * 0.25 { return }
+        lastTick = Date()
         inFlight = true
         let includeSelf = self.includeSelf
         queue.async { [sampler, analyzer, incidentLog] in
@@ -130,8 +136,9 @@ final class Engine: ObservableObject {
             let log: [Incident]? = incidentLog.revision != self.incidentRevision ? incidentLog.incidents : nil
             self.incidentRevision = incidentLog.revision
             Task { @MainActor in
-                self.liveFindings = found
-                self.diskFullDays = fullDays
+                // publish only real changes (each publish re-evaluates every observing view)
+                if found.map(\.signature) != self.liveFindings.map(\.signature) { self.liveFindings = found }
+                if fullDays.map({ ($0 * 10).rounded() }) != self.diskFullDays.map({ ($0 * 10).rounded() }) { self.diskFullDays = fullDays }
                 Alerts.shared.evaluate(found + self.reportFindings, now: s.time)
                 if let log { self.incidents = log }
                 fresh.forEach { self.onNewIncident?($0) }
@@ -148,15 +155,63 @@ final class Engine: ObservableObject {
         frames.removeFirst(); frames.append(light)
     }
 
+    // MARK: Visibility
+    /// Whether any FlightDeck window (main, inspector, compare, menu bar panel) is on screen. While none is,
+    /// sampling, the black box and alerts continue at full rate, but view-facing state is staged instead of
+    /// published, so SwiftUI isn't re-evaluating views nobody can see.
+    private(set) var uiVisible = true
+    private var hiddenFrames: [Snapshot?]?
+    private var hiddenCurrent: Snapshot?
+    private var lastHiddenLivePublish = Date.distantPast
+
+    func startVisibilityTracking() {
+        let names: [Notification.Name] = [NSWindow.didChangeOcclusionStateNotification, NSWindow.didMiniaturizeNotification,
+                                          NSWindow.didDeminiaturizeNotification, NSWindow.willCloseNotification, NSWindow.didBecomeKeyNotification,
+                                          NSApplication.didHideNotification, NSApplication.didUnhideNotification]
+        for n in names {
+            NotificationCenter.default.addObserver(forName: n, object: nil, queue: .main) { [weak self] _ in
+                // re-check a moment later: e.g. willClose fires while the window is still on screen
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { MainActor.assumeIsolated { self?.updateVisibility() } }
+            }
+        }
+    }
+
+    private func updateVisibility() {
+        let visible = !NSApp.isHidden && NSApp.windows.contains { w in
+            w.isVisible && !w.isMiniaturized && w.occlusionState.contains(.visible)
+                && !String(describing: type(of: w)).contains("StatusBar")   // the menu bar item itself is always "visible"
+        }
+        if ProcessInfo.processInfo.environment["FD_DEBUG_VISIBILITY"] != nil {
+            NSLog("FDVIS visible=%d %@", visible ? 1 : 0, NSApp.windows.map { "\(type(of: $0)) v=\($0.isVisible) m=\($0.isMiniaturized) o=\($0.occlusionState.contains(.visible))" }.joined(separator: "; "))
+        }
+        guard visible != uiVisible else { return }
+        uiVisible = visible
+        if visible {   // catch up in one publish, so graphs have no hole
+            if let f = hiddenFrames { frames = f }
+            if let c = hiddenCurrent { current = c }
+            hiddenFrames = nil; hiddenCurrent = nil
+        } else if mode == .live {
+            hiddenFrames = frames; hiddenCurrent = current
+        }
+    }
+
     private func ingest(_ s: Snapshot) {
         inFlight = false
-        liveSnapshot = s
         if recording { recorded.append(FlightDeckCore.Trace.trimmed(s)) }
         if blackBoxEnabled { let iv = interval; blackBoxQueue.async { [blackBox] in blackBox.append(s, interval: iv) } }
         DockIconController.shared.ingest(s, recording: recording, caution: liveFindings.map(\.severity.rawValue).max() ?? 0)
+        var light = s; light.processes = Array(s.processes.sorted { $0.cpu > $1.cpu }.prefix(12))
+        if !uiVisible {
+            // menu bar strip still updates, just less often
+            if s.time.timeIntervalSince(lastHiddenLivePublish) >= 5 { liveSnapshot = s; lastHiddenLivePublish = s.time }
+            guard mode == .live else { return }
+            if hiddenFrames == nil { hiddenFrames = frames }
+            hiddenFrames!.removeFirst(); hiddenFrames!.append(light); hiddenCurrent = s
+            return
+        }
+        liveSnapshot = s
         guard mode == .live else { return }
         current = s
-        var light = s; light.processes = Array(s.processes.sorted { $0.cpu > $1.cpu }.prefix(12))
         frames.removeFirst(); frames.append(light)
     }
 
