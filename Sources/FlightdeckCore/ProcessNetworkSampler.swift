@@ -6,6 +6,9 @@ public struct ProcessNetwork: Codable, Sendable, Hashable {
     public var totalIn: UInt64     // since Flightdeck started observing
     public var totalOut: UInt64
     public var connections: Int
+    public init(inBps: Double, outBps: Double, totalIn: UInt64, totalOut: UInt64, connections: Int) {
+        self.inBps = inBps; self.outBps = outBps; self.totalIn = totalIn; self.totalOut = totalOut; self.connections = connections
+    }
 }
 
 /// Per-process network traffic from `/usr/bin/nettop` (which holds Apple's private network-statistics

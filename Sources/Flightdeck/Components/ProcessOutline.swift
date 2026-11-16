@@ -22,8 +22,8 @@ enum ProcColumn: String, CaseIterable, Equatable {
     }
     func text(_ s: ProcessSample) -> String {
         switch self {
-        case .name: s.name
-        case .pid: "\(s.pid)"
+        case .name: s.notResponding == true ? "\(s.name) (Not Responding)" : s.name
+        case .pid: s.pid < 0 ? "" : "\(s.pid)"
         case .cpu: s.restricted ? "—" : String(format: "%.1f", s.cpu)
         case .memory: s.restricted ? "—" : Fmt.bytes(s.memory)
         case .disk: s.restricted ? "—" : (s.diskReadBps + s.diskWriteBps > 0 ? Fmt.rate(s.diskReadBps + s.diskWriteBps) : "0")
@@ -42,6 +42,7 @@ struct ProcessOutline: NSViewRepresentable {
     var frameTime: Date?
     var processes: [ProcessSample]
     var tree: Bool
+    var byApp = false
     var filter: String
     var palette: Palette
     @Binding var selection: ProcessIdentity?
@@ -83,7 +84,7 @@ struct ProcessOutline: NSViewRepresentable {
 
     func updateNSView(_ sv: NSScrollView, context: Context) {
         let c = context.coordinator
-        let key = "\(frameTime?.timeIntervalSince1970 ?? 0)|\(tree)|\(filter)|\(processes.count)|\(palette.id)"
+        let key = "\(frameTime?.timeIntervalSince1970 ?? 0)|\(tree)|\(byApp)|\(filter)|\(processes.count)|\(palette.id)"
         let selChanged = c.parent.selection != selection
         c.parent = self
         if key != c.lastKey { c.lastKey = key; c.rebuild() } else if selChanged { c.applySelection() }
@@ -99,6 +100,51 @@ struct ProcessOutline: NSViewRepresentable {
         var lastKey = ""
         var lastSort: (ProcColumn, Bool) = (.cpu, false)
         init(_ p: ProcessOutline) { parent = p }
+
+        /// Stable synthetic identities for app group rows (negative PIDs never collide with real ones).
+        var groupIDs: [String: Int32] = [:]
+        var groupItems: [ProcessIdentity: ProcItem] = [:]
+        func groupIdentity(_ key: String) -> ProcessIdentity {
+            if groupIDs[key] == nil { groupIDs[key] = -Int32(groupIDs.count + 1) }
+            return ProcessIdentity(pid: groupIDs[key]!, startTime: 0)
+        }
+
+        /// One row per app summing its processes; the processes become its children.
+        func appGroups(_ all: [ProcItem]) -> [ProcItem] {
+            var buckets: [String: [ProcItem]] = [:]
+            var order: [String] = []
+            for (it, gk) in zip(all, AppUsage.groupKeys(all.map(\.s))) {
+                let k = gk.key
+                if buckets[k] == nil { order.append(k) }
+                buckets[k, default: []].append(it)
+            }
+            return order.map { k in
+                let members = buckets[k]!
+                guard members.count > 1 else { return members[0] }
+                var g = members[0].s
+                g.identity = groupIdentity(k)
+                g.name = "\(AppUsage.groupKeys([members[0].s]).first!.name) (\(members.count))"
+                g.path = k.hasPrefix("proc:") ? g.path : k + "/"
+                g.ppid = 0
+                g.cpu = members.reduce(0) { $0 + $1.s.cpu }
+                g.memory = members.reduce(0) { $0 + $1.s.memory }
+                g.threads = members.reduce(0) { $0 + $1.s.threads }
+                g.diskReadBps = members.reduce(0) { $0 + $1.s.diskReadBps }
+                g.diskWriteBps = members.reduce(0) { $0 + $1.s.diskWriteBps }
+                g.wakeups = members.reduce(0) { $0 + $1.s.wakeups }
+                let e = members.compactMap(\.s.energyWatts); g.energyWatts = e.isEmpty ? nil : e.reduce(0, +)
+                let n = members.compactMap(\.s.network)
+                g.network = n.isEmpty ? nil : ProcessNetwork(inBps: n.reduce(0) { $0 + $1.inBps }, outBps: n.reduce(0) { $0 + $1.outBps },
+                                                             totalIn: n.reduce(0) { $0 + $1.totalIn }, totalOut: n.reduce(0) { $0 + $1.totalOut },
+                                                             connections: n.reduce(0) { $0 + $1.connections })
+                g.restricted = members.allSatisfy(\.s.restricted)
+                g.notResponding = members.contains { $0.s.notResponding == true } ? true : nil
+                let item = groupItems[g.identity] ?? ProcItem(g)
+                item.s = g; item.children = sorted(members)
+                groupItems[g.identity] = item; items[g.identity] = item
+                return item
+            }
+        }
 
         @objc func doubleClicked(_ ov: NSOutlineView) {
             guard ov.clickedRow >= 0, let it = ov.item(atRow: ov.clickedRow) as? ProcItem else { return }
@@ -145,7 +191,9 @@ struct ProcessOutline: NSViewRepresentable {
             }
             items = next
             let f = parent.filter.trimmingCharacters(in: .whitespaces).lowercased()
-            if !f.isEmpty || !parent.tree {
+            if f.isEmpty && parent.byApp {
+                roots = sorted(appGroups(Array(next.values)))
+            } else if !f.isEmpty || !parent.tree {
                 roots = sorted(next.values.filter { s in f.isEmpty || s.s.name.lowercased().contains(f) || "\(s.s.pid)" == f || s.s.user.lowercased() == f || s.s.path.lowercased().contains(f) })
             } else {
                 let byPID = Dictionary(next.values.map { ($0.s.pid, $0) }, uniquingKeysWith: { a, _ in a })
@@ -232,6 +280,7 @@ struct ProcessOutline: NSViewRepresentable {
             cell.textField?.alignment = c.numeric ? .right : .left
             cell.textField?.textColor = (c.text(it.s) == "—") ? .secondaryLabelColor : .labelColor
             if c == .name {
+                if it.s.notResponding == true { cell.textField?.textColor = .systemRed }
                 cell.imageView?.image = icon(for: it.s.path)
                 cell.toolTip = it.s.restricted ? "Owned by another user; some values are unavailable without elevated rights" : it.s.path
             }

@@ -157,6 +157,13 @@ public final class Analyzer {
                 topCPU.map { "Biggest user: \(describe($0)) at \(Int($0.cpu))%." }, "Performance:CPU")
         }
 
+        // Hung apps
+        for p in s.processes where p.notResponding == true {
+            let name = AppUsage.key(for: p).name
+            add("hang:\(p.identity.pid)-\(p.identity.startTime)", .warning, "hourglass", "\(name) is not responding",
+                "Its main thread is stuck. Open it in the inspector and sample its stacks to see where, or Force Quit it.", "Processes")
+        }
+
         // Memory
         if s.memory.pressureLevel >= 2 {
             add("mem-pressure", s.memory.pressureLevel >= 4 ? .warning : .caution, "memorychip",

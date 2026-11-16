@@ -53,6 +53,10 @@ Anything macOS doesn't let a normal user read for other users' processes is show
 security from CoreWLAN, plus router and DNS servers, all local. An opt-in probe (off by default) pings the router and
 an internet host every 10 s, so Flightdeck can tell "your Wi-Fi is the problem" from "your internet provider is".
 
+**Processes** can be shown as a parent/child **Tree**, grouped by **Apps** (every helper rolled into its app, with
+app-level Quit / Force Quit), or **Flat**. Apps the window server considers hung are marked **Not Responding** in red
+and raise a warning finding.
+
 Six themes: Light, Dark, Green, Amber, Blue, Mono.
 
 **Live Dock icon:** right-click the Dock icon (or use Monitor › Dock Icon, or Settings) to pick a mode:

@@ -28,10 +28,18 @@ public struct AppUsage: Sendable, Identifiable, Hashable {
         return ("proc:\(p.name)", p.name, p.path)
     }
 
+    /// Group keys aligned with `procs`. A process whose path is unreadable but whose name matches an app
+    /// bundle seen in the same sample joins that app (e.g. an app's main process when its path is hidden).
+    public static func groupKeys(_ procs: [ProcessSample]) -> [(key: String, name: String, icon: String)] {
+        let raw = procs.map(key(for:))
+        var byName: [String: (key: String, name: String, icon: String)] = [:]
+        for k in raw where !k.key.hasPrefix("proc:") { byName[k.name] = k }
+        return raw.map { k in k.key.hasPrefix("proc:") ? (byName[k.name] ?? k) : k }
+    }
+
     public static func aggregate(_ procs: [ProcessSample]) -> [AppUsage] {
         var groups: [String: AppUsage] = [:]
-        for p in procs {
-            let k = key(for: p)
+        for (p, k) in zip(procs, groupKeys(procs)) {
             var g = groups[k.key] ?? AppUsage(id: k.key, name: k.name, iconPath: k.icon)
             g.processes += 1; g.cpu += p.cpu; g.memory += p.memory; g.threads += p.threads
             g.diskBps += p.diskReadBps + p.diskWriteBps

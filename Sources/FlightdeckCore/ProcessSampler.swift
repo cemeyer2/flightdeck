@@ -5,6 +5,7 @@ import Darwin
 public struct ProcessIdentity: Codable, Sendable, Hashable {
     public var pid: Int32
     public var startTime: UInt64   // microseconds since epoch
+    public init(pid: Int32, startTime: UInt64) { self.pid = pid; self.startTime = startTime }
 }
 
 public struct ProcessSample: Codable, Sendable, Identifiable, Hashable {
@@ -29,6 +30,8 @@ public struct ProcessSample: Codable, Sendable, Identifiable, Hashable {
     public var restricted: Bool       // couldn't read full info (other user's process)
     /// nil = network sampling unavailable or warming up. Present for every process once nettop works.
     public var network: ProcessNetwork? = nil
+    /// GUI apps only: true while the window server considers it hung. nil = not a GUI app / unknown.
+    public var notResponding: Bool? = nil
     public var startDate: Date { Date(timeIntervalSince1970: Double(identity.startTime) / 1e6) }
 }
 
@@ -146,7 +149,9 @@ public final class ProcessSampler {
             if path.hasSuffix("/" + appName) || name.count >= 15 { name = appName }
         } else if name.count >= 15, !path.isEmpty { name = (path as NSString).lastPathComponent }
         if pid == 0 { name = "kernel_task" }
-        pathCache[ident] = (name, path); return (name, path)
+        // Only cache successes: a transient failure (e.g. right at exec) must not hide the path forever.
+        if !path.isEmpty { pathCache[ident] = (name, path) }
+        return (name, path)
     }
 
     // MARK: Actions (identity-checked)

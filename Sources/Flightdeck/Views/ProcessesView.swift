@@ -5,7 +5,7 @@ struct ProcessesView: View {
     @EnvironmentObject var e: Engine
     @Environment(\.palette) var p
     @State private var filter = ""
-    @AppStorage("procTree") private var tree = true
+    @AppStorage("procView") private var view = "tree"   // tree | apps | flat
     @AppStorage("procMineOnly") private var mineOnly = false
     @State private var selection: ProcessIdentity?
     @State private var confirm: (ProcessSample, Int32, String)?
@@ -16,8 +16,21 @@ struct ProcessesView: View {
         return mineOnly ? procs.filter { $0.uid == getuid() } : procs
     }
 
+    /// The running app behind an app-group row (synthetic rows have negative PIDs).
+    func runningApp(_ s: ProcessSample) -> NSRunningApplication? {
+        guard let b = AppUsage.bundle(of: s.path) else { return nil }
+        return NSWorkspace.shared.runningApplications.first { $0.bundleURL?.standardizedFileURL.path == URL(fileURLWithPath: b).standardizedFileURL.path }
+    }
+
     func nsMenu(_ s: ProcessSample) -> NSMenu {
         let m = NSMenu()
+        if s.pid < 0 {   // app group row
+            let app = runningApp(s)
+            m.addItem(ClosureMenuItem("Quit App", enabled: app != nil) { app?.terminate() })
+            m.addItem(ClosureMenuItem("Force Quit App", enabled: app != nil) { app?.forceTerminate() })
+            m.addItem(ClosureMenuItem("Reveal in Finder") { NSWorkspace.shared.selectFile(AppUsage.bundle(of: s.path), inFileViewerRootedAtPath: "") })
+            return m
+        }
         m.addItem(ClosureMenuItem("Inspect…") { AppActions.openInspector?(s.identity) })
         m.addItem(.separator())
         m.addItem(ClosureMenuItem("Quit") { confirm = (s, SIGTERM, "Quit") })
@@ -36,7 +49,9 @@ struct ProcessesView: View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
                 TextField("Filter by name, PID, user or path", text: $filter).textFieldStyle(.roundedBorder).frame(maxWidth: 320)
-                Toggle("Tree", isOn: $tree).toggleStyle(.switch)
+                Picker("", selection: $view) { Text("Tree").tag("tree"); Text("Apps").tag("apps"); Text("Flat").tag("flat") }
+                    .pickerStyle(.segmented).labelsHidden().frame(width: 190)
+                    .help("Tree: by parent process · Apps: helpers grouped under their app · Flat: every process")
                 Toggle("My processes", isOn: $mineOnly).toggleStyle(.switch)
                 Spacer()
                 if let c = e.current {
@@ -44,9 +59,9 @@ struct ProcessesView: View {
                         .font(.system(size: 11, design: .monospaced)).foregroundStyle(p.dim)
                 }
             }.padding(10)
-            ProcessOutline(frameTime: e.current?.time, processes: visibleProcesses, tree: tree, filter: filter, palette: p, selection: $selection, menu: nsMenu,
-                           onOpen: { AppActions.openInspector?($0.identity) })
-            if let selected { ProcessDetailBar(s: selected, actions: { AnyView(actions(selected)) }) }
+            ProcessOutline(frameTime: e.current?.time, processes: visibleProcesses, tree: view == "tree", byApp: view == "apps", filter: filter, palette: p, selection: $selection, menu: nsMenu,
+                           onOpen: { if $0.pid > 0 { AppActions.openInspector?($0.identity) } })
+            if let selected, selected.pid > 0 { ProcessDetailBar(s: selected, actions: { AnyView(actions(selected)) }) }
         }
         .alert("\(confirm?.2 ?? "") “\(confirm?.0.name ?? "")”?", isPresented: Binding(get: { confirm != nil }, set: { if !$0 { confirm = nil } })) {
             Button(confirm?.2 ?? "OK", role: .destructive) { if let c = confirm { send(c.1, c.0) }; confirm = nil }
@@ -66,7 +81,7 @@ struct ProcessesView: View {
         Divider()
         Button("Reveal in Finder") { NSWorkspace.shared.selectFile(s.path, inFileViewerRootedAtPath: "") }.disabled(s.path.isEmpty)
         Button("Copy Path") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(s.path, forType: .string) }
-        Button("Select Parent") { filter = ""; tree = true; selection = e.current?.processes.first { $0.pid == s.ppid }?.identity }
+        Button("Select Parent") { filter = ""; view = "tree"; selection = e.current?.processes.first { $0.pid == s.ppid }?.identity }
     }
 
     func send(_ sig: Int32, _ s: ProcessSample) {

@@ -38,6 +38,8 @@ public final class Sampler: @unchecked Sendable {
             }
             processNetwork.retain(pids: Set(procs.map(\.pid)))
         }
+        let hangs = HangDetector.check()
+        if !hangs.isEmpty { for i in procs.indices { procs[i].notResponding = hangs[procs[i].pid] } }
         let lat = probe.results
         return Snapshot(time: Date(), cpu: cpu.sample(), memory: memory.sample(), disk: disk.sample(),
                         network: network.sample(), power: power.sample(), gpu: SystemInfo.gpuUtilization(),
