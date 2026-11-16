@@ -3,6 +3,12 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ARCHS="${ARCHS:---arch arm64 --arch x86_64}"
+# The Command Line Tools lack the SwiftUIMacros plugin that the macOS 27 SDK needs for @State,
+# so without full Xcode, build against the macOS 26 SDK instead (set SDKROOT to override).
+CLT_SDK="/Library/Developer/CommandLineTools/SDKs/MacOSX26.sdk"
+if [ -z "${SDKROOT:-}" ] && [ "$(xcode-select -p)" = "/Library/Developer/CommandLineTools" ] && [ -d "$CLT_SDK" ]; then
+    export SDKROOT="$CLT_SDK"
+fi
 swift build -c release $ARCHS
 BIN="$(swift build -c release $ARCHS --show-bin-path)/FlightDeck"
 APP="build/FlightDeck.app"
