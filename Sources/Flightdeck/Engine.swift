@@ -36,6 +36,8 @@ final class Engine: ObservableObject {
     @Published private(set) var liveFindings: [Finding] = []
     @Published private(set) var replayFindings: [Finding] = []
     @Published private(set) var incidents: [Incident] = []
+    /// Days until the startup disk fills at the current trend (nil = no clear shrinking trend).
+    @Published private(set) var diskFullDays: Double?
     var findings: [Finding] { mode == .live ? liveFindings : replayFindings }
     /// Set to a Destination raw value (optionally "Performance:<tab>") to navigate there.
     @Published var navigationRequest: String?
@@ -107,12 +109,14 @@ final class Engine: ObservableObject {
             let s = sampler.sample()
             self.processHistory.record(s.processes)
             let found = analyzer.ingest(s)
+            let fullDays = analyzer.daysUntilFull()
             let fresh = incidentLog.update(found, at: s.time)
             if s.time.timeIntervalSince(self.lastIncidentSave) > 60 { incidentLog.save(); self.lastIncidentSave = s.time }
             let log: [Incident]? = incidentLog.revision != self.incidentRevision ? incidentLog.incidents : nil
             self.incidentRevision = incidentLog.revision
             Task { @MainActor in
                 self.liveFindings = found
+                self.diskFullDays = fullDays
                 Alerts.shared.evaluate(found, now: s.time)
                 if let log { self.incidents = log }
                 fresh.forEach { self.onNewIncident?($0) }

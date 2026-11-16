@@ -266,6 +266,11 @@ public final class Analyzer {
                     "\(Fmt.bytes(v.available)) free, shrinking steadily.", "Disk Space")
             }
         }
+        for d in s.drives ?? [] where !d.healthy {
+            add("drive:\(d.id)", d.criticalWarning != 0 || d.mediaErrors > 0 ? .warning : .caution, "internaldrive.fill",
+                "\(d.model) health: \(d.warnings.joined(separator: ", "))",
+                "Back up now. SSD problems tend to get worse, not better.", "Performance:Disk")
+        }
         if let h = s.power.battery?.health, h < 80 {
             add("battery-health", .info, "battery.75", String(format: "Battery health is %.0f%%", h),
                 "Below 80% Apple recommends service.", "Performance:Energy")

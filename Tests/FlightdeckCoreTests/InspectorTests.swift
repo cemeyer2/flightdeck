@@ -36,3 +36,14 @@ final class InspectorTests: XCTestCase {
         }
     }
 }
+
+final class DriveHealthTests: XCTestCase {
+    func testReadsInternalSSD() {
+        let d = DriveHealthReader.read()
+        print("DRIVES", d)
+        guard let first = d.first else { return }   // Macs without NVMe SMART simply report nothing
+        XCTAssertGreaterThan(first.bytesWritten, 0)
+        XCTAssertGreaterThan(first.powerOnHours, 0)
+        XCTAssert((0...150).contains(first.temperature))
+    }
+}

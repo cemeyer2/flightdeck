@@ -102,3 +102,22 @@ final class IncidentLogTests: XCTestCase {
         XCTAssertEqual(IncidentLog(url: url).incidents.count, 1)
     }
 }
+
+final class EnergyBudgetTests: XCTestCase {
+    func testIntegratesPerAppAndSkipsGaps() {
+        let t0 = Date(timeIntervalSince1970: 6_000_000)
+        var base = AnalyzerTests.base
+        base.power.systemWatts = .value(10); base.power.powerSource = "AC Power"
+        var p = base.processes[0]; p.identity = ProcessIdentity(pid: 5, startTime: 1)
+        p.path = "/Applications/Hot.app/Contents/MacOS/Hot"; p.energyWatts = 3.6
+        var frames: [Snapshot] = []
+        for i in 0..<3601 where !(1000..<2000).contains(i) {   // 1 Hz for an hour, with a 1000 s gap
+            var s = base; s.time = t0.addingTimeInterval(Double(i)); s.processes = [p]; frames.append(s)
+        }
+        let b = EnergyBudget.compute(Trace(host: "h", model: "m", interval: 1, frames: frames))
+        XCTAssertEqual(b.apps.first?.name, "Hot")
+        XCTAssertEqual(b.apps.first!.wattHours, 3.6 * 2600 / 3600, accuracy: 0.01, "the gap is not counted")
+        XCTAssertEqual(b.apps.first!.averageWatts, 3.6, accuracy: 0.001)
+        XCTAssertEqual(b.systemWattHours!, 10 * 2600 / 3600, accuracy: 0.01)
+    }
+}

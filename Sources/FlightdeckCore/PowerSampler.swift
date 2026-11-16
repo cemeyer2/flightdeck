@@ -55,7 +55,9 @@ public final class PowerSampler {
             var props: Unmanaged<CFMutableDictionary>?
             if IORegistryEntryCreateCFProperties(svc, &props, kCFAllocatorDefault, 0) == KERN_SUCCESS,
                let d = props?.takeRetainedValue() as? [String: Any] {
-                func i(_ k: String) -> Int? { (d[k] as? NSNumber)?.intValue }
+                // Newer Macs keep capacities inside "BatteryData"; look there too.
+                let bd = d["BatteryData"] as? [String: Any] ?? [:]
+                func i(_ k: String) -> Int? { (d[k] as? NSNumber)?.intValue ?? (bd[k] as? NSNumber)?.intValue }
                 let cur = i("CurrentCapacity") ?? 0, mx = i("MaxCapacity") ?? 100
                 let volt = i("Voltage").map { Double($0) / 1000 }
                 let amp = (d["InstantAmperage"] as? NSNumber ?? d["Amperage"] as? NSNumber).map { Double(Int64(truncatingIfNeeded: $0.int64Value)) / 1000 }
@@ -65,7 +67,8 @@ public final class PowerSampler {
                     isCharging: (d["IsCharging"] as? Bool) ?? false,
                     externalConnected: (d["ExternalConnected"] as? Bool) ?? false,
                     cycleCount: i("CycleCount"),
-                    maxCapacity: i("AppleRawMaxCapacity") ?? i("NominalChargeCapacity"),
+                    // NominalChargeCapacity matches the "Maximum Capacity" macOS shows in Battery settings
+                    maxCapacity: i("NominalChargeCapacity") ?? i("AppleRawMaxCapacity"),
                     designCapacity: i("DesignCapacity"),
                     temperature: i("Temperature").map { Double($0) / 100 },
                     voltage: volt, amperage: amp,

@@ -57,6 +57,13 @@ an internet host every 10 s, so Flightdeck can tell "your Wi-Fi is the problem" 
 app-level Quit / Force Quit), or **Flat**. Apps the window server considers hung are marked **Not Responding** in red
 and raise a warning finding.
 
+**Energy and storage health:** Performance › Energy has an **energy budget**: which apps used the most energy
+(Wh and average W) over the last 1, 8 or 24 hours, how long the Mac ran on battery and how much charge that took,
+and a battery charge history, all from the black box. Battery health uses the same capacity figure as macOS
+(nominal ÷ design). Performance › Disk shows **drive health** from the SSD's NVMe SMART log (wear, spare,
+lifetime reads and writes, power-on hours, unsafe shutdowns, media errors) and how many days until the startup
+disk fills at the current rate. Unhealthy drives raise a warning.
+
 Six themes: Light, Dark, Green, Amber, Blue, Mono.
 
 **Live Dock icon:** right-click the Dock icon (or use Monitor › Dock Icon, or Settings) to pick a mode:

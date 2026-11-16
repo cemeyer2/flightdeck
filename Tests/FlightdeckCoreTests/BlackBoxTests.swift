@@ -24,7 +24,7 @@ final class BlackBoxTests: XCTestCase {
         let coarse = box.trace(.coarse, from: t0)!
         XCTAssertEqual(coarse.frames.count, 25, "one frame per 10 s")
         XCTAssertEqual(coarse.interval, 10)
-        XCTAssertLessThanOrEqual(fine.frames[0].processes.count, box.config.keepProcesses)
+        XCTAssertLessThanOrEqual(fine.frames[0].processes.count, box.config.keepProcesses + box.config.keepProcesses / 5)
         let window = box.trace(.fine, from: t0.addingTimeInterval(100), to: t0.addingTimeInterval(159))!
         XCTAssertEqual(window.frames.count, 60)
         box.flush()

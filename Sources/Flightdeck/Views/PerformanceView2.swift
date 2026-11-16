@@ -31,7 +31,8 @@ struct DiskPerf: View {
                     }
                 }
             }
-            Panel(title: "Capacity") {
+            DriveHealthPanel()
+            Panel(title: "Capacity", trailing: e.diskFullDays.map { "startup disk full in ~\(max(Int($0.rounded()), 1)) days at the current rate" }) {
                 ForEach(d?.volumes ?? []) { v in VolumeRow(v: v) }
             }
             Panel(title: "Top disk processes") {
@@ -144,7 +145,8 @@ struct EnergyPerf: View {
                     HStack(spacing: 28) {
                         Readout(label: "Charge", value: String(format: "%.0f", b.percent), unit: "%")
                         Readout(label: "State", value: b.isCharging ? "Charging" : (b.externalConnected ? "On AC" : "Discharging"))
-                        Readout(label: "Time remaining", value: b.timeRemaining.map { "\($0 / 60)h \($0 % 60)m" })
+                        Readout(label: b.isCharging ? "Time to full" : "Time remaining",
+                                value: b.isCharging && b.percent >= 99 ? "Charged" : b.timeRemaining.flatMap { $0 > 0 ? "\($0 / 60)h \($0 % 60)m" : nil })
                         Readout(label: "Health", value: b.health.map { String(format: "%.0f", $0) }, unit: "%")
                         Readout(label: "Cycles", value: b.cycleCount.map(String.init))
                         Readout(label: "Temp", value: b.temperature.map { String(format: "%.1f", $0) }, unit: "°C")
@@ -154,6 +156,7 @@ struct EnergyPerf: View {
                     VFDMeter(fraction: b.percent / 100, segments: 40, color: b.percent < 20 ? p.crit : p.accent)
                 }
             }
+            EnergyBudgetPanel()
             Panel(title: "Top energy processes (measured energy)") {
                 ProcessMiniList(metric: { $0.energyWatts ?? 0 }, format: { String(format: "%.2f W", $0) }, count: 10)
             }
@@ -273,6 +276,97 @@ struct ConnectionQualityPanel: View {
                 let r = await Task.detached { (NetworkConfig.defaultRoute(), NetworkConfig.dnsServers()) }.value
                 route = r.0; dns = r.1
                 try? await Task.sleep(for: .seconds(15))
+            }
+        }
+    }
+}
+
+/// Which apps used the most energy over the last hours, from the black box.
+struct EnergyBudgetPanel: View {
+    @EnvironmentObject var e: Engine
+    @Environment(\.palette) var p
+    @AppStorage("energyBudgetHours") private var hours = 8
+    @State private var budget: EnergyBudget?
+    @State private var loading = false
+
+    var body: some View {
+        Panel(title: "Energy budget", trailing: budget.map { "recorded \(shortDuration($0.span))" }) {
+            HStack {
+                Picker("", selection: $hours) { Text("1 hour").tag(1); Text("8 hours").tag(8); Text("24 hours").tag(24) }
+                    .pickerStyle(.segmented).labelsHidden().frame(width: 260)
+                if loading { ProgressView().controlSize(.small) }
+                Spacer()
+                if let b = budget {
+                    if let wh = b.systemWattHours { Text(String(format: "System used %.1f Wh", wh)).foregroundStyle(p.dim) }
+                    if b.onBattery > 60 {
+                        Text("· \(shortDuration(b.onBattery)) on battery" + (b.batteryDropPercent.map { String(format: ", %.0f%% charge used", $0) } ?? ""))
+                            .foregroundStyle(p.dim)
+                    }
+                }
+            }.font(.system(size: 11, design: .monospaced))
+            if !e.blackBoxEnabled {
+                Text("Turn on the black box (Settings) to see energy use over time.").foregroundStyle(p.dim)
+            } else if let b = budget {
+                if b.apps.isEmpty { Text("No energy measurements recorded in this period yet.").foregroundStyle(p.dim) }
+                let top = max(b.apps.first?.wattHours ?? 1, 0.001)
+                ForEach(b.apps.prefix(10)) { a in
+                    HStack(spacing: 8) {
+                        AppIcon(path: a.iconPath.hasSuffix(".app") ? a.iconPath + "/" : a.iconPath).frame(width: 16, height: 16)
+                        Text(a.name).lineLimit(1).frame(width: 200, alignment: .leading)
+                        VFDMeter(fraction: a.wattHours / top, segments: 30, height: 6)
+                        Text(String(format: "%.2f Wh", a.wattHours)).frame(width: 80, alignment: .trailing)
+                        Text(String(format: "avg %.2f W", a.averageWatts)).foregroundStyle(p.dim).frame(width: 90, alignment: .trailing)
+                    }.font(.system(size: 12, design: .monospaced))
+                }
+                if b.charge.count > 2 {
+                    let step = max(b.charge.count / 240, 1)
+                    HistoryGraph(traces: [GraphTrace(name: "charge", values: stride(from: 0, to: b.charge.count, by: step).map { Optional(b.charge[$0].1) }, color: p.accent)],
+                                 maxValue: 100, format: { String(format: "%.0f%%", $0) }).frame(height: 70)
+                    Text("Battery charge over the period").font(.caption).foregroundStyle(p.dim)
+                }
+                Text("Integrated from each process's measured energy (the busiest ~30 processes are recorded each sample), grouped by app.")
+                    .font(.caption).foregroundStyle(p.dim)
+            }
+        }
+        .task(id: hours) { await load() }
+    }
+
+    func load() async {
+        loading = true; defer { loading = false }
+        let box = e.blackBox, h = hours
+        budget = await Task.detached(priority: .utility) { () -> EnergyBudget? in
+            let from = Date().addingTimeInterval(-Double(h) * 3600)
+            let tier: BlackBox.Tier = h <= 1 ? .fine : .coarse
+            return box.trace(tier, from: from).map(EnergyBudget.compute)
+        }.value
+    }
+}
+
+struct DriveHealthPanel: View {
+    @EnvironmentObject var e: Engine
+    @Environment(\.palette) var p
+    var body: some View {
+        let drives = e.current?.drives ?? []
+        if !drives.isEmpty {
+            Panel(title: "Drive health", trailing: "NVMe SMART · refreshed every 5 min") {
+                ForEach(drives) { d in
+                    HStack(spacing: 24) {
+                        Readout(label: d.model, value: d.healthy ? "Healthy" : "Attention", color: d.healthy ? p.accent : p.crit)
+                        Readout(label: "Wear", value: "\(d.percentUsed)", unit: "%", color: d.percentUsed >= 80 ? p.warn : nil)
+                        Readout(label: "Spare", value: "\(d.availableSpare)", unit: "%")
+                        Readout(label: "Written", value: Fmt.bytes(d.bytesWritten))
+                        Readout(label: "Read", value: Fmt.bytes(d.bytesRead))
+                        Readout(label: "Power-on", value: "\(d.powerOnHours)", unit: "h")
+                        Readout(label: "Temp", value: String(format: "%.0f", d.temperature), unit: "°C")
+                        Spacer()
+                    }
+                    VFDMeter(fraction: Double(min(d.percentUsed, 100)) / 100, segments: 50, height: 6)
+                    Text("\(d.powerCycles) power cycles · \(d.unsafeShutdowns) unsafe shutdowns · \(d.mediaErrors) media errors · \(d.errorLogEntries) error-log entries"
+                         + (d.warnings.isEmpty ? "" : " · " + d.warnings.joined(separator: ", ")))
+                        .font(.system(size: 11, design: .monospaced)).foregroundStyle(d.warnings.isEmpty ? p.dim : p.crit)
+                    Text("Wear is the drive's own estimate of its rated write endurance used; 100% is not a failure date, but plan a backup and replacement well before it.")
+                        .font(.caption).foregroundStyle(p.dim)
+                }
             }
         }
     }
