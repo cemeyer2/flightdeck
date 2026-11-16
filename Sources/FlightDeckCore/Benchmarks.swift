@@ -64,11 +64,9 @@ public enum Benchmarks {
                 return .init(name: name, score: Double(copied) / Date().timeIntervalSince(t0) / 1e9, unit: "GB/s", detail: "memcpy 256 MB blocks")
             case "Disk sequential write", "Disk sequential read":
                 // 1 GB written in 8 MB chunks to a temp file with F_NOCACHE, which bypasses the unified buffer cache so the
-                // drive,
-                // not RAM, is measured. The write time includes the final synchronize (fsync). The read test reuses the
-                // file from a
-                // previous write run if present (writing it first otherwise) and deletes it afterwards; a write run alone leaves
-                // the file in the temp directory until the next read run.
+                // drive, not RAM, is measured. The write time includes the final synchronize (fsync). The read test writes
+                // the file first (untimed) and both tests delete it afterwards, so no 1 GB file is left behind. A write
+                // error (e.g. disk full) fails the test instead of crashing: `write(contentsOf:)` throws, `write(_:)` raises.
                 let url = FileManager.default.temporaryDirectory.appendingPathComponent("flightdeck-bench.bin")
                 let chunk = Data(count: 8 << 20), total = 1 << 30
                 if name.hasSuffix("write") || !FileManager.default.fileExists(atPath: url.path) {
@@ -76,10 +74,17 @@ public enum Benchmarks {
                     guard let h = try? FileHandle(forWritingTo: url) else { break }
                     _ = fcntl(h.fileDescriptor, F_NOCACHE, 1)
                     let t0 = Date(); var w = 0
-                    while w < total { h.write(chunk); w += chunk.count }
+                    var failure: Error?
+                    while w < total { do { try h.write(contentsOf: chunk); w += chunk.count } catch { failure = error; break } }
                     try? h.synchronize(); try? h.close()
+                    if let failure {
+                        try? FileManager.default.removeItem(at: url)
+                        return .init(name: name, score: 0, unit: "", detail: "failed: \(failure.localizedDescription)")
+                    }
                     if name.hasSuffix("write") {
-                        return .init(name: name, score: Double(w) / Date().timeIntervalSince(t0) / 1e6, unit: "MB/s", detail: "1 GB, 8 MB blocks, uncached")
+                        let secs = Date().timeIntervalSince(t0)
+                        try? FileManager.default.removeItem(at: url)
+                        return .init(name: name, score: Double(w) / secs / 1e6, unit: "MB/s", detail: "1 GB, 8 MB blocks, uncached")
                     }
                 }
                 guard let h = try? FileHandle(forReadingFrom: url) else { break }

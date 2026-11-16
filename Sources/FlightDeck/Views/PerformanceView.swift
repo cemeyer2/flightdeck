@@ -167,9 +167,10 @@ struct MemoryPerf: View {
     @EnvironmentObject var e: Engine
     @Environment(\.palette) var p
     var body: some View {
-        let m = e.current?.memory
+        // Unmeasured memory (VM statistics unreadable) shows "—" everywhere instead of placeholder zeros.
+        let m = e.current.flatMap { $0.memory.isMeasured ? $0.memory : nil }
         VStack(spacing: 12) {
-            Panel(title: "Memory", trailing: m.map { Fmt.bytes($0.total) + " installed" }) {
+            Panel(title: "Memory", trailing: e.current.map { Fmt.bytes($0.memory.total) + " installed" }) {
                 HStack(spacing: 28) {
                     Readout(label: "Used", value: m.map { Fmt.bytes($0.used) })
                     Readout(label: "App", value: m.map { Fmt.bytes($0.app) })

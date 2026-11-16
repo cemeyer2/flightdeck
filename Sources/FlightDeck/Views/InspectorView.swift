@@ -345,7 +345,11 @@ struct InspectorView: View {
                     }
                 }.font(.system(size: 11, design: .monospaced)).textSelection(.enabled)
             }
-        } else if model.details != nil { unavailable("The environment") } else { ProgressView() }
+        } else if model.details != nil {
+            // macOS exposes a process's environment only to that process itself, so this is expected for every other one.
+            Text("macOS doesn't let one app read another process's environment variables, so they can't be shown here (only FlightDeck's own are visible). Nothing is guessed.")
+                .foregroundStyle(p.dim).fixedSize(horizontal: false, vertical: true)
+        } else { ProgressView() }
     }
 
     var stacksTab: some View {

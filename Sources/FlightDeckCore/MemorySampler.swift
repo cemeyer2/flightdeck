@@ -29,6 +29,10 @@ public struct MemorySample: Codable, Sendable {
     public var compressions: UInt64
     public var decompressions: UInt64
     /// Pages swapped to / from disk since boot, and the page size (optional: absent in older traces).
+    /// false when the kernel's VM statistics couldn't be read: the byte counts are then placeholders, not measurements,
+    /// and views show "—". nil (older traces) means measured.
+    public var measured: Bool? = nil
+    public var isMeasured: Bool { measured != false }
     public var swapIns: UInt64? = nil
     public var swapOuts: UInt64? = nil
     public var pageSize: UInt64? = nil
@@ -59,7 +63,7 @@ public final class MemorySampler {
             return MemorySample(total: total, used: 0, app: 0, wired: 0, compressed: 0, cached: 0, free: 0,
                                 swapUsed: .unavailable("n/a"), swapTotal: .unavailable("n/a"),
                                 pressure: .unavailable("n/a"), pressureLevel: plevel,
-                                pageIns: 0, pageOuts: 0, compressions: 0, decompressions: 0)
+                                pageIns: 0, pageOuts: 0, compressions: 0, decompressions: 0, measured: false)
         }
         // Wrapping subtraction so a momentary purgeable > internal reading can't trap.
         // Purgeable can momentarily exceed internal between the kernel's counter updates; clamp instead of wrapping.

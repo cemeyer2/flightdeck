@@ -58,7 +58,7 @@ problem; click to jump to the right view), and light an amber or red caution lam
 
 **Process inspector:** double-click a process (or ⌘I, or Inspect… in its menu) to open it in its own window:
 CPU, memory, disk and network history (every process's last 300 samples are kept, not just the busiest), PID,
-parent and children, user, start time, CPU time, energy, wake-ups, arguments, working directory, code signature
+parent and children, user, start time, CPU time, energy, wake-ups, arguments, working directory (the environment is shown only where macOS allows it), code signature
 (Apple, Developer ID, ad-hoc or invalid; team; hardened runtime), kernel statistics with rates (page faults, page-ins, Unix and Mach syscalls, context switches, Mach messages, resident/virtual and peak memory, instructions per cycle, logical writes), every open file descriptor, sockets with addresses
 and TCP state, threads (CPU, state, priority, times), the environment, and call-stack sampling via
 `/usr/bin/sample` to see why it's busy or hung. Actions: quit, force quit, suspend, resume, lower priority (nice).

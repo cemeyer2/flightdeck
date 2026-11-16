@@ -192,3 +192,51 @@ final class FidelityTests: XCTestCase {
         XCTAssertEqual(st.topCPU.first?.avg ?? 0, 50, accuracy: 0.5)
     }
 }
+
+/// The smaller bugs from the review.
+final class SmallBugTests: XCTestCase {
+    /// Empty arguments are real arguments: they must not shift the argv/environment boundary.
+    func testEmptyArgumentsDontShiftEnvironment() throws {
+        let p = Process(); p.executableURL = URL(fileURLWithPath: "/bin/sh")
+        p.arguments = ["-c", "sleep 5; true", "", "x"]   // two commands, so sh stays sh instead of exec-ing sleep
+        try p.run(); defer { p.terminate() }
+        Thread.sleep(forTimeInterval: 0.3)
+        let d = ProcessInspector.details(pid: p.processIdentifier, path: "/bin/sh")
+        XCTAssertEqual(d.arguments.value, ["/bin/sh", "-c", "sleep 5; true", "", "x"])
+        // macOS doesn't expose another process's environment: it must read as unavailable, never as "0 variables",
+        // and an argument must never leak into it.
+        if let env = d.environment.value { XCTAssertFalse(env.contains("x")); XCTAssertFalse(env.isEmpty) }
+        else { XCTAssertNil(d.environment.value) }
+    }
+
+    /// Every connection gets a unique ID, even identical unconnected sockets.
+    func testConnectionIDsAreUnique() {
+        let c = Connections.list()
+        XCTAssertEqual(Set(c.map(\.id)).count, c.count)
+    }
+
+    /// A process that starts between two samples shows its real average since launch, not 0%.
+    func testNewProcessIsntShownIdle() throws {
+        let s = ProcessSampler(); _ = s.sample()
+        let hog = FileManager.default.temporaryDirectory.appendingPathComponent("fd-hog-\(UUID().uuidString)")
+        let src = hog.appendingPathExtension("c")
+        try "int main(void){volatile unsigned long x=0;for(;;)x++;}".write(to: src, atomically: true, encoding: .utf8)
+        let cc = Process(); cc.executableURL = URL(fileURLWithPath: "/usr/bin/cc"); cc.arguments = ["-o", hog.path, src.path]
+        try cc.run(); cc.waitUntilExit()
+        guard cc.terminationStatus == 0 else { throw XCTSkip("no C compiler") }
+        _ = s.sample()                               // baseline after compiling, before the hog exists
+        let p = Process(); p.executableURL = hog; try p.run()
+        defer { p.terminate(); try? FileManager.default.removeItem(at: hog); try? FileManager.default.removeItem(at: src) }
+        Thread.sleep(forTimeInterval: 0.6)
+        let first = s.sample().first { $0.pid == p.processIdentifier }
+        XCTAssertGreaterThan(first?.cpu ?? 0, 40, "first appearance already shows its CPU use")
+    }
+
+    /// A memory sample whose statistics couldn't be read is flagged, so views show "—" instead of zeros.
+    func testUnmeasuredMemoryIsFlagged() {
+        var m = BlackBoxTests.base.memory
+        XCTAssertTrue(m.isMeasured)
+        m.measured = false
+        XCTAssertFalse(m.isMeasured)
+    }
+}

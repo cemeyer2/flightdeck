@@ -205,6 +205,16 @@ public final class ProcessSampler {
                 wk = d(cur.wake, p.wake) / dt
                 // Energy is only reported when rusage worked; otherwise nil, never an invented 0 W.
                 if ruOK { energy = d(cur.energy, p.energy) / 1e9 / dt }   // nJ -> W
+            } else if let last = lastTime, ident.startTime > 0 {
+                // A process that started since the last sample has no previous reading, but its counters started at zero
+                // when it launched: its average since launch is a real measurement, not a guess (rather than showing 0%).
+                let started = Date(timeIntervalSince1970: Double(ident.startTime) / 1e6)
+                let age = now.timeIntervalSince(started)
+                if started >= last, age > 0.05 {
+                    cpu = Double(cur.cpuNs) / 1e9 / age * 100
+                    rb = Double(cur.r) / age; wb = Double(cur.w) / age; wk = Double(cur.wake) / age
+                    if ruOK { energy = Double(cur.energy) / 1e9 / age }
+                }
             }
             // pbi_comm is a fixed-size C char tuple (MAXCOMLEN + 1), so read it as raw bytes up to the first NUL.
             let comm = withUnsafeBytes(of: bsd.pbi_comm) { String(decoding: $0.prefix(while: { $0 != 0 }), as: UTF8.self) }

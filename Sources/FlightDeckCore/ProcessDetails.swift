@@ -107,19 +107,22 @@ public enum ProcessInspector {
         var i = 4
         while i < size && buf[i] != 0 { i += 1 }        // exec path
         while i < size && buf[i] == 0 { i += 1 }        // padding
-        var strings: [String] = []
-        var start = i
-        // Empty strings are skipped. A run of NULs after the argv strings marks the end of the useful area (after envp
-        // the kernel may leave padding and the "apple" strings), hence the break once argc strings have been read.
-        while i < size {
-            if buf[i] == 0 {
-                if i > start { strings.append(String(decoding: buf[start..<i], as: UTF8.self)) } else if strings.count >= argc { break }
-                start = i + 1
-            }
-            i += 1
+        // After the padding come exactly `argc` NUL-terminated arguments (an empty argument is just a NUL, so they must be
+        // counted, not skipped), then the environment's NUL-terminated strings, ended by an empty string.
+        func next() -> String? {
+            guard i < size else { return nil }
+            let start = i
+            while i < size && buf[i] != 0 { i += 1 }
+            defer { i += 1 }
+            return String(decoding: buf[start..<min(i, size)], as: UTF8.self)
         }
-        let args = Array(strings.prefix(argc))
-        let env = strings.count > argc ? Array(strings[argc...]) : []
+        var args: [String] = []
+        while args.count < argc, let a = next() { args.append(a) }
+        var env: [String] = []
+        while let e = next(), !e.isEmpty { env.append(e) }
+        // macOS only exposes the environment for the calling process itself; for others the buffer simply ends after the
+        // arguments. That's "hidden", not "no variables".
+        if env.isEmpty && pid != getpid() { return (.value(args), .unavailable("macOS hides other processes' environment")) }
         return (.value(args), .value(env))
     }
 

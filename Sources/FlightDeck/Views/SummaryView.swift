@@ -20,8 +20,8 @@ struct SummaryView: View {
                                 fraction: s?.cpu.total.value.map { $0 / 100 },
                                 detail: s.map { String(format: "load %.2f %.2f %.2f", $0.cpu.loadAverage[0], $0.cpu.loadAverage[1], $0.cpu.loadAverage[2]) },
                                 traces: [GraphTrace(name: "cpu", values: e.series { $0.cpu.total.value }, color: p.accent)], maxValue: 100)
-                    SummaryCard(title: "Memory", value: s.map { Fmt.bytes($0.memory.used) },
-                                fraction: s.map { Double($0.memory.used) / Double(max($0.memory.total, 1)) },
+                    SummaryCard(title: "Memory", value: s.flatMap { $0.memory.isMeasured ? Fmt.bytes($0.memory.used) : nil },
+                                fraction: s.flatMap { $0.memory.isMeasured ? Double($0.memory.used) / Double(max($0.memory.total, 1)) : nil },
                                 detail: s.map { "pressure " + ($0.memory.pressure.value.map { Fmt.pct($0) } ?? "—") + " · swap " + ($0.memory.swapUsed.value.map { Fmt.bytes($0) } ?? "—") },
                                 traces: [GraphTrace(name: "mem", values: e.series { Double($0.memory.used) / Double(max($0.memory.total, 1)) * 100 }, color: p.accent),
                                          GraphTrace(name: "pressure", values: e.series { $0.memory.pressure.value }, color: p.accent2, fill: false)], maxValue: 100)

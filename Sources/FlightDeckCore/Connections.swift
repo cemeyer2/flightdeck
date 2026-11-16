@@ -6,7 +6,10 @@ import Darwin
 /// One open internet socket. `local`/`remote` are lsof's numeric "host:port" strings; `remote` is "" when unconnected.
 /// `state` is the TCP state (ESTABLISHED, LISTEN, ...), "—" for UDP (stateless).
 public struct ConnectionItem: Identifiable, Hashable, Sendable {
-    public var id: String { "\(pid)-\(proto)-\(local)-\(remote)" }
+    public var id: String { "\(pid)-\(proto)-\(local)-\(remote)" + (occurrence > 1 ? "#\(occurrence)" : "") }
+    /// 1 for the first socket with this pid/proto/local/remote, 2… for identical ones (e.g. several unconnected UDP
+    /// sockets), so SwiftUI lists get unique, stable IDs.
+    public var occurrence = 1
     public var pid: Int32
     public var process: String
     public var proto: String
@@ -33,13 +36,17 @@ public enum Connections {
         guard let out = Shell.run("/usr/sbin/lsof", ["-nP", "-i", "-FpcPnT"], timeout: 15) else { return [] }
         var items: [ConnectionItem] = []
         var pid: Int32 = 0, cmd = "", proto = "", name = "", state = ""
+        var seen: [String: Int] = [:]
         // Fields arrive as a stream: a "p" line starts a process, an "f" line starts each of its files, and the following lines
         // describe that file. A pending socket is therefore emitted whenever the next file or process begins (and at the end).
         func flush() {
             guard !name.isEmpty else { return }
             let parts = name.components(separatedBy: "->")
-            items.append(ConnectionItem(pid: pid, process: cmd, proto: proto, local: parts[0],
-                                        remote: parts.count > 1 ? parts[1] : "", state: state.isEmpty ? (proto == "UDP" ? "—" : "") : state))
+            var item = ConnectionItem(pid: pid, process: cmd, proto: proto, local: parts[0],
+                                      remote: parts.count > 1 ? parts[1] : "", state: state.isEmpty ? (proto == "UDP" ? "—" : "") : state)
+            seen[item.id, default: 0] += 1
+            item.occurrence = seen[item.id]!
+            items.append(item)
             name = ""; state = ""
         }
         for line in out.split(separator: "\n") {
