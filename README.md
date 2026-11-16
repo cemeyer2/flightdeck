@@ -29,8 +29,7 @@ saves the last 5 minutes to 24 hours after the fact; Recorder › Replay Black B
 
 **Diagnosis and Flight Log:** an analyzer turns the sample stream into plain-English findings on the Summary banner
 (click one to jump to where to look). It smooths over spikes and groups helper processes into their app. It detects
-apps hogging CPU, memory pressure and growing swap, apps whose memory grows steadily (likely leaks), thermal throttling
-(and explains kernel_task), heavy disk or network I/O, frequent wake-ups, a startup disk that will fill up within days,
+apps hogging CPU, memory pressure and growing swap, apps whose memory grows steadily (likely leaks), thermal throttling (and explains kernel_task), measured CPU throttling (busy performance cores held well below their top clock while hot), heavy disk or network I/O, frequent wake-ups, a startup disk that will fill up within days,
 and anything unusual for *this* Mac, compared with a baseline built from the black box's 24 hours. Well-known
 background work (Spotlight, Time Machine, iCloud, Photos analysis, updates) is explained. Anything lasting 20 s or
 more goes into the **Flight Log** (kept 7 days) with a one-click replay of that moment from the black box. A **timeline** (1/6/24 h) of CPU, memory pressure and temperature with incident markers sits on top; click any moment to replay it. The Flight Log also lists **macOS reports** from the last 7 days (crashes with exception type, hangs, memory kills, CPU and disk-write limit violations), and an app that crashes or hangs repeatedly becomes a finding. Right-click a finding to inspect the responsible process, quit its app, or mute its alerts.

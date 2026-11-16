@@ -206,3 +206,21 @@ final class SwappingTests: XCTestCase {
         XCTAssertFalse(run(100), "~1.6 MB/s is not heavy")
     }
 }
+
+final class ThrottleTests: XCTestCase {
+    func run(mhz: Double, hot: Double) -> Bool {
+        let t = AnalyzerTests(); let a = Analyzer(); let t0 = Date(timeIntervalSince1970: 11_000_000)
+        for i in 0..<60 {
+            var s = t.snap(t0.addingTimeInterval(Double(i)), procs: [])
+            s.power.hottest = .value(hot)
+            s.gpuDetail = GPUDetail(clients: [], cpuClusters: [ClusterFrequency(name: "P-cluster", mhz: mhz, active: 95, maxMHz: 3228)])
+            a.ingest(s)
+        }
+        return a.findings.contains { $0.id == "cpu-throttled" }
+    }
+    func testThrottlingNeedsLowClocksWhileBusyAndHot() {
+        XCTAssertTrue(run(mhz: 1800, hot: 98))
+        XCTAssertFalse(run(mhz: 3100, hot: 98), "full clocks are not throttling")
+        XCTAssertFalse(run(mhz: 1800, hot: 60), "cool and slow is just power management")
+    }
+}

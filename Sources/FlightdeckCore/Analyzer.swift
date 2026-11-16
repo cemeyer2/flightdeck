@@ -92,6 +92,7 @@ public final class Analyzer {
     private var appGPU: [String: EMA] = [:]
     private var gpuThermal = EMA()
     private var swapOutRate = EMA()
+    private var pClockRatio = EMA()   // P-cluster clock / max, while busy
     private var lastSwapOuts: (Date, UInt64)?
     private var lastRecoveries: Int?
     private var recoveryEvents: [Date] = []
@@ -128,6 +129,8 @@ public final class Analyzer {
         for a in apps { appGPU[a.id, default: EMA()].update(a.gpu ?? 0, dt: step, tau: 20) }
         appGPU = appGPU.filter { byKey[$0.key] != nil }
         if let tl = s.gpuDetail?.thermalLimited { gpuThermal.update(tl, dt: step, tau: 30) }
+        let busyP = (s.gpuDetail?.cpuClusters ?? []).filter { $0.name.hasPrefix("P") && $0.active > 70 && $0.mhz != nil && $0.maxMHz > 0 }
+        if let c = busyP.max(by: { $0.active < $1.active }) { pClockRatio.update(c.mhz! / c.maxMHz, dt: step, tau: 20) } else { pClockRatio = EMA() }
         if let so = s.memory.swapOuts, let ps = s.memory.pageSize {
             if let (lt, lv) = lastSwapOuts, t > lt, so >= lv { swapOutRate.update(Double(so - lv) * Double(ps) / t.timeIntervalSince(lt), dt: step, tau: 20) }
             lastSwapOuts = (t, so)
@@ -265,6 +268,14 @@ public final class Analyzer {
                 d, "Performance:Thermals")
         }
 
+        // Measured CPU throttling: busy P-cores held well below their top clock while hot
+        if let r = pClockRatio.value, r < 0.7, s.power.thermalState >= 1 || (s.power.hottest.value ?? 0) >= 90,
+           let c = (s.gpuDetail?.cpuClusters ?? []).filter({ $0.name.hasPrefix("P") }).max(by: { $0.active < $1.active }), let mhz = c.mhz {
+            add("cpu-throttled", .caution, "speedometer", String(format: "CPU is throttled: busy performance cores at %.1f of %.1f GHz", mhz / 1000, c.maxMHz / 1000),
+                (s.power.hottest.value.map { String(format: "Hottest sensor %.0f °C. ", $0) } ?? "") + "macOS lowers clocks to control heat, so work takes longer. Better airflow or a cooler room helps.",
+                "Performance:Thermals")
+        }
+
         // I/O
         if let d = diskEMA.value, d > thresholds.diskBps {
             let top = apps.max { $0.diskBps < $1.diskBps }
@@ -352,7 +363,7 @@ public final class Analyzer {
     }
 
     private func resetShortTerm() {
-        appCPU = [:]; appGPU = [:]; gpuThermal = EMA(); swapOutRate = EMA(); lastSwapOuts = nil; cpuEMA = EMA(); cpuSlow = EMA(); diskEMA = EMA(); netEMA = EMA(); wattsEMA = EMA(); since = [:]
+        appCPU = [:]; appGPU = [:]; gpuThermal = EMA(); swapOutRate = EMA(); lastSwapOuts = nil; pClockRatio = EMA(); cpuEMA = EMA(); cpuSlow = EMA(); diskEMA = EMA(); netEMA = EMA(); wattsEMA = EMA(); since = [:]
     }
 }
 

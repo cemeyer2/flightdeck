@@ -75,10 +75,21 @@ struct CPUPerf: View {
                             let v = idx.compactMap { $0 < snap.cpu.cores.count ? snap.cpu.cores[$0].total : nil }
                             return v.isEmpty ? nil : v.reduce(0, +) / Double(v.count)
                         }
+                        let prefix = kind == .performance ? "P" : "E"
+                        let mhz: (Snapshot) -> Double? = { snap in
+                            snap.gpuDetail?.cpuClusters.filter { $0.name.hasPrefix(prefix) }.compactMap(\.mhz).max()
+                        }
                         Panel(title: kind == .performance ? "Performance cores (\(idx.count))" : "Efficiency cores (\(idx.count))",
-                              trailing: e.current.flatMap(avg).map(Fmt.pct)) {
+                              trailing: [e.current.flatMap(avg).map(Fmt.pct), e.current.flatMap(mhz).map { String(format: "%.0f MHz", $0) }]
+                                .compactMap { $0 }.joined(separator: " · ")) {
                             VFDMeter(fraction: e.current.flatMap(avg).map { $0 / 100 }, segments: 40, color: kind == .performance ? p.pCore : p.eCore)
                             HistoryGraph(traces: [GraphTrace(name: kind.rawValue, values: e.series(avg), color: kind == .performance ? p.pCore : p.eCore)], maxValue: 100).frame(height: 160)
+                            if e.series(mhz).contains(where: { $0 != nil }) {
+                                let top = (e.current?.gpuDetail?.cpuClusters.first { $0.name.hasPrefix(prefix) }?.maxMHz) ?? 0
+                                HistoryGraph(traces: [GraphTrace(name: "mhz", values: e.series(mhz), color: p.accent2, fill: false)],
+                                             maxValue: top > 0 ? top : nil, minHeadroom: 500, format: { String(format: "%.0f MHz", $0) }).frame(height: 70)
+                                Text("Clock (average while active)").font(.caption).foregroundStyle(p.dim)
+                            }
                         }
                     }
                 }
