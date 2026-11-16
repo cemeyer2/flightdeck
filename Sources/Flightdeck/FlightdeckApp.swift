@@ -131,6 +131,7 @@ struct SettingsView: View {
     @AppStorage("alertMinSeverity") private var alertMinSeverity = 2
     @AppStorage("alertAfterMinutes") private var alertAfterMinutes = 2.0
     @State private var loginItem = LoginItem.isEnabled
+    @State private var mutedCount = 0
     @State private var loginError: String?
     @State private var blackBoxBytes: UInt64 = 0
     @State private var confirmClear = false
@@ -157,6 +158,13 @@ struct SettingsView: View {
                 Picker("After it lasts", selection: $alertAfterMinutes) {
                     Text("1 minute").tag(1.0); Text("2 minutes").tag(2.0); Text("5 minutes").tag(5.0); Text("10 minutes").tag(10.0)
                 }.disabled(!alertsEnabled)
+                HStack {
+                    Text("Muted alerts: \(mutedCount)").font(.caption)
+                    Spacer()
+                    Button("Unmute All") { Alerts.shared.muted = []; mutedCount = 0 }.disabled(mutedCount == 0)
+                }.onAppear { mutedCount = Alerts.shared.muted.count }
+                Text("Right-click any finding to mute its alerts, inspect the responsible process or quit its app.")
+                    .font(.caption).foregroundStyle(.secondary)
                 Picker("An app is \"busy\" above", selection: $engine.appCPUThreshold) {
                     Text("50% of a core").tag(50.0); Text("80% of a core").tag(80.0); Text("1.5 cores").tag(150.0); Text("3 cores").tag(300.0)
                 }

@@ -11,6 +11,11 @@ final class Alerts: NSObject, UNUserNotificationCenterDelegate {
 
     var enabled: Bool { UserDefaults.standard.object(forKey: "alertsEnabled") as? Bool ?? true }
     var minSeverity: Int { UserDefaults.standard.object(forKey: "alertMinSeverity") as? Int ?? 2 }
+    /// Finding ids the user muted (alerts only; findings still show).
+    var muted: Set<String> {
+        get { Set(UserDefaults.standard.stringArray(forKey: "mutedFindings") ?? []) }
+        set { UserDefaults.standard.set(Array(newValue).sorted(), forKey: "mutedFindings") }
+    }
     var after: TimeInterval { (UserDefaults.standard.object(forKey: "alertAfterMinutes") as? Double ?? 2) * 60 }
 
     private var notifiedSince: [String: Date] = [:]   // finding id -> the occurrence we already notified about
@@ -31,7 +36,8 @@ final class Alerts: NSObject, UNUserNotificationCenterDelegate {
         let ids = Set(findings.map(\.id))
         notifiedSince = notifiedSince.filter { ids.contains($0.key) }
         guard enabled, let center else { return }
-        for f in findings where f.severity.rawValue >= minSeverity && now.timeIntervalSince(f.since) >= after {
+        let muted = self.muted
+        for f in findings where f.severity.rawValue >= minSeverity && now.timeIntervalSince(f.since) >= after && !muted.contains(f.id) {
             guard notifiedSince[f.id] != f.since else { continue }
             notifiedSince[f.id] = f.since
             if let last = lastSent[f.id], now.timeIntervalSince(last) < Self.cooldown { continue }

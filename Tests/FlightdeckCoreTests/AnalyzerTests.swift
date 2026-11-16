@@ -34,6 +34,7 @@ final class AnalyzerTests: XCTestCase {
         let f = a.findings.first { $0.id == "cpu:/Applications/Xcode.app" }
         XCTAssertNotNil(f, "two Xcode processes at 80% each roll up to one app at 160%")
         XCTAssertTrue(f!.title.contains("Xcode (2 processes)"))
+        XCTAssertEqual(Set(f!.pids ?? []), [10, 11], "responsible processes are attached for Inspect/Quit")
         XCTAssertLessThan(f!.since.timeIntervalSince(t0), 30, "since is when it started, not now")
         // a 5-minute gap resets sustained conditions
         a.ingest(snap(t0.addingTimeInterval(420), procs: procs(160)))

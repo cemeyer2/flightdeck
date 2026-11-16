@@ -15,6 +15,8 @@ public struct Finding: Identifiable, Sendable, Hashable, Codable {
     public var since: Date
     /// Where to look: a sidebar destination, optionally "Performance:<tab>".
     public var destination: String?
+    /// Processes responsible (busiest first), for "Inspect" / "Quit" actions.
+    public var pids: [Int32]? = nil
 }
 
 public struct Thresholds: Sendable, Codable, Equatable {
@@ -144,8 +146,10 @@ public final class Analyzer {
         }
 
         var active: [Finding] = []
-        func add(_ id: String, _ sev: Finding.Severity, _ icon: String, _ title: String, _ detail: String? = nil, _ dest: String? = nil) {
-            active.append(Finding(id: id, severity: sev, icon: icon, title: title, detail: detail, since: t, destination: dest))
+        let cpuOf = Dictionary(s.processes.map { ($0.pid, $0.cpu) }, uniquingKeysWith: max)
+        func add(_ id: String, _ sev: Finding.Severity, _ icon: String, _ title: String, _ detail: String? = nil, _ dest: String? = nil, pids: [Int32]? = nil) {
+            active.append(Finding(id: id, severity: sev, icon: icon, title: title, detail: detail, since: t, destination: dest,
+                                  pids: pids?.sorted { (cpuOf[$0] ?? 0) > (cpuOf[$1] ?? 0) }))
         }
         func describe(_ a: AppUsage) -> String { a.processes > 1 ? "\(a.name) (\(a.processes) processes)" : a.name }
         let topCPU = apps.max { $0.cpu < $1.cpu }
@@ -157,7 +161,7 @@ public final class Analyzer {
         for (k, v) in hogs {
             guard let a = byKey[k] else { continue }
             add("cpu:\(k)", .caution, "cpu", String(format: "%@ is using %.0f%% CPU", describe(a), v),
-                KnownProcess.explain(a.name) ?? "Quit it or let it finish if you don't need it right now.", "Processes")
+                KnownProcess.explain(a.name) ?? "Quit it or let it finish if you don't need it right now.", "Processes", pids: a.pids)
         }
         if hogs.isEmpty, let c = cpuEMA.value, c > 90 {
             add("cpu-saturated", .caution, "cpu", String(format: "CPU is %.0f%% busy", c),
@@ -186,7 +190,7 @@ public final class Analyzer {
         }
         for (k, e) in appGPU { if let v = e.value, v > 80, let a = byKey[k] {
             add("gpu:\(k)", .caution, "cube.transparent", String(format: "%@ is using %.0f%% of the GPU", describe(a), v),
-                KnownProcess.explain(a.name) ?? "Graphics or compute work from this app is keeping the GPU busy.", "Performance:GPU")
+                KnownProcess.explain(a.name) ?? "Graphics or compute work from this app is keeping the GPU busy.", "Performance:GPU", pids: a.pids)
         } }
 
         // Apps keeping the Mac awake (system daemons that do this routinely are left out)
@@ -199,14 +203,14 @@ public final class Analyzer {
         for (k, v) in awake {
             let name = v.0.map(describe) ?? k.replacingOccurrences(of: "proc:", with: "")
             add("awake:\(k)", .info, v.1.preventsDisplaySleep ? "display" : "moon.zzz", "\(name) \(v.1.label)",
-                v.1.name.isEmpty ? nil : "Reason given: “\(v.1.name)”.", "Processes")
+                v.1.name.isEmpty ? nil : "Reason given: “\(v.1.name)”.", "Processes", pids: v.0?.pids)
         }
 
         // Hung apps
         for p in s.processes where p.notResponding == true {
             let name = AppUsage.key(for: p).name
             add("hang:\(p.identity.pid)-\(p.identity.startTime)", .warning, "hourglass", "\(name) is not responding",
-                "Its main thread is stuck. Open it in the inspector and sample its stacks to see where, or Force Quit it.", "Processes")
+                "Its main thread is stuck. Open it in the inspector and sample its stacks to see where, or Force Quit it.", "Processes", pids: [p.pid])
         }
 
         // Memory
@@ -236,7 +240,7 @@ public final class Analyzer {
                 add("leak:\(k)", .caution, "chart.line.uptrend.xyaxis",
                     "\(name) keeps using more memory: +\(Fmt.bytes(growth)) in \(Int(span / 60)) min",
                     "It now uses \(Fmt.bytes(lastP.1)). Steady growth like this often means a memory leak; restarting the app frees the memory.",
-                    "Processes")
+                    "Processes", pids: byKey[k]?.pids)
             }
         }
 
@@ -263,7 +267,7 @@ public final class Analyzer {
         }
         if let w = apps.max(by: { $0.wakeups < $1.wakeups }), w.wakeups > thresholds.wakeups {
             add("wakeups:\(w.id)", .info, "alarm", String(format: "%@ wakes the CPU %.0f times a second", describe(w), w.wakeups),
-                "Frequent wake-ups keep the CPU from resting and cost battery, even at low CPU %.", "Processes")
+                "Frequent wake-ups keep the CPU from resting and cost battery, even at low CPU %.", "Processes", pids: w.pids)
         }
 
         // Network quality: Wi-Fi signal (local) and, when the opt-in probe runs, where the trouble is

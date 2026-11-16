@@ -38,6 +38,7 @@ struct FindingRow: View {
                 if f.destination != nil { Image(systemName: "chevron.right").font(.system(size: 10)).foregroundStyle(p.dim) }
             }.contentShape(Rectangle())
         }.buttonStyle(.plain)
+        .contextMenu { FindingActions(f: f) }
     }
 }
 
@@ -215,5 +216,33 @@ struct TimelinePanel: View {
                 }.frame(maxHeight: .infinity)
             }.frame(height: 12)
         }
+    }
+}
+
+/// Responses to a finding: inspect the responsible process, quit its app, or mute its alerts.
+struct FindingActions: View {
+    @EnvironmentObject var e: Engine
+    var f: Finding
+    var top: ProcessSample? { f.pids?.first.flatMap { pid in e.liveSnapshot?.processes.first { $0.pid == pid } } }
+    var app: NSRunningApplication? {
+        guard let p = top, let b = AppUsage.bundle(of: p.path) else { return nil }
+        return NSWorkspace.shared.runningApplications.first { $0.bundleURL?.standardizedFileURL.path == URL(fileURLWithPath: b).standardizedFileURL.path }
+    }
+    var body: some View {
+        if let p = top {
+            Button("Inspect \(p.name) (\(p.pid))") { AppActions.openInspector?(p.identity) }
+        }
+        if let a = app {
+            Button("Quit \(a.localizedName ?? "App")") { a.terminate() }
+            Button("Force Quit \(a.localizedName ?? "App")") { a.forceTerminate() }
+        }
+        if let d = f.destination { Button("Show in \(d.replacingOccurrences(of: ":", with: " › "))") { e.navigationRequest = d } }
+        Divider()
+        if Alerts.shared.muted.contains(f.id) {
+            Button("Unmute Alerts for This") { Alerts.shared.muted.remove(f.id) }
+        } else {
+            Button("Mute Alerts for This") { Alerts.shared.muted.insert(f.id) }
+        }
+        Button("Copy") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(f.title + (f.detail.map { "\n" + $0 } ?? ""), forType: .string) }
     }
 }
