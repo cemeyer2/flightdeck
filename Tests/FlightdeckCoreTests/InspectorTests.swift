@@ -73,3 +73,31 @@ final class ProcessExtrasTests: XCTestCase {
         XCTAssertEqual(s?.translated, false)
     }
 }
+
+final class DiagnosticReportTests: XCTestCase {
+    func write(_ name: String, _ s: String, in dir: URL) { try! s.write(to: dir.appendingPathComponent(name), atomically: true, encoding: .utf8) }
+
+    func testParsesKindsAndFindings() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("dr-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let now = Date()
+        let ts = DiagnosticReports.headerDate.string(from: now.addingTimeInterval(-600))
+        for i in 0..<2 {
+            write("Foo-\(i).ips", #"{"app_name":"Foo","timestamp":"\#(ts)","bug_type":"309","name":"Foo"}"# + "\n{\n  \"exception\" : {\"codes\":\"0x1\", \"type\" : \"EXC_BAD_ACCESS\", \"signal\" : \"SIGSEGV\"}\n}", in: dir)
+        }
+        write("ExcUserFault_bar.ips", #"{"is_simulated":1,"app_name":"bar","timestamp":"\#(ts)","bug_type":"309"}"# + "\n{}", in: dir)
+        write("JetsamEvent-x.ips", #"{"bug_type":"298","timestamp":"\#(ts)"}"# + "\n{}", in: dir)
+        write("curl_x.diag", "Date/Time:        \(DiagnosticReports.textDate.string(from: now))\nCommand:          curl\nEvent:            disk writes\nWrites:           8589.94 MB of file backed memory dirtied\n", in: dir)
+        let r = DiagnosticReports.scan(since: now.addingTimeInterval(-3600), directories: [dir.path])
+        XCTAssertEqual(r.count, 5)
+        XCTAssertEqual(r.filter { $0.kind == .crash }.count, 2)
+        XCTAssertEqual(r.first { $0.kind == .crash }?.summary, "EXC_BAD_ACCESS / SIGSEGV")
+        XCTAssertEqual(r.first { $0.process == "bar" }?.kind, .userFault)
+        XCTAssertEqual(r.first { $0.process == "curl" }?.kind, .diskWrites)
+        XCTAssertTrue(r.first { $0.process == "curl" }?.summary?.hasPrefix("8589.94 MB") ?? false)
+        XCTAssertEqual(r.first { $0.kind == .jetsam }?.process, "System")
+        let f = DiagnosticReports.findings(r, now: now)
+        XCTAssertEqual(f.map(\.title), ["Foo crashed 2 times in the last 24 hours"])
+        print("REAL", DiagnosticReports.scan(since: now.addingTimeInterval(-7 * 86_400)).prefix(6).map { "\($0.kind.rawValue): \($0.process) \($0.summary ?? "")" })
+    }
+}

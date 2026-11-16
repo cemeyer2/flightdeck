@@ -72,6 +72,7 @@ struct FlightLogView: View {
                     Text("Nothing logged yet. Anything that lasts 20 seconds or more (a busy app, memory pressure, heat, a filling disk) is logged here, with a replay of what the Mac was doing.")
                         .foregroundStyle(p.dim).fixedSize(horizontal: false, vertical: true)
                 }
+                ReportsPanel()
                 ForEach(days.keys.sorted(by: >), id: \.self) { day in
                     Panel(title: day.formatted(date: .complete, time: .omitted)) {
                         ForEach(days[day]!) { IncidentRow(i: $0) }
@@ -244,5 +245,47 @@ struct FindingActions: View {
             Button("Mute Alerts for This") { Alerts.shared.muted.insert(f.id) }
         }
         Button("Copy") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(f.title + (f.detail.map { "\n" + $0 } ?? ""), forType: .string) }
+    }
+}
+
+/// Crashes, hangs, memory kills and resource-limit reports macOS wrote in the last 7 days.
+struct ReportsPanel: View {
+    @EnvironmentObject var e: Engine
+    @Environment(\.palette) var p
+    @AppStorage("reportsShowAll") private var showAll = false
+    @AppStorage("reportsIncludeFaults") private var includeFaults = false
+
+    var body: some View {
+        let rs = e.reports.filter { includeFaults || $0.kind != .userFault }
+        let shown = showAll ? rs : Array(rs.prefix(8))
+        Panel(title: "macOS reports", trailing: "\(rs.count) in the last 7 days") {
+            HStack(spacing: 16) {
+                ForEach([DiagnosticReport.Kind.crash, .hang, .jetsam, .cpuLimit, .diskWrites], id: \.self) { k in
+                    let n = rs.filter { $0.kind == k }.count
+                    Label("\(n) \(k.rawValue.lowercased())", systemImage: k.icon).foregroundStyle(n > 0 && k.severity >= .caution ? p.warn : p.dim)
+                }
+                Spacer()
+                Toggle("Non-fatal faults", isOn: $includeFaults).toggleStyle(.switch).controlSize(.small)
+            }.font(.system(size: 11, design: .monospaced))
+            if rs.isEmpty { Text("No crashes, hangs or resource-limit reports this week.").foregroundStyle(p.dim) }
+            ForEach(shown) { r in
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Text(r.time.formatted(.dateTime.weekday(.abbreviated).hour().minute())).frame(width: 90, alignment: .leading)
+                        .font(.system(size: 11, design: .monospaced)).foregroundStyle(p.dim)
+                    Image(systemName: r.kind.icon).foregroundStyle(r.kind.severity >= .caution ? p.warn : p.dim).frame(width: 18)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("\(r.process) · \(r.kind.rawValue)").font(.system(size: 12, weight: .medium, design: .monospaced))
+                        if let s = r.summary { Text(s).font(.system(size: 10)).foregroundStyle(p.dim).lineLimit(2) }
+                    }
+                    Spacer()
+                    Button("Open") { NSWorkspace.shared.open(URL(fileURLWithPath: r.path)) }.help("Open the full report (Console)")
+                    Button { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: r.path)]) } label: { Image(systemName: "folder") }
+                        .help("Show in Finder")
+                }.buttonStyle(.borderless)
+            }
+            if rs.count > 8 { Toggle("Show all \(rs.count)", isOn: $showAll).toggleStyle(.switch).controlSize(.small) }
+            Text("Written by macOS when an app crashes or hangs, when it kills processes to free memory, or when a process exceeds CPU or disk-write limits. Flightdeck only reads their headers.")
+                .font(.caption).foregroundStyle(p.dim)
+        }
     }
 }

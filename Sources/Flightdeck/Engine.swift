@@ -38,7 +38,10 @@ final class Engine: ObservableObject {
     @Published private(set) var incidents: [Incident] = []
     /// Days until the startup disk fills at the current trend (nil = no clear shrinking trend).
     @Published private(set) var diskFullDays: Double?
-    var findings: [Finding] { mode == .live ? liveFindings : replayFindings }
+    var findings: [Finding] { mode == .live ? liveFindings + reportFindings : replayFindings }
+    /// macOS diagnostic reports from the last 7 days (rescanned every 5 minutes).
+    @Published private(set) var reports: [DiagnosticReport] = []
+    @Published private(set) var reportFindings: [Finding] = []
     /// Set to a Destination raw value (optionally "Performance:<tab>") to navigate there.
     @Published var navigationRequest: String?
     /// Called on the main actor for each incident once it has lasted long enough to log.
@@ -70,6 +73,13 @@ final class Engine: ObservableObject {
             queue.async { analyzer.seed(history: history) }
         }
         incidents = incidentLog.incidents
+        Task { [weak self] in
+            while !Task.isCancelled {
+                let r = await Task.detached(priority: .utility) { DiagnosticReports.scan(since: Date().addingTimeInterval(-7 * 86_400)) }.value
+                self?.reports = r; self?.reportFindings = DiagnosticReports.findings(r)
+                try? await Task.sleep(for: .seconds(300))
+            }
+        }
         applyThresholds()
         applyProbe()
         NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: nil) { [blackBox, blackBoxQueue, queue, incidentLog] _ in
@@ -117,7 +127,7 @@ final class Engine: ObservableObject {
             Task { @MainActor in
                 self.liveFindings = found
                 self.diskFullDays = fullDays
-                Alerts.shared.evaluate(found, now: s.time)
+                Alerts.shared.evaluate(found + self.reportFindings, now: s.time)
                 if let log { self.incidents = log }
                 fresh.forEach { self.onNewIncident?($0) }
                 self.ingest(s)
