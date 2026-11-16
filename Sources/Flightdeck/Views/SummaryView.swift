@@ -8,6 +8,7 @@ struct SummaryView: View {
     var body: some View {
         MaybeScroll {
             VStack(spacing: 12) {
+                AnnunciatorPanel()
                 DiagnosisBanner()
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), spacing: 12)], spacing: 12) {
                     let s = e.current
@@ -129,5 +130,47 @@ struct DiagnosisBanner: View {
         .padding(12)
         .background(RoundedRectangle(cornerRadius: 10).fill((worst.map(p.color) ?? p.accent).opacity(0.10)))
         .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder((worst.map(p.color) ?? p.accent).opacity(0.35)))
+    }
+}
+
+/// Cockpit annunciator: one labelled light per subsystem, lit by the worst finding in it.
+struct AnnunciatorPanel: View {
+    @EnvironmentObject var e: Engine
+    @Environment(\.palette) var p
+
+    static let lights: [(label: String, match: [String], dest: String)] = [
+        ("CPU", ["cpu:", "cpu-saturated", "unusual-cpu", "cpu-throttled", "wakeups:"], "Performance:CPU"),
+        ("MEM", ["mem-pressure", "leak:"], "Performance:Memory"),
+        ("SWAP", ["swap", "swapping"], "Performance:Memory"),
+        ("THERM", ["thermal", "gpu-thermal", "cpu-throttled"], "Performance:Thermals"),
+        ("DISK", ["disk-busy", "drive:"], "Performance:Disk"),
+        ("STORAGE", ["disk-low", "disk-full"], "Disk Space"),
+        ("NET", ["net-", "wifi-weak"], "Performance:Network"),
+        ("GPU", ["gpu"], "Performance:GPU"),
+        ("POWER", ["unusual-power", "battery-health"], "Performance:Energy"),
+        ("HANG", ["hang:", "report:Hang"], "Processes"),
+        ("CRASH", ["report:Crash"], "Flight Log"),
+        ("AWAKE", ["awake:"], "Processes"),
+    ]
+
+    var body: some View {
+        let f = e.findings
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 6), spacing: 6) {
+            ForEach(Self.lights, id: \.label) { light in
+                let hits = f.filter { x in light.match.contains { x.id.hasPrefix($0) } }
+                let sev = hits.map(\.severity).max()
+                Button { e.navigationRequest = hits.first?.destination ?? light.dest } label: {
+                    Text(light.label)
+                        .font(.system(size: 11, weight: .heavy, design: .monospaced))
+                        .frame(maxWidth: .infinity).padding(.vertical, 7)
+                        .foregroundStyle(sev.map { $0 >= .caution ? Color.black : p.text } ?? p.dim.opacity(0.6))
+                        .background(RoundedRectangle(cornerRadius: 4).fill(sev.map { $0 >= .caution ? p.color($0) : p.accent.opacity(0.25) } ?? p.panel))
+                        .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(sev.map { p.color($0) } ?? p.panelBorder, lineWidth: 1))
+                        .shadow(color: sev.map { $0 >= .caution ? p.color($0).opacity(0.6) : .clear } ?? .clear, radius: 5)
+                }
+                .buttonStyle(.plain)
+                .help(hits.isEmpty ? "\(light.label): normal" : hits.map(\.title).joined(separator: "\n"))
+            }
+        }
     }
 }
