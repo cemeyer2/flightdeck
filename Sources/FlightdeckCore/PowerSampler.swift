@@ -29,6 +29,8 @@ public struct PowerSample: Codable, Sendable {
     public var thermalState: Int      // ProcessInfo.ThermalState rawValue
     public var temperatures: [SensorReading]
     public var hottest: Measured<Double>
+    /// Fan speeds from the SMC (empty on fanless Macs; nil in traces recorded before fans were read).
+    public var fans: [FanReading]? = nil
 }
 
 public struct SensorReading: Codable, Sendable, Identifiable, Hashable {
@@ -96,7 +98,8 @@ public final class PowerSampler {
                            lowPowerMode: ProcessInfo.processInfo.isLowPowerModeEnabled,
                            thermalState: ProcessInfo.processInfo.thermalState.rawValue,
                            temperatures: temps,
-                           hottest: temps.map(\.celsius).max().map { .value($0) } ?? .unavailable("no sensors"))
+                           hottest: temps.map(\.celsius).max().map { .value($0) } ?? .unavailable("no sensors"),
+                           fans: SMC.shared.fans())
     }
 }
 

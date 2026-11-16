@@ -64,6 +64,9 @@ and a battery charge history, all from the black box. Battery health uses the sa
 lifetime reads and writes, power-on hours, unsafe shutdowns, media errors) and how many days until the startup
 disk fills at the current rate. Unhealthy drives raise a warning.
 
+**Thermals** adds fan speeds from the SMC (RPM, min, max, target, history) and a sensor heatmap of every
+temperature sensor, hottest first.
+
 Six themes: Light, Dark, Green, Amber, Blue, Mono.
 
 **Live Dock icon:** right-click the Dock icon (or use Monitor › Dock Icon, or Settings) to pick a mode:

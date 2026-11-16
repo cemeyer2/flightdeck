@@ -47,3 +47,11 @@ final class DriveHealthTests: XCTestCase {
         XCTAssert((0...150).contains(first.temperature))
     }
 }
+
+final class SMCTests: XCTestCase {
+    func testFansDecode() {
+        let f = SMC.shared.fans()
+        print("FANS", f)
+        for fan in f { XCTAssert((0...20_000).contains(fan.rpm)); if let m = fan.maxRPM { XCTAssertGreaterThan(m, 500) } }
+    }
+}

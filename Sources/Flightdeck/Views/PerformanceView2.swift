@@ -181,17 +181,40 @@ struct ThermalPerf: View {
                 HistoryGraph(traces: [GraphTrace(name: "hot", values: e.series { $0.power.hottest.value }, color: p.accent)],
                              maxValue: 110, format: { String(format: "%.0f °C", $0) }).frame(height: 180)
             }
-            Panel(title: "Sensors", trailing: "refreshed every \(Int(PowerSampler.sensorInterval)) s") {
-                let temps = pw?.temperatures ?? []
+            if let fans = pw?.fans, !fans.isEmpty {
+                Panel(title: "Fans", trailing: "from the SMC") {
+                    HStack(spacing: 28) {
+                        ForEach(fans) { f in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Readout(label: "Fan \(f.index + 1)", value: String(format: "%.0f", f.rpm), unit: "RPM")
+                                VFDMeter(fraction: f.fraction, segments: 20, height: 6).frame(width: 160)
+                                Text([f.minRPM.map { String(format: "min %.0f", $0) }, f.maxRPM.map { String(format: "max %.0f", $0) },
+                                      f.targetRPM.map { String(format: "target %.0f", $0) }].compactMap { $0 }.joined(separator: " · "))
+                                    .font(.system(size: 10, design: .monospaced)).foregroundStyle(p.dim)
+                            }
+                        }
+                        Spacer()
+                    }
+                    HistoryGraph(traces: fans.map { f in
+                        GraphTrace(name: "fan\(f.index)", values: e.series { $0.power.fans?.first { $0.index == f.index }?.rpm },
+                                   color: f.index == 0 ? p.accent : p.accent2, fill: f.index == 0) },
+                                 minHeadroom: 2000, format: { String(format: "%.0f rpm", $0) }).frame(height: 110)
+                }
+            }
+            Panel(title: "Sensor heatmap", trailing: "\(pw?.temperatures.count ?? 0) sensors · refreshed every \(Int(PowerSampler.sensorInterval)) s") {
+                let temps = (pw?.temperatures ?? []).sorted { $0.celsius > $1.celsius }
                 if temps.isEmpty { Text("No temperature sensors are exposed on this Mac.").foregroundStyle(p.dim) }
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 260), spacing: 14)], spacing: 6) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 6)], spacing: 6) {
                     ForEach(temps) { t in
-                        HStack {
-                            Text(t.name).lineLimit(1).foregroundStyle(p.text)
-                            Spacer()
-                            VFDMeter(fraction: t.celsius / 110, segments: 12, height: 6).frame(width: 80)
-                            Text(String(format: "%.1f °C", t.celsius)).frame(width: 64, alignment: .trailing)
-                        }.font(.system(size: 11, design: .monospaced))
+                        let heat = min(max((t.celsius - 30) / 70, 0), 1)   // 30 °C cool … 100 °C hot
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(String(format: "%.1f °C", t.celsius)).font(.system(size: 13, weight: .semibold, design: .monospaced))
+                            Text(t.name).font(.system(size: 9, design: .monospaced)).lineLimit(1).truncationMode(.middle)
+                        }
+                        .foregroundStyle(heat > 0.55 ? Color.black : p.text)
+                        .frame(maxWidth: .infinity, alignment: .leading).padding(6)
+                        .background(RoundedRectangle(cornerRadius: 4).fill(heatColor(heat)))
+                        .help(t.name)
                     }
                 }
             }
@@ -370,4 +393,13 @@ struct DriveHealthPanel: View {
             }
         }
     }
+}
+
+/// Cool blue → amber → red for the heatmap; monochrome themes use the accent at varying strength.
+func heatColor(_ f: Double) -> Color {
+    let stops: [(Double, (Double, Double, Double))] = [(0, (0.12, 0.25, 0.45)), (0.45, (0.20, 0.55, 0.65)), (0.7, (0.95, 0.70, 0.20)), (1, (0.95, 0.25, 0.20))]
+    var lo = stops[0], hi = stops[stops.count - 1]
+    for i in 1..<stops.count where f <= stops[i].0 { lo = stops[i - 1]; hi = stops[i]; break }
+    let t = hi.0 > lo.0 ? (f - lo.0) / (hi.0 - lo.0) : 0
+    return Color(red: lo.1.0 + (hi.1.0 - lo.1.0) * t, green: lo.1.1 + (hi.1.1 - lo.1.1) * t, blue: lo.1.2 + (hi.1.2 - lo.1.2) * t)
 }
