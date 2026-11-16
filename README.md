@@ -34,7 +34,7 @@ warnings. Without them the app is ad-hoc signed, which is fine for your own Mac.
 
 Summary · Performance (CPU per core with P/E colouring, overall/logical/cluster modes; Memory; Disk; Network with per-app traffic;
 Energy; Thermals; GPU) · Processes (live tree, sort/filter, Quit/Force Quit/Suspend/Resume) · System Info ·
-Startup Apps · Users · Services (launchd) · Power & Freq · Connections · Installed Apps · Disk Space · Benchmarks
+Startup Apps · Users · Services (launchd) · Power & Freq · Connections · Installed Apps · Disk Space · Benchmarks · Console
 
 **Flight Recorder:** Record (⇧⌘R) captures every telemetry frame and saves it as a `.flightlog` file
 (zlib-compressed JSON). Open it (⌘O, or double-click in Finder) to scrub or replay it through the same views. Older `.mltrace` recordings from before the rename still open.
@@ -74,6 +74,23 @@ parent and children, user, start time, CPU time, energy, wake-ups, arguments, wo
 and TCP state, threads (CPU, state, priority, times), the environment, and call-stack sampling via
 `/usr/bin/sample` to see why it's busy or hung. Actions: quit, force quit, suspend, resume, lower priority (nice).
 Anything macOS doesn't let a normal user read for other users' processes is shown as unavailable.
+
+**Console:** errors and faults from the unified log over the last 5 minutes, hour or 24 hours, grouped by process and
+subsystem with counts and sparklines, the noisiest processes, sample messages per group, a filter, and a live tail
+(`log stream`, only while the window is visible). Keeps the newest 20,000 messages; 24 h queries are read newest-first in
+hourly chunks with progress and Cancel, and stop at 1 million messages. macOS redacts message details it considers
+private as `<private>`; the Console says how many are affected.
+
+**Why is the fan loud?** (Performance › Thermals): when fans spin above idle or thermal pressure rises, a card connects
+fan speed (against its minimum and maximum), the hottest sensor, whether macOS is holding the CPU/GPU back for heat, and
+which apps produce the heat, e.g. "Fan at 4,200 rpm (idle ~1,200) because the CPU is at 92 °C; Photos is responsible for
+~60% of the power draw." On fanless Macs it explains throttling instead.
+
+**Prometheus endpoint** (Settings › Metrics export, off by default): serves the latest sample as Prometheus text on
+`http://127.0.0.1:9464/metrics` (port configurable, localhost only): CPU total/user/system and per core, memory,
+pressure, swap, disk and network rates, system watts, hottest temperature, thermal state, fan RPM, GPU %, battery %, and
+the top 20 processes by CPU (`name`, `pid` labels). Unmeasured values are omitted, never exported as 0. It does no work
+between scrapes.
 
 **Connection quality** (Performance › Network): Wi-Fi signal, noise, SNR, link rate, channel, band, width, PHY and
 security from CoreWLAN, plus router and DNS servers, all local. An opt-in probe (off by default) pings the router and
@@ -115,6 +132,7 @@ elapsed time, and which apps' CPU use changed.
 ```sh
 flightdeck --snapshot [--top N]     # summary, top apps and findings after a 1 s warm-up
 flightdeck --snapshot --json        # full snapshot + findings as JSON (for scripts and Shortcuts)
+flightdeck --json-stream [2] [--top 20]   # one JSON snapshot per line every 2 s (default 1 s) until interrupted
 flightdeck --findings               # what's wrong right now
 flightdeck --stats rec.flightlog    # statistics and findings of a recording
 flightdeck --csv rec.flightlog out.csv [--processes]

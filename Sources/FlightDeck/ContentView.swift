@@ -10,7 +10,8 @@ import FlightDeckCore
 enum Destination: String, CaseIterable, Identifiable, Hashable {
     case summary = "Summary", stressMap = "Stress Map", flightLog = "Flight Log", rules = "Rules", performance = "Performance", processes = "Processes", systemInfo = "System Info",
          startup = "Startup Apps", users = "Users", services = "Services", power = "Power & Freq", sleep = "Sleep & Wake",
-         connections = "Connections", apps = "Installed Apps", diskSpace = "Disk Space", benchmarks = "Benchmarks"
+         connections = "Connections", apps = "Installed Apps", diskSpace = "Disk Space", benchmarks = "Benchmarks",
+         console = "Console"
     var id: String { rawValue }
     var icon: String {
         switch self {
@@ -30,6 +31,7 @@ enum Destination: String, CaseIterable, Identifiable, Hashable {
         case .apps: "square.grid.2x2"
         case .diskSpace: "internaldrive"
         case .benchmarks: "speedometer"
+        case .console: "exclamationmark.bubble"
         }
     }
 }
@@ -109,6 +111,7 @@ struct ContentView: View {
         case .apps: InstalledAppsView()
         case .diskSpace: DiskSpaceView()
         case .benchmarks: BenchmarksView()
+        case .console: ConsoleView()
         }
     }
 

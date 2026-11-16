@@ -195,6 +195,8 @@ struct ThermalPerf: View {
     var body: some View {
         let pw = e.current?.power
         VStack(spacing: 12) {
+            // Only present when there is something to explain (fans above idle, or heat holding performance back).
+            if let s = e.current, let why = FanExplainer.explain(s) { FanExplainerCard(explanation: why) }
             Panel(title: "Thermal pressure") {
                 HStack(spacing: 28) {
                     Readout(label: "State", value: pw.map { thermalName($0.thermalState) }, color: (pw?.thermalState ?? 0) >= 2 ? p.crit : p.accent)
@@ -577,5 +579,25 @@ struct GPUAppRow: View {
             Text(Fmt.duration(total)).foregroundStyle(p.dim).frame(width: 90, alignment: .trailing)
             Text(apis).foregroundStyle(p.dim).frame(width: 70, alignment: .leading)
         }.font(.system(size: 12, design: .monospaced))
+    }
+}
+
+/// "Why is the fan loud?": the explanation from `FanExplainer` (all logic is in core), a headline and supporting lines.
+struct FanExplainerCard: View {
+    @Environment(\.palette) var p
+    let explanation: FanExplanation
+    var body: some View {
+        let x = explanation
+        let color = x.severity == .warning ? p.crit : x.severity == .caution ? p.warn : p.accent
+        Panel(title: x.hasFans ? "Why is the fan loud?" : "Why is it slowing down?") {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: x.hasFans ? "fan" : "thermometer.high").font(.system(size: 20)).foregroundStyle(color)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(x.headline).font(.system(size: 14, weight: .semibold)).fixedSize(horizontal: false, vertical: true)
+                    ForEach(x.details, id: \.self) { Text($0).font(.system(size: 11, design: .monospaced)).foregroundStyle(p.dim) }
+                }
+                Spacer(minLength: 0)
+            }
+        }
     }
 }
