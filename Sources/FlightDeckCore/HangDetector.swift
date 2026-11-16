@@ -17,9 +17,8 @@ public enum HangDetector {
     typealias PSNFn = @convention(c) (pid_t, UnsafeMutablePointer<ProcessSerialNumber>) -> OSStatus
 
     /// Resolved once, lazily (Swift static lets are initialised thread-safely). nil if any symbol is missing.
-    /// `nonisolated(unsafe)` because C function-pointer tuples aren't Sendable; the value is immutable after init.
     /// The dlopen handles are intentionally never closed: the functions are used for the life of the app.
-    nonisolated(unsafe) static let fns: (ConnFn, UnrespFn, PSNFn)? = {
+    static let fns: (ConnFn, UnrespFn, PSNFn)? = {
         let sl = dlopen("/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight", RTLD_NOW)
         let as_ = dlopen("/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices", RTLD_NOW)
         // CGS* symbols live in SkyLight on current macOS (re-exported by CoreGraphics on older ones);

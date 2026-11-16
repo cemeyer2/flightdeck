@@ -152,18 +152,27 @@ final class DiskScan: ObservableObject {
         entries = []; scanning = true
         let target = path
         let live = liveGeneration
-        Task.detached(priority: .utility) { [weak self] in
+        // A constant weak box rather than `[weak self]`: a weak capture is a `var`, which Swift won't share safely with
+        // the background closure. It is only dereferenced on the main thread.
+        let owner = WeakBox(self)
+        Task.detached(priority: .utility) {
             DiskUsage.children(of: target, progress: { entry in
                 DispatchQueue.main.async {
-                    guard let self, self.generation == gen else { return }
+                    guard let self = owner.value, self.generation == gen else { return }
                     // Insert in size order instead of re-sorting the whole list for every streamed result.
                     let i = self.entries.firstIndex { $0.size < entry.size } ?? self.entries.endIndex
                     self.entries.insert(entry, at: i)
                 }
             }, cancelled: { live.get() != gen })
-            await MainActor.run { if let self, self.generation == gen { self.scanning = false } }
+            await MainActor.run { if let self = owner.value, self.generation == gen { self.scanning = false } }
         }
     }
+}
+
+/// Holds a weak reference that background work can carry; read `value` only on the thread that owns the object.
+final class WeakBox<T: AnyObject>: @unchecked Sendable {
+    weak var value: T?
+    init(_ v: T) { value = v }
 }
 
 /// A lock-protected integer shared with background work (here: "is this scan still the current one?").
