@@ -44,7 +44,7 @@ problem; click to jump to the right view), and light an amber or red caution lam
 **Process inspector:** double-click a process (or ⌘I, or Inspect… in its menu) to open it in its own window:
 CPU, memory, disk and network history (every process's last 300 samples are kept, not just the busiest), PID,
 parent and children, user, start time, CPU time, energy, wake-ups, arguments, working directory, code signature
-(Apple, Developer ID, ad-hoc or invalid; team; hardened runtime), every open file descriptor, sockets with addresses
+(Apple, Developer ID, ad-hoc or invalid; team; hardened runtime), kernel statistics with rates (page faults, page-ins, Unix and Mach syscalls, context switches, Mach messages, resident/virtual and peak memory, instructions per cycle, logical writes), every open file descriptor, sockets with addresses
 and TCP state, threads (CPU, state, priority, times), the environment, and call-stack sampling via
 `/usr/bin/sample` to see why it's busy or hung. Actions: quit, force quit, suspend, resume, lower priority (nice).
 Anything macOS doesn't let a normal user read for other users' processes is shown as unavailable.
@@ -54,7 +54,7 @@ security from CoreWLAN, plus router and DNS servers, all local. An opt-in probe 
 an internet host every 10 s, so Flightdeck can tell "your Wi-Fi is the problem" from "your internet provider is".
 
 **Processes** can be shown as a parent/child **Tree**, grouped by **Apps** (every helper rolled into its app, with
-app-level Quit / Force Quit), or **Flat**. Apps the window server considers hung are marked **Not Responding** in red
+app-level Quit / Force Quit), or **Flat**. The **Kind** column shows Apple-silicon or Intel (Rosetta) binaries, and **Sleep** shows who is keeping the Mac or display awake (also a finding, with the reason the app gave). Apps the window server considers hung are marked **Not Responding** in red
 and raise a warning finding.
 
 **Energy and storage health:** Performance › Energy has an **energy budget**: which apps used the most energy

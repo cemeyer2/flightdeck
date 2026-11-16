@@ -138,3 +138,16 @@ final class ExportTests: XCTestCase {
         XCTAssertFalse(TraceExport.processCSV(t).isEmpty)
     }
 }
+
+final class AwakeFindingTests: XCTestCase {
+    func testAppKeepingMacAwake() {
+        let t = AnalyzerTests()
+        var p = t.proc("Zoom", path: "/Applications/zoom.us.app/Contents/MacOS/zoom.us", pid: 40)
+        p.uid = 501; p.powerAssertions = [PowerAssertion(type: "PreventUserIdleDisplaySleep", name: "In a meeting")]
+        let a = Analyzer()
+        a.ingest(t.snap(Date(timeIntervalSince1970: 8_000_000), procs: [p]))
+        let f = a.findings.first { $0.id == "awake:/Applications/zoom.us.app" }
+        XCTAssertEqual(f?.title, "zoom.us keeps the display awake")
+        XCTAssertEqual(f?.detail, "Reason given: “In a meeting”.")
+    }
+}

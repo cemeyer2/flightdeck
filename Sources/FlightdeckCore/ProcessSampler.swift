@@ -34,6 +34,10 @@ public struct ProcessSample: Codable, Sendable, Identifiable, Hashable {
     public var notResponding: Bool? = nil
     /// Share of GPU time (%) over the last sample; nil = this process has no GPU client.
     public var gpu: Double? = nil
+    /// true = an Intel binary running under Rosetta 2; nil = unknown.
+    public var translated: Bool? = nil
+    /// Power assertions this process holds that keep the Mac or display awake (nil = none).
+    public var powerAssertions: [PowerAssertion]? = nil
     public var startDate: Date { Date(timeIntervalSince1970: Double(identity.startTime) / 1e6) }
 }
 
@@ -43,6 +47,15 @@ public final class ProcessSampler {
     private var lastTime: Date?
     private var userCache: [UInt32: String] = [:]
     private var pathCache: [ProcessIdentity: (String, String)] = [:]
+    private var translatedCache: [ProcessIdentity: Bool] = [:]
+
+    /// Rosetta translation flag from the kernel's process record (P_TRANSLATED).
+    static func isTranslated(_ pid: Int32) -> Bool? {
+        var info = kinfo_proc(); var size = MemoryLayout<kinfo_proc>.size
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
+        guard sysctl(&mib, 4, &info, &size, nil, 0) == 0, size > 0 else { return nil }
+        return info.kp_proc.p_flag & 0x20000 != 0
+    }
     private let timebase: (UInt32, UInt32) = {
         var tb = mach_timebase_info_data_t(); mach_timebase_info(&tb); return (tb.numer, tb.denom)
     }()
@@ -123,6 +136,7 @@ public final class ProcessSampler {
             }
             let comm = withUnsafeBytes(of: bsd.pbi_comm) { String(decoding: $0.prefix(while: { $0 != 0 }), as: UTF8.self) }
             let (name, path) = names(pid: pid, ident: ident, comm: comm)
+            if translatedCache[ident] == nil, let t = Self.isTranslated(pid) { translatedCache[ident] = t }
             out.append(ProcessSample(
                 identity: ident, ppid: Int32(bsd.pbi_ppid), name: name, path: path,
                 user: userName(bsd.pbi_uid), uid: bsd.pbi_uid,
@@ -131,9 +145,11 @@ public final class ProcessSampler {
                 threads: restricted ? 0 : Int(all.ptinfo.pti_threadnum),
                 diskReadBps: rb, diskWriteBps: wb, diskRead: cur.r, diskWritten: cur.w,
                 energyWatts: energy, wakeups: wk, restricted: restricted && !ruOK))
+            out[out.count - 1].translated = translatedCache[ident]
         }
         prev = next; lastTime = now
         pathCache = pathCache.filter { next[$0.key] != nil }
+        translatedCache = translatedCache.filter { next[$0.key] != nil }
         return out
     }
 

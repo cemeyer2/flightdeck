@@ -48,6 +48,8 @@ public final class Sampler: @unchecked Sendable {
         let hangs = HangDetector.check()
         if !hangs.isEmpty { for i in procs.indices { procs[i].notResponding = hangs[procs[i].pid] } }
         if drivesRead.map({ Date().timeIntervalSince($0) > 300 }) ?? true { drives = DriveHealthReader.read(); drivesRead = Date() }
+        let assertions = PowerAssertions.byPID()
+        for i in procs.indices { procs[i].powerAssertions = assertions[procs[i].pid] }
         let gd = gpuSampler.sample()
         let gpuByPID = Dictionary(gd.clients.map { ($0.pid, $0.percent) }, uniquingKeysWith: +)
         for i in procs.indices { procs[i].gpu = gpuByPID[procs[i].pid] }

@@ -11,6 +11,8 @@ final class InspectorModel: ObservableObject {
     @Published private(set) var exited = false
     @Published private(set) var history: [ProcessHistory.Point?] = []
     @Published private(set) var details: ProcessDetails?
+    /// Previous counters, for per-second rates.
+    @Published private(set) var previousCounters: ProcessDetails.Counters?
     @Published private(set) var children: [ProcessSample] = []
     @Published var stacks: String?
     @Published var sampling = false
@@ -41,7 +43,7 @@ final class InspectorModel: ObservableObject {
         let pid = identity.pid, path = sample?.path ?? ""
         Task.detached(priority: .utility) {
             let d = ProcessInspector.details(pid: pid, path: path)
-            await MainActor.run { self.details = d }
+            await MainActor.run { self.previousCounters = self.details?.counters; self.details = d }
         }
     }
 
@@ -196,6 +198,7 @@ struct InspectorView: View {
                 row("Arguments", d?.arguments.value?.joined(separator: " "))
             }.font(.system(size: 12, design: .monospaced)).textSelection(.enabled)
         }
+        if let c = d?.counters { StatisticsPanel(c: c, prev: model.previousCounters, s: s) }
         if let sig = d?.signature {
             Panel(title: "Code signature") {
                 Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 5) {
@@ -329,5 +332,45 @@ struct InspectorView: View {
         if let a = model.details?.arguments.value { out += "Arguments: \(a.joined(separator: " "))\n" }
         if let sig = model.details?.signature { out += "Signature: \(sig.summary)\n" }
         return out
+    }
+}
+
+/// Activity Monitor-style statistics with rates (per second, over the last refresh).
+struct StatisticsPanel: View {
+    @Environment(\.palette) var p
+    var c: ProcessDetails.Counters
+    var prev: ProcessDetails.Counters?
+    var s: ProcessSample?
+
+    func rate(_ k: KeyPath<ProcessDetails.Counters, Int64>) -> String {
+        guard let prev, c.time > prev.time else { return "" }
+        let r = Double(c[keyPath: k] - prev[keyPath: k]) / c.time.timeIntervalSince(prev.time)
+        return r >= 0 ? String(format: "  (%.0f/s)", r) : ""
+    }
+    func n(_ v: Int64) -> String { v.formatted(.number) }
+
+    var body: some View {
+        Panel(title: "Statistics", trailing: "kernel counters since launch (rate over the last 3 s)") {
+            Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 5) {
+                GridRow { Text("Page faults").foregroundStyle(p.dim); Text(n(c.faults) + rate(\.faults))
+                          Text("Page-ins").foregroundStyle(p.dim); Text(n(c.pageins) + rate(\.pageins)) }
+                GridRow { Text("Unix syscalls").foregroundStyle(p.dim); Text(n(c.unixSyscalls) + rate(\.unixSyscalls))
+                          Text("Mach syscalls").foregroundStyle(p.dim); Text(n(c.machSyscalls) + rate(\.machSyscalls)) }
+                GridRow { Text("Context switches").foregroundStyle(p.dim); Text(n(c.contextSwitches) + rate(\.contextSwitches))
+                          Text("Copy-on-write faults").foregroundStyle(p.dim); Text(n(c.cowFaults) + rate(\.cowFaults)) }
+                GridRow { Text("Mach msgs sent").foregroundStyle(p.dim); Text(n(c.machMessagesSent) + rate(\.machMessagesSent))
+                          Text("Mach msgs received").foregroundStyle(p.dim); Text(n(c.machMessagesReceived) + rate(\.machMessagesReceived)) }
+                GridRow { Text("Resident / virtual").foregroundStyle(p.dim); Text("\(Fmt.bytes(c.residentBytes)) / \(Fmt.bytes(c.virtualBytes))")
+                          Text("Peak memory").foregroundStyle(p.dim); Text(c.peakFootprint.map { Fmt.bytes($0) } ?? "—") }
+                GridRow { Text("Instructions / cycles").foregroundStyle(p.dim)
+                          Text(c.instructions.flatMap { i in c.cycles.map { cy in String(format: "IPC %.2f", Double(i) / Double(max(cy, 1))) } } ?? "—")
+                          Text("Logical writes").foregroundStyle(p.dim); Text(c.logicalWrites.map { Fmt.bytes($0) } ?? "—") }
+                GridRow { Text("Running threads").foregroundStyle(p.dim); Text("\(c.runningThreads) of \(s?.threads ?? 0)")
+                          Text("Kind").foregroundStyle(p.dim); Text(s?.translated == true ? "Intel (Rosetta 2)" : s?.translated == false ? "Apple silicon" : "—") }
+                if let a = s?.powerAssertions, !a.isEmpty {
+                    GridRow { Text("Keeping awake").foregroundStyle(p.dim); Text(a.map { "\($0.label)" + ($0.name.isEmpty ? "" : " (“\($0.name)”)") }.joined(separator: "; ")).gridCellColumns(3) }
+                }
+            }.font(.system(size: 12, design: .monospaced)).textSelection(.enabled)
+        }
     }
 }

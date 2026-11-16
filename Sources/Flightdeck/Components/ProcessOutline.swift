@@ -9,9 +9,9 @@ final class ProcItem: NSObject {
 }
 
 enum ProcColumn: String, CaseIterable, Equatable {
-    case name = "Name", pid = "PID", cpu = "CPU %", gpu = "GPU %", memory = "Memory", disk = "Disk", netIn = "Net In", netOut = "Net Out", energy = "Energy", wakeups = "Wakeups", threads = "Threads", user = "User"
+    case name = "Name", pid = "PID", cpu = "CPU %", gpu = "GPU %", memory = "Memory", disk = "Disk", netIn = "Net In", netOut = "Net Out", energy = "Energy", wakeups = "Wakeups", threads = "Threads", kind = "Kind", sleep = "Sleep", user = "User"
     var width: CGFloat { switch self { case .name: 240; case .user: 90; case .cpu, .memory, .disk, .netIn, .netOut: 84; default: 62 } }
-    var numeric: Bool { self != .name && self != .user }
+    var numeric: Bool { self != .name && self != .user && self != .kind && self != .sleep }
     func key(_ s: ProcessSample) -> Double {
         switch self {
         case .pid: Double(s.pid); case .cpu: s.cpu; case .memory: Double(s.memory)
@@ -34,6 +34,8 @@ enum ProcColumn: String, CaseIterable, Equatable {
         case .wakeups: s.restricted ? "—" : String(format: "%.0f", s.wakeups)
         case .threads: s.restricted ? "—" : "\(s.threads)"
         case .user: s.user
+        case .kind: s.translated == true ? "Intel" : (s.translated == false ? "Apple" : "")
+        case .sleep: s.powerAssertions.map { a in a.contains { $0.preventsDisplaySleep } ? "Display" : "Prevents" } ?? ""
         }
     }
 }
@@ -170,7 +172,7 @@ struct ProcessOutline: NSViewRepresentable {
 
         func sorted(_ a: [ProcItem]) -> [ProcItem] {
             let (col, asc) = sortKey()
-            if col == .name || col == .user {
+            if !col.numeric {
                 return a.sorted { let c = col.text($0.s).localizedCaseInsensitiveCompare(col.text($1.s)); if c == .orderedSame { return $0.s.pid < $1.s.pid }; return asc ? c == .orderedAscending : c == .orderedDescending }
             }
             return a.sorted {

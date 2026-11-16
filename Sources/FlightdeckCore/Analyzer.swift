@@ -189,6 +189,19 @@ public final class Analyzer {
                 KnownProcess.explain(a.name) ?? "Graphics or compute work from this app is keeping the GPU busy.", "Performance:GPU")
         } }
 
+        // Apps keeping the Mac awake (system daemons that do this routinely are left out)
+        var awake: [String: (AppUsage?, PowerAssertion)] = [:]
+        for p in s.processes where p.uid >= 500 || AppUsage.bundle(of: p.path) != nil {
+            guard let a = p.powerAssertions?.first else { continue }
+            let k = AppUsage.groupKeys([p])[0].key
+            awake[k] = (byKey[k], a)
+        }
+        for (k, v) in awake {
+            let name = v.0.map(describe) ?? k.replacingOccurrences(of: "proc:", with: "")
+            add("awake:\(k)", .info, v.1.preventsDisplaySleep ? "display" : "moon.zzz", "\(name) \(v.1.label)",
+                v.1.name.isEmpty ? nil : "Reason given: “\(v.1.name)”.", "Processes")
+        }
+
         // Hung apps
         for p in s.processes where p.notResponding == true {
             let name = AppUsage.key(for: p).name

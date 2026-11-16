@@ -42,6 +42,18 @@ public struct ProcessDetails: Sendable {
         }
     }
 
+    /// Cumulative kernel counters (Activity Monitor's "Statistics"); rates come from two readings.
+    public struct Counters: Sendable, Hashable {
+        public var time: Date
+        public var faults: Int64, pageins: Int64, cowFaults: Int64
+        public var machMessagesSent: Int64, machMessagesReceived: Int64
+        public var machSyscalls: Int64, unixSyscalls: Int64, contextSwitches: Int64
+        public var runningThreads: Int32, priority: Int32
+        public var residentBytes: UInt64, virtualBytes: UInt64
+        public var peakFootprint: UInt64?, instructions: UInt64?, cycles: UInt64?, logicalWrites: UInt64?
+        public var interruptWakeups: UInt64?, idleWakeups: UInt64?
+    }
+
     public var arguments: Measured<[String]>
     public var environment: Measured<[String]>
     public var cwd: Measured<String>
@@ -51,6 +63,7 @@ public struct ProcessDetails: Sendable {
     public var signature: Signature?
     public var nice: Int32?
     public var ancestry: [(pid: Int32, name: String)]
+    public var counters: Counters?
 }
 
 public enum ProcessInspector {
@@ -62,7 +75,7 @@ public enum ProcessInspector {
         let niceOK = errno == 0   // read now: later calls overwrite errno
         return ProcessDetails(arguments: args, environment: env, cwd: cwd(pid), files: files, sockets: sockets,
                               threads: threads(pid), signature: path.isEmpty ? nil : signature(path),
-                              nice: niceOK ? n : nil, ancestry: ancestry(pid))
+                              nice: niceOK ? n : nil, ancestry: ancestry(pid), counters: counters(pid))
     }
 
     static func argsAndEnv(_ pid: Int32) -> (Measured<[String]>, Measured<[String]>) {
@@ -87,6 +100,20 @@ public enum ProcessInspector {
         let args = Array(strings.prefix(argc))
         let env = strings.count > argc ? Array(strings[argc...]) : []
         return (.value(args), .value(env))
+    }
+
+    public static func counters(_ pid: Int32) -> ProcessDetails.Counters? {
+        var ti = proc_taskinfo()
+        guard proc_pidinfo(pid, PROC_PIDTASKINFO, 0, &ti, Int32(MemoryLayout<proc_taskinfo>.size)) == Int32(MemoryLayout<proc_taskinfo>.size) else { return nil }
+        var ru = rusage_info_v6()
+        let ok = withUnsafeMutablePointer(to: &ru) { $0.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) { proc_pid_rusage(pid, RUSAGE_INFO_V6, $0) } } == 0
+        return .init(time: Date(), faults: Int64(ti.pti_faults), pageins: Int64(ti.pti_pageins), cowFaults: Int64(ti.pti_cow_faults),
+                     machMessagesSent: Int64(ti.pti_messages_sent), machMessagesReceived: Int64(ti.pti_messages_received),
+                     machSyscalls: Int64(ti.pti_syscalls_mach), unixSyscalls: Int64(ti.pti_syscalls_unix), contextSwitches: Int64(ti.pti_csw),
+                     runningThreads: ti.pti_numrunning, priority: ti.pti_priority, residentBytes: ti.pti_resident_size, virtualBytes: ti.pti_virtual_size,
+                     peakFootprint: ok ? ru.ri_lifetime_max_phys_footprint : nil, instructions: ok && ru.ri_instructions > 0 ? ru.ri_instructions : nil,
+                     cycles: ok && ru.ri_cycles > 0 ? ru.ri_cycles : nil, logicalWrites: ok ? ru.ri_logical_writes : nil,
+                     interruptWakeups: ok ? ru.ri_interrupt_wkups : nil, idleWakeups: ok ? ru.ri_pkg_idle_wkups : nil)
     }
 
     static func cwd(_ pid: Int32) -> Measured<String> {

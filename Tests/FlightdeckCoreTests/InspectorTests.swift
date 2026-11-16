@@ -55,3 +55,21 @@ final class SMCTests: XCTestCase {
         for fan in f { XCTAssert((0...20_000).contains(fan.rpm)); if let m = fan.maxRPM { XCTAssertGreaterThan(m, 500) } }
     }
 }
+
+import IOKit.pwr_mgt
+final class ProcessExtrasTests: XCTestCase {
+    func testCountersKindAndAssertions() {
+        let c = ProcessInspector.counters(getpid())
+        XCTAssertNotNil(c); XCTAssertGreaterThan(c!.unixSyscalls, 0); XCTAssertGreaterThan(c!.peakFootprint ?? 0, 0)
+        XCTAssertEqual(ProcessSampler.isTranslated(getpid()), false)
+        var id: IOPMAssertionID = 0
+        XCTAssertEqual(IOPMAssertionCreateWithName(kIOPMAssertionTypePreventUserIdleSystemSleep as CFString, IOPMAssertionLevel(kIOPMAssertionLevelOn), "flightdeck test" as CFString, &id), kIOReturnSuccess)
+        defer { IOPMAssertionRelease(id) }
+        let mine = PowerAssertions.byPID()[getpid()]
+        XCTAssertEqual(mine?.first?.name, "flightdeck test")
+        XCTAssertTrue(mine?.first?.preventsSystemSleep ?? false)
+        let s = Sampler().sample().processes.first { $0.pid == getpid() }
+        XCTAssertNotNil(s?.powerAssertions)
+        XCTAssertEqual(s?.translated, false)
+    }
+}
