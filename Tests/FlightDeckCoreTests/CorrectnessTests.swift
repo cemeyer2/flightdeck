@@ -106,3 +106,57 @@ final class TimeBucketTests: XCTestCase {
         XCTAssertTrue(b[2...7].allSatisfy { $0 == nil })
     }
 }
+
+/// Rules must never be able to hurt the system or the user's current work.
+final class RuleSafetyTests: XCTestCase {
+    let t = AnalyzerTests()
+    let t0 = Date(timeIntervalSince1970: 15_000_000)
+
+    func run(_ r: Rule, _ procs: [ProcessSample], seconds: Int = 120, frontmost: Int32? = nil) -> [RuleFiring] {
+        let e = RuleEngine(); e.rules = [r]; e.frontmostPID = frontmost
+        return (0..<seconds).flatMap { e.evaluate(t.snap(t0.addingTimeInterval(Double($0)), procs: procs)) }
+    }
+
+    /// Platform binaries and the frontmost app are never quit, even by a matching rule.
+    func testDestructiveRulesSkipSystemAndFrontmost() {
+        let sys = t.proc("mds_stores", path: "/System/Library/Frameworks/x/mds_stores", pid: 20, cpu: 400)
+        let front = t.proc("Editor", path: "/Applications/Editor.app/Contents/MacOS/Editor", pid: 21, cpu: 400)
+        let other = t.proc("Hog", path: "/Applications/Hog.app/Contents/MacOS/Hog", pid: 22, cpu: 400)
+        var r = Rule(name: "q", target: .process, match: "", metric: .cpu, threshold: 100, minutes: 1, action: .quit)
+        r.acknowledgedBroadMatch = true
+        let f = run(r, [sys, front, other], frontmost: 21)
+        XCTAssertEqual(f.map(\.subject), ["Hog"])
+        // …while notify may still watch system processes
+        let n = run(Rule(name: "n", target: .process, match: "mds", metric: .cpu, threshold: 100, minutes: 1, action: .notify), [sys])
+        XCTAssertEqual(n.count, 1)
+    }
+
+    /// A destructive match-everything rule doesn't run until the user acknowledges it; and destructive rules wait ≥ 1 min.
+    func testBroadDestructiveNeedsAcknowledgementAndMinimumDuration() {
+        let hog = t.proc("Hog", path: "/Applications/Hog.app/Contents/MacOS/Hog", pid: 22, cpu: 400)
+        var r = Rule(name: "q", target: .app, match: "", metric: .cpu, threshold: 100, minutes: 0, action: .forceQuit)
+        XCTAssertNotNil(r.problem)
+        XCTAssertTrue(run(r, [hog]).isEmpty)
+        r.acknowledgedBroadMatch = true
+        let f = run(r, [hog])
+        XCTAssertEqual(f.count, 1)
+        XCTAssertEqual(f[0].time.timeIntervalSince(t0), 60, accuracy: 1, "0 minutes is raised to 1 for destructive actions")
+        XCTAssertEqual(f[0].subjectID, "/Applications/Hog.app")
+    }
+
+    /// Invalid rules never run; rules saved by older versions still load.
+    func testValidationAndOldRulesDecode() {
+        XCTAssertNotNil(Rule(name: "z", threshold: 0).problem)
+        let old = #"[{"id":"6F9C0F5E-0E7B-4E2C-9C7A-2E6E8B1C9A11","name":"old","enabled":true,"target":"App","match":"x","metric":"CPU %","threshold":50,"minutes":2,"action":"Notify me","command":"","cooldownMinutes":30}]"#
+        let rules = RuleEngine.load(Data(old.utf8))
+        XCTAssertEqual(rules.first?.name, "old"); XCTAssertEqual(rules.first?.resumeAfterMinutes, 5)
+    }
+
+    /// Dry run replays recorded frames through a fresh engine.
+    func testDryRun() {
+        let hog = t.proc("Hog", path: "/Applications/Hog.app/Contents/MacOS/Hog", pid: 22, cpu: 400)
+        let frames = (0..<200).map { t.snap(t0.addingTimeInterval(Double($0)), procs: [hog]) }
+        let r = Rule(name: "n", enabled: false, target: .app, match: "hog", metric: .cpu, threshold: 100, minutes: 1, action: .notify)
+        XCTAssertEqual(RuleEngine.dryRun(r, frames: frames).count, 1)
+    }
+}

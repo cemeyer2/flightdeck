@@ -15,7 +15,7 @@ final class AnalyzerTests: XCTestCase {
     func proc(_ name: String, path: String, pid: Int32, cpu: Double = 1, mem: UInt64 = 100_000_000) -> ProcessSample {
         var p = Self.base.processes[0]
         p.identity = ProcessIdentity(pid: pid, startTime: 1); p.name = name; p.path = path
-        p.cpu = cpu; p.memory = mem; p.wakeups = 0; p.diskReadBps = 0; p.diskWriteBps = 0; p.network = nil
+        p.uid = getuid(); p.cpu = cpu; p.memory = mem; p.wakeups = 0; p.diskReadBps = 0; p.diskWriteBps = 0; p.network = nil
         return p
     }
 

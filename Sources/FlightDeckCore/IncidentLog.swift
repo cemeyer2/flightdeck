@@ -22,6 +22,13 @@ public struct Incident: Codable, Sendable, Identifiable, Hashable {
     public var evidenceSummary: String? = nil
     /// Ongoing incidents measure up to now.
     public var duration: TimeInterval { (end ?? Date()).timeIntervalSince(start) }
+
+    public init(id: UUID, key: String, severity: Finding.Severity, icon: String, title: String, detail: String?,
+                destination: String?, start: Date, end: Date?, evidencePath: String? = nil, evidenceSummary: String? = nil) {
+        self.id = id; self.key = key; self.severity = severity; self.icon = icon; self.title = title; self.detail = detail
+        self.destination = destination; self.start = start; self.end = end
+        self.evidencePath = evidencePath; self.evidenceSummary = evidenceSummary
+    }
 }
 
 /// Persistent history of findings ("what happened at 3:14 pm?"). Findings shorter than `minDuration`
@@ -112,6 +119,11 @@ public final class IncidentLog {
     }
 
     /// Records the stack sample captured for an incident. Called back on the sampling queue when a capture finishes.
+    /// Adds an already-complete incident (e.g. an automatic rule action) to the log.
+    public func record(_ inc: Incident) {
+        incidents.append(inc); dirty = true; revision += 1
+    }
+
     public func attach(evidence path: String, summary: String?, to id: UUID) {
         guard let i = incidents.firstIndex(where: { $0.id == id }) else { return }
         incidents[i].evidencePath = path; incidents[i].evidenceSummary = summary

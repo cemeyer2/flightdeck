@@ -82,9 +82,10 @@ final class Engine: ObservableObject {
         didSet { UserDefaults.standard.set(RuleEngine.save(rules), forKey: "rules"); let r = rules; queue.async { [ruleEngine] in ruleEngine.rules = r } }
     }
     /// One line in the rule activity log: what fired and what the action did.
-    struct RuleLogEntry: Identifiable { let id = UUID(); var firing: RuleFiring; var result: String }
+    /// One automatic action, as shown in the Rules view and kept on disk (last 200).
+    struct RuleLogEntry: Identifiable, Codable { var id: UUID; var time: Date; var rule: String; var action: String; var subject: String; var result: String }
     /// Most recent rule actions first, capped at 100.
-    @Published private(set) var ruleLog: [RuleLogEntry] = []
+    @Published private(set) var ruleLog: [RuleLogEntry] = Engine.loadRuleLog()
     /// Set to a Destination raw value (optionally "Performance:<tab>") to navigate there.
     @Published var navigationRequest: String?
     /// Called on the main actor for each incident once it has lasted long enough to log.
@@ -158,14 +159,19 @@ final class Engine: ObservableObject {
             blackBoxQueue.sync { blackBox.flush() }
             queue.sync { incidentLog.closeAll(at: Date()); incidentLog.save() }
         }
+        // Anything a Suspend rule stopped is resumed when FlightDeck quits.
+        NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.resumeSuspended(all: true) }
+        }
     }
 
     /// Runs on the main actor, called from `tick()` for each firing returned by the RuleEngine.
-    /// Carries out a rule's action. Signals are identity-checked (a recycled PID is never hit); every action is announced.
+    /// Carries out a rule's action. Signals are identity-checked (a recycled PID is never hit); every action is announced
+    /// in a notification, the persistent rule log and the Flight Log.
     private func execute(_ f: RuleFiring) {
         let r = f.rule
         let what = f.targets.count > 1 ? "\(f.subject) (\(f.targets.count) processes)" : f.subject
-        let measured = "\(r.metric.rawValue) \(String(format: "%.1f", f.value)) for \(r.minutes.formatted()) min"
+        let measured = "\(r.metric.rawValue) \(String(format: "%.1f", f.value)) for \(r.effectiveMinutes.formatted()) min"
         var result: String
         // Sends `sig` to every target. `ProcessSampler.send` checks PID + start time first, so a recycled PID is refused
         // and counted as failed rather than signalled.
@@ -174,6 +180,12 @@ final class Engine: ObservableObject {
             for id in f.targets { do { try ProcessSampler.send(sig, to: id); ok += 1 } catch { failed += 1 } }
             return failed == 0 ? "\(verb) \(what)" : "\(verb) \(ok) of \(f.targets.count) processes of \(f.subject) (\(failed) not permitted or gone)"
         }
+        // App rules quit through the app itself (NSRunningApplication), like the Dock's Quit: the app gets to ask about
+        // unsaved work and close its helpers. Plain processes (and apps that aren't running as an app) get signals.
+        let app: NSRunningApplication? = r.target == .app
+            ? NSWorkspace.shared.runningApplications.first { $0.bundleURL?.standardizedFileURL.path == URL(fileURLWithPath: f.subjectID).standardizedFileURL.path }
+            : nil
+        let entryID = UUID()
         switch r.action {
         case .notify: result = "Notified"
         case .lowerPriority:
@@ -182,21 +194,92 @@ final class Engine: ObservableObject {
             // processes the user owns; failures are simply not counted.
             for id in f.targets where ProcessSampler.identity(of: id.pid) == id { if (try? ProcessInspector.setNice(pid: id.pid, 10)) != nil { ok += 1 } }
             result = "Lowered the priority of \(ok) of \(f.targets.count) processes"
-        case .suspend: result = signal(SIGSTOP, "Suspended")
-        case .quit: result = signal(SIGTERM, "Quit")
-        case .forceQuit: result = signal(SIGKILL, "Force quit")
+        case .suspend:
+            result = signal(SIGSTOP, "Suspended")
+            // Never leave an app frozen: resume after the rule's time, and on quit (see `resumeAllSuspended`).
+            let until = Date().addingTimeInterval(max(r.resumeAfterMinutes, 0.5) * 60)
+            suspended += f.targets.map { ($0, until) }
+            result += ", resuming in \(max(r.resumeAfterMinutes, 0.5).formatted()) min"
+        case .quit:
+            if let app { result = app.terminate() ? "Asked \(f.subject) to quit" : "\(f.subject) declined to quit" } else { result = signal(SIGTERM, "Quit") }
+        case .forceQuit:
+            if let app { result = app.forceTerminate() ? "Force quit \(f.subject)" : "Couldn't force quit \(f.subject)" } else { result = signal(SIGKILL, "Force quit") }
         case .command:
-            // User shell commands get the firing's details in FD_* environment variables. The process isn't waited on.
-            let p = Process(); p.executableURL = URL(fileURLWithPath: "/bin/sh"); p.arguments = ["-c", r.command]
-            var env = ProcessInfo.processInfo.environment
-            env["FD_RULE"] = r.name; env["FD_SUBJECT"] = f.subject; env["FD_METRIC"] = r.metric.rawValue
-            env["FD_VALUE"] = String(format: "%.2f", f.value); env["FD_PIDS"] = f.targets.map { "\($0.pid)" }.joined(separator: " ")
-            p.environment = env
-            do { try p.run(); result = "Ran the command (pid \(p.processIdentifier))" } catch { result = "Command failed: \(error.localizedDescription)" }
+            result = "Running the command…"
+            runRuleCommand(r, f, entryID: entryID)
         }
         Alerts.shared.post(title: "Rule “\(r.name)”", body: "\(what): \(measured). \(result).")
-        ruleLog.insert(RuleLogEntry(firing: f, result: result), at: 0)
-        if ruleLog.count > 100 { ruleLog.removeLast(ruleLog.count - 100) }
+        record(RuleLogEntry(id: entryID, time: f.time, rule: r.name, action: r.action.rawValue, subject: f.subject, result: result))
+        // Also an (instant) incident in the Flight Log, so automatic actions sit on the same timeline as problems.
+        let inc = Incident(id: UUID(), key: "rule:\(r.id)", severity: r.action.isDestructive ? .caution : .info, icon: "bolt.badge.automatic",
+                           title: "Rule “\(r.name)”: \(result)", detail: "\(what): \(measured)", destination: "Rules", start: f.time, end: f.time)
+        queue.async { [incidentLog] in incidentLog.record(inc) }
+    }
+
+    /// Runs a rule's shell command off the main thread with FD_* environment variables, stops it after 60 s, and stores
+    /// the start of its output in the rule log.
+    private func runRuleCommand(_ r: Rule, _ f: RuleFiring, entryID: UUID) {
+        let command = r.command
+        var env = ProcessInfo.processInfo.environment
+        env["FD_RULE"] = r.name; env["FD_SUBJECT"] = f.subject; env["FD_METRIC"] = r.metric.rawValue
+        env["FD_VALUE"] = String(format: "%.2f", f.value); env["FD_PIDS"] = f.targets.map { "\($0.pid)" }.joined(separator: " ")
+        Task.detached(priority: .utility) { [weak self] in
+            let p = Process(); p.executableURL = URL(fileURLWithPath: "/bin/sh"); p.arguments = ["-c", command]; p.environment = env
+            let pipe = Pipe(); p.standardOutput = pipe; p.standardError = pipe
+            var outcome: String
+            do {
+                try p.run()
+                let killer = DispatchWorkItem { if p.isRunning { p.terminate() } }
+                DispatchQueue.global().asyncAfter(deadline: .now() + 60, execute: killer)
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()   // returns when the command (or the kill) ends
+                p.waitUntilExit(); killer.cancel()
+                let out = String(decoding: data.prefix(600), as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+                outcome = p.terminationReason == .uncaughtSignal ? "Command stopped after 60 s" : "Command exited \(p.terminationStatus)"
+                if !out.isEmpty { outcome += ": " + out }
+            } catch { outcome = "Command failed to start: \(error.localizedDescription)" }
+            let final = outcome
+            await MainActor.run { self?.updateLog(entryID, result: final) }
+        }
+    }
+
+    // MARK: Rule log (persisted) and suspended processes
+
+    /// Processes a Suspend rule stopped, and when to resume them.
+    private var suspended: [(ProcessIdentity, Date)] = []
+
+    /// Resumes suspended processes whose time is up (called every sample) or all of them (`all`, at quit).
+    private func resumeSuspended(all: Bool = false) {
+        let now = Date()
+        for (id, until) in suspended where all || until <= now { try? ProcessSampler.send(SIGCONT, to: id) }
+        suspended.removeAll { all || $0.1 <= now }
+    }
+
+    static var ruleLogURL: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Flightdeck/rule-actions.json")
+    }
+
+    private func record(_ e: RuleLogEntry) {
+        ruleLog.insert(e, at: 0)
+        if ruleLog.count > 200 { ruleLog.removeLast(ruleLog.count - 200) }
+        saveRuleLog()
+    }
+
+    private func updateLog(_ id: UUID, result: String) {
+        guard let i = ruleLog.firstIndex(where: { $0.id == id }) else { return }
+        ruleLog[i].result = result
+        saveRuleLog()
+    }
+
+    private func saveRuleLog() {
+        let enc = JSONEncoder(); enc.dateEncodingStrategy = .secondsSince1970
+        guard let d = try? enc.encode(ruleLog) else { return }
+        try? FileManager.default.createDirectory(at: Self.ruleLogURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? d.write(to: Self.ruleLogURL, options: .atomic)
+    }
+
+    static func loadRuleLog() -> [RuleLogEntry] {
+        let dec = JSONDecoder(); dec.dateDecodingStrategy = .secondsSince1970
+        return (try? Data(contentsOf: ruleLogURL)).flatMap { try? dec.decode([RuleLogEntry].self, from: $0) } ?? []
     }
 
     /// `fresh` are incidents IncidentLog just logged (findings that lasted past its `minDuration`). Only hangs, CPU and
@@ -265,11 +348,14 @@ final class Engine: ObservableObject {
         lastTick = Date()
         inFlight = true
         let includeSelf = self.includeSelf
+        let front = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        resumeSuspended()
         queue.async { [sampler, analyzer, incidentLog, ruleEngine] in
             sampler.processes.includeSelf = includeSelf
             let s = sampler.sample()
             self.processHistory.record(s.processes)
             let found = analyzer.ingest(s)
+            ruleEngine.frontmostPID = front
             let firings = ruleEngine.evaluate(s)
             let fullDays = analyzer.daysUntilFull()
             let fresh = incidentLog.update(found, at: s.time)

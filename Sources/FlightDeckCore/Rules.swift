@@ -37,6 +37,48 @@ public struct Rule: Codable, Sendable, Identifiable, Hashable {
     public var command: String = ""
     /// Minimum time between two firings for the same subject, even across separate occurrences.
     public var cooldownMinutes: Double = 30
+    /// Suspend only: resume the processes automatically after this many minutes (and whenever FlightDeck quits),
+    /// so a suspended app is never left frozen indefinitely.
+    public var resumeAfterMinutes: Double = 5
+    /// The user confirmed that a destructive rule with no name filter really should apply to every app/process.
+    public var acknowledgedBroadMatch = false
+
+    /// Older saved rules lack the newer fields; decode them with defaults instead of discarding the rule.
+    public init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        name = try c.decode(String.self, forKey: .name)
+        enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
+        target = try c.decodeIfPresent(Target.self, forKey: .target) ?? .app
+        match = try c.decodeIfPresent(String.self, forKey: .match) ?? ""
+        metric = try c.decodeIfPresent(Metric.self, forKey: .metric) ?? .cpu
+        threshold = try c.decodeIfPresent(Double.self, forKey: .threshold) ?? 200
+        minutes = try c.decodeIfPresent(Double.self, forKey: .minutes) ?? 10
+        action = try c.decodeIfPresent(Action.self, forKey: .action) ?? .notify
+        command = try c.decodeIfPresent(String.self, forKey: .command) ?? ""
+        cooldownMinutes = try c.decodeIfPresent(Double.self, forKey: .cooldownMinutes) ?? 30
+        resumeAfterMinutes = try c.decodeIfPresent(Double.self, forKey: .resumeAfterMinutes) ?? 5
+        acknowledgedBroadMatch = try c.decodeIfPresent(Bool.self, forKey: .acknowledgedBroadMatch) ?? false
+    }
+
+    /// Whether the rule matches every app/process (no name filter).
+    public var matchesEverything: Bool { let m = match.trimmingCharacters(in: .whitespaces); return m.isEmpty || m == "*" }
+
+    /// Why the rule can't be saved or run as configured, or nil if it's valid.
+    public var problem: String? {
+        if name.trimmingCharacters(in: .whitespaces).isEmpty { return "Give the rule a name." }
+        if !(threshold > 0) { return "The threshold must be above 0." }
+        if minutes < 0 { return "The duration can't be negative." }
+        if action == .command && command.trimmingCharacters(in: .whitespaces).isEmpty { return "Enter a command to run." }
+        if action.isDestructive && matchesEverything && !acknowledgedBroadMatch {
+            return "This would \(action.rawValue.lowercased()) for any \(target.rawValue.lowercased()); confirm that below."
+        }
+        return nil
+    }
+
+    /// The duration actually enforced: destructive actions always wait at least a minute, so a momentary spike can't
+    /// quit anything.
+    public var effectiveMinutes: Double { action.isDestructive || action == .lowerPriority ? max(minutes, 1) : max(minutes, 0) }
 
     public init(name: String, enabled: Bool = true, target: Target = .app, match: String = "", metric: Metric = .cpu, threshold: Double = 200,
                 minutes: Double = 10, action: Action = .notify, command: String = "", cooldownMinutes: Double = 30) {
@@ -72,6 +114,8 @@ public struct Rule: Codable, Sendable, Identifiable, Hashable {
 public struct RuleFiring: Sendable, Identifiable, Hashable {
     public var id = UUID()
     public var rule: Rule
+    /// The app's bundle path (app rules) or "<pid>-<start>" (process rules), so app-level actions can target the app.
+    public var subjectID: String = ""
     /// Display name of the app or process.
     public var subject: String
     /// Identities as of the triggering snapshot, so the action can refuse a PID that has since been reused.
@@ -86,7 +130,22 @@ public struct RuleFiring: Sendable, Identifiable, Hashable {
 public final class RuleEngine: @unchecked Sendable {
     public var rules: [Rule] = []
     /// Never matched by any rule: killing or suspending these would hang or log out the Mac, or stop FlightDeck itself.
-    public static let protected: Set<String> = ["kernel_task", "launchd", "WindowServer", "loginwindow", "FlightDeck", "Flightdeck", "logd", "configd", "powerd"]
+    public static let protected: Set<String> = ["kernel_task", "launchd", "WindowServer", "loginwindow", "FlightDeck", "Flightdeck", "logd", "configd", "powerd",
+                                                "Finder", "Dock", "SystemUIServer", "ControlCenter", "coreaudiod", "sshd", "Terminal", "iTerm2"]
+    /// Platform locations: processes running from here are part of macOS and are never quit, suspended or reniced.
+    static let platformPrefixes = ["/System/", "/usr/libexec/", "/usr/sbin/", "/usr/bin/", "/bin/", "/sbin/", "/Library/Apple/"]
+    /// The frontmost app's PID (set by the app each sample): the app you're using is never quit or suspended by a rule.
+    public var frontmostPID: Int32?
+
+    /// May this process be acted on with `action`? Notify and commands may observe anything except FlightDeck itself;
+    /// anything that changes a process (quit, suspend, renice) is limited to ordinary, non-system, non-frontmost processes.
+    func allowed(_ p: ProcessSample, for action: Rule.Action) -> Bool {
+        guard p.pid > 1, p.pid != getpid() else { return false }
+        if action == .notify || action == .command { return true }
+        if Self.protected.contains(p.name) || p.pid == frontmostPID { return false }
+        if Self.platformPrefixes.contains(where: { p.path.hasPrefix($0) }) || p.path.isEmpty { return false }
+        return p.uid == getuid()   // other users' processes can't be signalled anyway; don't pretend
+    }
     // All three are keyed "<rule id>|<subject key>"; subject keys are the app id or "<pid>-<start time>".
     private var since: [String: Date] = [:]          // rule+subject -> condition true since
     private var fired: [String: Date] = [:]          // rule+subject -> occurrence already handled (since date)
@@ -104,11 +163,11 @@ public final class RuleEngine: @unchecked Sendable {
         last = t
         // Protection is applied before matching, so even a "*" rule can never select FlightDeck, launchd (pid 1),
         // the kernel (pid 0) or the protected system processes.
-        let me = getpid()
-        let procs = s.processes.filter { $0.pid > 1 && $0.pid != me && !Self.protected.contains($0.name) }
         var out: [RuleFiring] = []
         var seen = Set<String>()
-        for r in rules where r.enabled {
+        // Invalid rules (e.g. threshold 0, or an unconfirmed destructive match-all) never run.
+        for r in rules where r.enabled && r.problem == nil {
+            let procs = s.processes.filter { allowed($0, for: r.action) }
             var subjects: [(key: String, name: String, value: Double, targets: [ProcessIdentity])] = []
             switch r.target {
             case .process:
@@ -138,11 +197,11 @@ public final class RuleEngine: @unchecked Sendable {
                 // Fire at most once per occurrence: `fired` remembers the start of the occurrence already handled. An
                 // occurrence that becomes due during the cooldown waits (it is not marked fired), so it still fires
                 // when the cooldown ends if the condition is still true.
-                guard t.timeIntervalSince(start) >= r.minutes * 60, fired[k] != start else { continue }
-                if let lf = lastFire[k], t.timeIntervalSince(lf) < r.cooldownMinutes * 60 { continue }
+                guard t.timeIntervalSince(start) >= r.effectiveMinutes * 60, fired[k] != start else { continue }
+                if let lf = lastFire[k], t.timeIntervalSince(lf) < max(r.cooldownMinutes, 1) * 60 { continue }
                 fired[k] = start
                 lastFire[k] = t
-                out.append(RuleFiring(rule: r, subject: sub.name, targets: sub.targets, value: sub.value, time: t))
+                out.append(RuleFiring(rule: r, subjectID: sub.key, subject: sub.name, targets: sub.targets, value: sub.value, time: t))
             }
         }
         // Forget countdowns for subjects that are below threshold, gone, or belong to a disabled/deleted rule.
@@ -153,6 +212,15 @@ public final class RuleEngine: @unchecked Sendable {
     }
 
     /// Decodes saved rules; missing or corrupt data yields no rules rather than an error.
+    /// What `rule` would have done over recorded frames (e.g. the black box's 24 h): a fresh engine replays them.
+    /// Recorded frames keep only the busiest processes, so this can miss quieter matches.
+    public static func dryRun(_ rule: Rule, frames: [Snapshot]) -> [RuleFiring] {
+        let e = RuleEngine()
+        var r = rule; r.enabled = true
+        e.rules = [r]
+        return frames.flatMap { e.evaluate($0) }
+    }
+
     public static func load(_ data: Data?) -> [Rule] { data.flatMap { try? JSONDecoder().decode([Rule].self, from: $0) } ?? [] }
     public static func save(_ rules: [Rule]) -> Data? { try? JSONEncoder().encode(rules) }
 

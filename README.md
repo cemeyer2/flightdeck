@@ -124,7 +124,12 @@ which processes scheduled wakes, and which apps kept the Mac awake and for how l
 **Rules** automate responses: "when app *Chrome* has CPU % above 300 for 10 minutes, notify me / lower its priority /
 suspend / quit / force quit / run a command". Commands get `FD_RULE`, `FD_SUBJECT`, `FD_PIDS`, `FD_METRIC` and `FD_VALUE`
 in their environment (names are never spliced into the shell). Rules fire once per occurrence with a cooldown, signals
-are identity-checked, FlightDeck and core macOS processes are never targeted, and every action posts a notification.
+are identity-checked, and every action posts a notification and lands in the Flight Log and a saved action log.
+Safety rails: quit/suspend/renice never touch macOS components (anything under /System, /usr, /bin, /sbin), Finder, Dock,
+terminals, the app you're using, or FlightDeck itself; app rules quit through the app (so it can ask to save);
+destructive rules always wait at least a minute, and a match-everything destructive rule must be explicitly confirmed;
+suspended apps resume automatically (and when FlightDeck quits); commands time out after 60 s with their output logged.
+"Test Against the Last 24 Hours" dry-runs a rule on the black box before you save it.
 
 ## Measurement principles
 

@@ -41,14 +41,14 @@ struct RulesView: View {
                         if e.rules.isEmpty { Button("Add Examples") { e.rules += RuleEngine.examples } }
                     }
                 }
-                // `ruleLog` is kept in memory only, so it starts empty each launch.
-                Panel(title: "Recent actions", trailing: "this session") {
+                // `ruleLog` is persisted (last 200 actions); each action also appears in the Flight Log.
+                Panel(title: "Recent actions", trailing: "last \(e.ruleLog.count)") {
                     if e.ruleLog.isEmpty { Text("No rule has fired yet.").foregroundStyle(p.dim) }
                     ForEach(e.ruleLog) { entry in
                         HStack(alignment: .firstTextBaseline, spacing: 10) {
-                            Text(entry.firing.time.formatted(date: .omitted, time: .standard)).foregroundStyle(p.dim).frame(width: 80, alignment: .leading)
-                            Text(entry.firing.rule.name).frame(width: 160, alignment: .leading)
-                            Text("\(entry.firing.subject): \(entry.result)").lineLimit(2)
+                            Text(entry.time.formatted(.dateTime.weekday(.abbreviated).hour().minute().second())).foregroundStyle(p.dim).frame(width: 110, alignment: .leading)
+                            Text(entry.rule).frame(width: 160, alignment: .leading)
+                            Text("\(entry.subject): \(entry.result)").lineLimit(3).textSelection(.enabled)
                         }.font(.system(size: 11, design: .monospaced))
                     }
                 }
@@ -56,7 +56,7 @@ struct RulesView: View {
         }
         .sheet(item: $editing) { r in
             // Saving replaces the rule with the same id, or appends it if it's new.
-            RuleEditor(rule: r, isNew: isNew) { saved in
+            RuleEditor(rule: r, isNew: isNew, blackBox: e.blackBox) { saved in
                 if let i = e.rules.firstIndex(where: { $0.id == saved.id }) { e.rules[i] = saved } else { e.rules.append(saved) }
                 editing = nil
             } cancel: { editing = nil }
@@ -68,6 +68,10 @@ struct RulesView: View {
 struct RuleEditor: View {
     @State var rule: Rule
     var isNew: Bool
+    /// Source of recorded frames for the dry run.
+    var blackBox: BlackBox
+    @State private var dryRun: [RuleFiring]?
+    @State private var testing = false
     var save: (Rule) -> Void
     var cancel: () -> Void
 
@@ -85,21 +89,56 @@ struct RuleEditor: View {
                 TextField("Command (/bin/sh)", text: $rule.command)
                 Text("Runs with FD_RULE, FD_SUBJECT, FD_PIDS, FD_METRIC and FD_VALUE in its environment.").font(.caption).foregroundStyle(.secondary)
             }
+            if rule.action == .suspend {
+                TextField("Resume automatically after (minutes)", value: $rule.resumeAfterMinutes, format: .number)
+            }
             if rule.action.isDestructive {
-                Label("This \(rule.action == .suspend ? "suspends" : "quits") matching processes automatically, without asking. Unsaved work in them can be lost.", systemImage: "exclamationmark.triangle")
-                    .font(.caption).foregroundStyle(.orange)
+                Label("This \(rule.action == .suspend ? "suspends" : "quits") matching processes automatically. Apps are asked to quit like from the Dock (so they can save); macOS components, the app you're using and FlightDeck are never touched; it always waits at least a minute.", systemImage: "exclamationmark.triangle")
+                    .font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+                if rule.matchesEverything {
+                    // Destructive + no name filter: make the user say so explicitly.
+                    Toggle("Yes, apply this to any \(rule.target.rawValue.lowercased()) that crosses the line", isOn: $rule.acknowledgedBroadMatch)
+                }
             }
             // Cooldown is per rule and subject, so one app firing doesn't silence the rule for other apps.
             TextField("Don't repeat within (minutes)", value: $rule.cooldownMinutes, format: .number)
             // Live plain-English preview of the rule as configured.
             Text(rule.sentence).font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary)
+            if let problem = rule.problem { Text(problem).font(.caption).foregroundStyle(.red) }
+            // Dry run: what this rule would have done over the black box's last 24 hours.
+            HStack {
+                Button(testing ? "Testing…" : "Test Against the Last 24 Hours") { test() }.disabled(testing || rule.problem != nil)
+                if let d = dryRun {
+                    Text(d.isEmpty ? "Would not have fired." : "Would have fired \(d.count) time\(d.count == 1 ? "" : "s").").font(.caption)
+                }
+            }
+            if let d = dryRun, !d.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(d.prefix(8)) { f in
+                        Text("\(f.time.formatted(.dateTime.weekday(.abbreviated).hour().minute()))  \(f.subject)  \(String(format: "%.1f", f.value))")
+                    }
+                    Text("Based on recorded samples (every 10 s, busiest processes only), so it can miss quieter matches.").foregroundStyle(.secondary)
+                }.font(.system(size: 10, design: .monospaced))
+            }
             HStack {
                 Spacer()
                 Button("Cancel", role: .cancel) { cancel() }
                 Button(isNew ? "Add Rule" : "Save") { save(rule) }.keyboardShortcut(.defaultAction)
-                    .disabled(rule.name.isEmpty || (rule.action == .command && rule.command.isEmpty))
+                    .disabled(rule.problem != nil)
             }
         }
-        .padding(20).frame(width: 520)
+        .padding(20).frame(width: 560)
+        .onChange(of: rule) { dryRun = nil }
+    }
+
+    func test() {
+        testing = true
+        let r = rule, box = blackBox
+        Task {
+            let result = await Task.detached(priority: .userInitiated) {
+                RuleEngine.dryRun(r, frames: box.trace(.coarse, from: Date().addingTimeInterval(-86_400))?.frames ?? [])
+            }.value
+            dryRun = result; testing = false
+        }
     }
 }
