@@ -11,6 +11,7 @@ final class ProcItem: NSObject {
 enum ProcColumn: String, CaseIterable, Equatable {
     case name = "Name", pid = "PID", cpu = "CPU %", gpu = "GPU %", memory = "Memory", disk = "Disk", netIn = "Net In", netOut = "Net Out", energy = "Energy", wakeups = "Wakeups", threads = "Threads", kind = "Kind", sleep = "Sleep", user = "User"
     var width: CGFloat { switch self { case .name: 240; case .user: 90; case .cpu, .memory, .disk, .netIn, .netOut: 84; default: 62 } }
+    var hiddenByDefault: Bool { [.kind, .sleep, .threads, .wakeups].contains(self) }
     var numeric: Bool { self != .name && self != .user && self != .kind && self != .sleep }
     func key(_ s: ProcessSample) -> Double {
         switch self {
@@ -75,6 +76,11 @@ struct ProcessOutline: NSViewRepresentable {
             if c == .name { ov.outlineTableColumn = col }
         }
         ov.sortDescriptors = [NSSortDescriptor(key: ProcColumn.cpu.rawValue, ascending: false)]
+        // Power users pick columns: right-click the header. Widths, order and visibility persist.
+        for c in ProcColumn.allCases where c.hiddenByDefault { ov.tableColumn(withIdentifier: .init(c.rawValue))?.isHidden = true }
+        ov.autosaveName = "ProcessColumns"; ov.autosaveTableColumns = true
+        let headerMenu = NSMenu(); headerMenu.delegate = context.coordinator; headerMenu.identifier = .init("header")
+        ov.headerView?.menu = headerMenu
         ov.dataSource = context.coordinator
         ov.delegate = context.coordinator
         ov.menu = NSMenu(); ov.menu?.delegate = context.coordinator
@@ -198,7 +204,8 @@ struct ProcessOutline: NSViewRepresentable {
             if f.isEmpty && parent.byApp {
                 roots = sorted(appGroups(Array(next.values)))
             } else if !f.isEmpty || !parent.tree {
-                roots = sorted(next.values.filter { s in f.isEmpty || s.s.name.lowercased().contains(f) || "\(s.s.pid)" == f || s.s.user.lowercased() == f || s.s.path.lowercased().contains(f) })
+                let q = ProcessQuery(f)
+                roots = sorted(next.values.filter { q.isEmpty || q.matches($0.s) })
             } else {
                 let byPID = Dictionary(next.values.map { ($0.s.pid, $0) }, uniquingKeysWith: { a, _ in a })
                 var r: [ProcItem] = []
@@ -308,6 +315,15 @@ struct ProcessOutline: NSViewRepresentable {
         // context menu
         func menuNeedsUpdate(_ menu: NSMenu) {
             menu.removeAllItems()
+            if menu.identifier?.rawValue == "header", let ov = outline {
+                let title = NSMenuItem(title: "Columns", action: nil, keyEquivalent: ""); title.isEnabled = false; menu.addItem(title)
+                for col in ov.tableColumns where col.identifier.rawValue != ProcColumn.name.rawValue {
+                    let it = ClosureMenuItem(col.title) { col.isHidden.toggle() }
+                    it.state = col.isHidden ? .off : .on
+                    menu.addItem(it)
+                }
+                return
+            }
             guard let ov = outline, ov.clickedRow >= 0, let it = ov.item(atRow: ov.clickedRow) as? ProcItem else { return }
             let m = parent.menu(it.s)
             for i in m.items { m.removeItem(i); menu.addItem(i) }

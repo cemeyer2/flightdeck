@@ -151,3 +151,24 @@ final class AwakeFindingTests: XCTestCase {
         XCTAssertEqual(f?.detail, "Reason given: “In a meeting”.")
     }
 }
+
+final class ProcessQueryTests: XCTestCase {
+    func testQueries() {
+        let t = AnalyzerTests()
+        var chrome = t.proc("Google Chrome Helper", path: "/Applications/Google Chrome.app/Contents/Frameworks/x/Helper", pid: 7, cpu: 60, mem: 2 << 30)
+        chrome.user = "cmeyer"; chrome.translated = false
+        var old = t.proc("OldTool", path: "/usr/local/bin/oldtool", pid: 8, cpu: 1, mem: 10 << 20)
+        old.user = "root"; old.translated = true
+        func q(_ s: String) -> [Int32] { [chrome, old].filter(ProcessQuery(s).matches).map(\.pid) }
+        XCTAssertEqual(q("cpu>50"), [7])
+        XCTAssertEqual(q("mem>1g"), [7])
+        XCTAssertEqual(q("mem<100m"), [8])
+        XCTAssertEqual(q("user:root"), [8])
+        XCTAssertEqual(q("kind:intel"), [8])
+        XCTAssertEqual(q("app:chrome cpu>10"), [7])
+        XCTAssertEqual(q("helper"), [7])
+        XCTAssertEqual(q("8"), [8])
+        XCTAssertEqual(q("cpu>50 user:root"), [])
+        XCTAssertTrue(ProcessQuery("  ").isEmpty)
+    }
+}

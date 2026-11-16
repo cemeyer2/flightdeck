@@ -54,7 +54,7 @@ security from CoreWLAN, plus router and DNS servers, all local. An opt-in probe 
 an internet host every 10 s, so Flightdeck can tell "your Wi-Fi is the problem" from "your internet provider is".
 
 **Processes** can be shown as a parent/child **Tree**, grouped by **Apps** (every helper rolled into its app, with
-app-level Quit / Force Quit), or **Flat**. The **Kind** column shows Apple-silicon or Intel (Rosetta) binaries, and **Sleep** shows who is keeping the Mac or display awake (also a finding, with the reason the app gave). Apps the window server considers hung are marked **Not Responding** in red
+app-level Quit / Force Quit), or **Flat**. The filter understands queries: `cpu>50 mem>1g user:root app:chrome kind:intel gpu>0 wakeups>500 sleep hung` (terms combine; plain text matches name, path, user or PID). Right-click the column header to choose columns; layout persists. ⌘1–⌘9 jump between sections (Go menu). The **Kind** column shows Apple-silicon or Intel (Rosetta) binaries, and **Sleep** shows who is keeping the Mac or display awake (also a finding, with the reason the app gave). Apps the window server considers hung are marked **Not Responding** in red
 and raise a warning finding.
 
 **Energy and storage health:** Performance › Energy has an **energy budget**: which apps used the most energy

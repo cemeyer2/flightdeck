@@ -28,6 +28,16 @@ struct FlightdeckApp: App {
         .windowToolbarStyle(.unified(showsTitle: false))
         .commands {
             CommandGroup(replacing: .newItem) {}
+            CommandMenu("Go") {
+                ForEach(Array(Destination.allCases.prefix(9).enumerated()), id: \.offset) { i, d in
+                    Button(d.rawValue) { AppActions.showMain(navigate: d.rawValue, engine: engine) }
+                        .keyboardShortcut(KeyEquivalent(Character("\(i + 1)")), modifiers: .command)
+                }
+                Divider()
+                ForEach(PerfTab.allCases) { t in
+                    Button("Performance › \(t.rawValue)") { AppActions.showMain(navigate: "Performance:\(t.rawValue)", engine: engine) }
+                }
+            }
             CommandMenu("Recorder") {
                 Button(engine.recording ? "Stop Recording" : "Start Recording") {
                     engine.recording ? engine.stopRecording() : engine.startRecording()

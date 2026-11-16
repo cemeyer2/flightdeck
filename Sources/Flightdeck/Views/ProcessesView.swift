@@ -48,7 +48,9 @@ struct ProcessesView: View {
         let selected = e.current?.processes.first { $0.identity == selection }
         VStack(spacing: 0) {
             HStack(spacing: 12) {
-                TextField("Filter by name, PID, user or path", text: $filter).textFieldStyle(.roundedBorder).frame(maxWidth: 320)
+                TextField("Filter: name, PID, or cpu>50 mem>1g user:root app:chrome kind:intel gpu>0 sleep hung", text: $filter)
+                    .textFieldStyle(.roundedBorder).frame(maxWidth: 420)
+                    .help("Space-separated terms, all must match. cpu>50 · gpu>0 · mem>1g · disk>10m · net>100k · threads>100 · wakeups>500 · user:root · app:chrome · kind:intel · sleep · hung · restricted · or any text")
                 Picker("", selection: $view) { Text("Tree").tag("tree"); Text("Apps").tag("apps"); Text("Flat").tag("flat") }
                     .pickerStyle(.segmented).labelsHidden().frame(width: 190)
                     .help("Tree: by parent process · Apps: helpers grouped under their app · Flat: every process")
