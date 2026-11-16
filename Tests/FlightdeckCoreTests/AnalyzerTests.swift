@@ -121,3 +121,20 @@ final class EnergyBudgetTests: XCTestCase {
         XCTAssertEqual(b.systemWattHours!, 10 * 2600 / 3600, accuracy: 0.01)
     }
 }
+
+final class ExportTests: XCTestCase {
+    func testCSVLeavesUnmeasuredEmptyAndStats() {
+        var a = AnalyzerTests.base; a.time = Date(timeIntervalSince1970: 7_000_000); a.cpu.total = .unavailable("warming up")
+        var b = a; b.time = a.time.addingTimeInterval(1); b.cpu.total = .value(40)
+        var c = b; c.time = b.time.addingTimeInterval(1); c.cpu.total = .value(60)
+        let t = Trace(host: "h", model: "m", interval: 1, frames: [a, b, c])
+        let rows = TraceExport.systemCSV(t).split(separator: "\n")
+        XCTAssertEqual(rows.count, 4)
+        XCTAssertTrue(rows[1].split(separator: ",", omittingEmptySubsequences: false)[1].isEmpty, "unmeasured CPU is an empty cell, not 0")
+        XCTAssertEqual(rows[2].split(separator: ",")[1], "40.000")
+        let st = TraceStats.compute(t)
+        XCTAssertEqual(st.cpu!.avg, 50, accuracy: 0.001)
+        XCTAssertEqual(st.cpu!.peak, 60)
+        XCTAssertFalse(TraceExport.processCSV(t).isEmpty)
+    }
+}

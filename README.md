@@ -67,6 +67,22 @@ disk fills at the current rate. Unhealthy drives raise a warning.
 **Thermals** adds fan speeds from the SMC (RPM, min, max, target, history) and a sensor heatmap of every
 temperature sensor, hottest first.
 
+**Export:** Recorder › Export writes a one-page **PDF flight report** (findings, average/95th/peak statistics,
+top apps, graphs) or **CSV** (system metrics, or per-process) for the replayed recording, or the last hour of the
+black box when live. Unmeasured values are empty CSV cells, not zeros.
+
+**Command line:** the app binary doubles as a CLI
+(`alias flightdeck=/Applications/Flightdeck.app/Contents/MacOS/Flightdeck`):
+
+```sh
+flightdeck --snapshot [--top N]     # summary, top apps and findings after a 1 s warm-up
+flightdeck --snapshot --json        # full snapshot + findings as JSON (for scripts and Shortcuts)
+flightdeck --findings               # what's wrong right now
+flightdeck --stats rec.flightlog    # statistics and findings of a recording
+flightdeck --csv rec.flightlog out.csv [--processes]
+flightdeck --report rec.flightlog out.pdf
+```
+
 Six themes: Light, Dark, Green, Amber, Blue, Mono.
 
 **Live Dock icon:** right-click the Dock icon (or use Monitor › Dock Icon, or Settings) to pick a mode:

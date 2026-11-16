@@ -9,7 +9,7 @@ struct FlightdeckApp: App {
     @AppStorage("dockMode") private var dockMode: DockMode = .cpuHistory
     @AppStorage("menuBarEnabled") private var menuBarEnabled = true
 
-    init() { IconRenderer.handleCommandLine() }
+    init() { IconRenderer.handleCommandLine(); CLI.handle() }
 
     var body: some Scene {
         Window("Flightdeck", id: "main") {
@@ -43,6 +43,11 @@ struct FlightdeckApp: App {
                 }.disabled(!engine.blackBoxEnabled)
                 Button("Replay Last 10 Minutes") { engine.replayBlackBox(minutes: 10) }
                     .keyboardShortcut("b", modifiers: [.command, .shift]).disabled(!engine.blackBoxEnabled)
+                Divider()
+                Button("Export Flight Report (PDF)…") { engine.exportReport() }.keyboardShortcut("e", modifiers: [.command, .shift])
+                Button("Export System Metrics (CSV)…") { engine.exportCSV(processes: false) }
+                Button("Export Process Metrics (CSV)…") { engine.exportCSV(processes: true) }
+                Text(engine.mode == .replay ? "Exports cover the replayed recording" : "Exports cover the last hour of the black box")
             }
             CommandMenu("Monitor") {
                 Button(engine.paused ? "Resume Sampling" : "Pause Sampling") { engine.paused.toggle() }
