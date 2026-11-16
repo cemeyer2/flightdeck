@@ -34,6 +34,7 @@ struct FlightdeckApp: App {
                 }.keyboardShortcut("r", modifiers: [.command, .shift])
                 Button("Open Trace…") { engine.openTrace() }.keyboardShortcut("o")
                 Button("Exit Replay") { engine.exitReplay() }.disabled(engine.mode != .replay)
+                OpenCompareButton()
                 Divider()
                 Menu("Save from Black Box") {
                     ForEach(BlackBoxRange.allCases) { r in Button("Last \(r.title)…") { engine.saveBlackBox(minutes: r.minutes) } }
@@ -63,6 +64,10 @@ struct FlightdeckApp: App {
                 .preferredColorScheme(Palette.of(theme).scheme)
         }
         .defaultSize(width: 900, height: 760)
+        Window("Compare Recordings", id: "compare") {
+            CompareView().environment(\.palette, Palette.of(theme)).preferredColorScheme(Palette.of(theme).scheme)
+        }
+        .defaultSize(width: 980, height: 820)
         MenuBarExtra(isInserted: $menuBarEnabled) {
             MenuBarPanel().environmentObject(engine).environment(\.palette, Palette.of(theme))
         } label: {
@@ -174,4 +179,9 @@ struct SettingsView: View {
             Button("Delete", role: .destructive) { engine.clearBlackBox(); blackBoxBytes = 0 }
         }
     }
+}
+
+struct OpenCompareButton: View {
+    @Environment(\.openWindow) private var openWindow
+    var body: some View { Button("Compare Recordings…") { openWindow(id: "compare") } }
 }

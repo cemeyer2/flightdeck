@@ -71,6 +71,10 @@ temperature sensor, hottest first.
 top apps, graphs) or **CSV** (system metrics, or per-process) for the replayed recording, or the last hour of the
 black box when live. Unmeasured values are empty CSV cells, not zeros.
 
+**Compare recordings** (Recorder › Compare Recordings…): two `.flightlog` files side by side, for example before
+and after an update. Shows average and 95th-percentile statistics with the change in each, overlaid graphs aligned by
+elapsed time, and which apps' CPU use changed.
+
 **Command line:** the app binary doubles as a CLI
 (`alias flightdeck=/Applications/Flightdeck.app/Contents/MacOS/Flightdeck`):
 
