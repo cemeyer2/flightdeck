@@ -223,6 +223,7 @@ struct SettingsView: View {
                 Text("Off by default. When on, FlightDeck pings your router and this host every 10 seconds (5 small ICMP packets each) to tell Wi-Fi problems from internet-provider problems.")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
+            MetricsExportSection()
             Text(engine.netProbeEnabled
                  ? "FlightDeck sends no data anywhere. The only network traffic it creates is the latency pings above. All measurements stay on this Mac."
                  : "FlightDeck sends no data anywhere and makes no network requests. All measurements stay on this Mac.")

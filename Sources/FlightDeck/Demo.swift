@@ -84,7 +84,8 @@ enum Demo {
                 var r = r; r.name = sensors[j]; r.celsius = temps[j] * wobble(0.02, 5 + Double(j)); return r
             }
             s.power.hottest = .value(79 * wobble(0.02, 5))
-            s.power.fans = s.power.fans.map { $0.prefix(1).map { var f = $0; f.rpm = 3150 * wobble(0.04, 6); return f } }
+            // One invented fan (not this Mac's), so the fan panels and the "why is the fan loud?" card always have data.
+            s.power.fans = [FanReading(index: 0, rpm: 3150 * wobble(0.04, 6), minRPM: 1200, maxRPM: 5800, targetRPM: 3150)]
             // GPU
             s.gpu = .value(44 * wobble(0.2, 3))
             if var g = s.gpuDetail {

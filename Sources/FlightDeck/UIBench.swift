@@ -18,8 +18,8 @@ enum UIBench {
         for _ in 0..<40 { Thread.sleep(forTimeInterval: 0.25); let s = sampler.sample(); e.feed(s, findings: analyzer.ingest(s)) }
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         let p = Palette.of(.dark)
-        func out<V: View>(_ name: String, height: CGFloat = 1500, _ v: V) {
-            let r = ImageRenderer(content: v.environmentObject(e).environment(\.palette, p).environment(\.colorScheme, .dark).environment(\.offscreen, true)
+        func out<V: View>(_ name: String, height: CGFloat = 1500, engine: Engine? = nil, _ v: V) {
+            let r = ImageRenderer(content: v.environmentObject(engine ?? e).environment(\.palette, p).environment(\.colorScheme, .dark).environment(\.offscreen, true)
                 .padding(16).frame(width: 1100, height: height, alignment: .top).background(p.background))
             r.scale = 2
             if let img = r.nsImage, let tiff = img.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff), let png = rep.representation(using: .png, properties: [:]) {
@@ -35,6 +35,17 @@ enum UIBench {
         out("memory", height: 1900, VStack { MemoryPerf() })
         out("gpu", height: 2200, VStack { GPUPerf() })
         out("thermals", VStack { ThermalPerf() })
+        // Console: a real 5-minute query, finished before rendering (the view itself only starts queries on appear).
+        let console = ConsoleModel(); console.span = .m5; console.load()
+        let deadline = Date().addingTimeInterval(30)
+        while console.loading && Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.2)) }
+        out("console", height: 2000, ConsoleView(model: console))
+        // Thermals again from demo data, so the "why is the fan loud?" card can be reviewed on a cool Mac too.
+        if let template = e.current {
+            let demo = Engine(headless: true), a = Analyzer()
+            for f in Demo.frames(template: template, count: 30) { demo.feed(f, findings: a.ingest(f)) }
+            out("thermals-demo", height: 1300, engine: demo, VStack { ThermalPerf() })
+        }
         if ProcessInfo.processInfo.environment["FD_RENDER_ALL"] != nil {
             for d in [Destination.systemInfo, .startup, .users, .services, .power, .connections, .apps, .diskSpace, .benchmarks] {
                 let v: AnyView
