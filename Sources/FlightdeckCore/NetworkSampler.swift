@@ -48,7 +48,10 @@ public final class NetworkSampler {
                     if if_indextoname(UInt32(h2.pointee.ifm_index), &nameBuf) != nil {
                         let name = String(cString: nameBuf)
                         let d = h2.pointee.ifm_data
-                        out[name] = Raw(ib: d.ifi_ibytes, ob: d.ifi_obytes, speed: d.ifi_baudrate,
+                        // NET_RT_IFLIST2 truncates byte counters to 32 bits (they wrap every 4 GB), so read
+                        // the full 64-bit counters from the interface MIB, as netstat does.
+                        let full = Self.counters64(index: Int32(h2.pointee.ifm_index))
+                        out[name] = Raw(ib: full?.0 ?? d.ifi_ibytes, ob: full?.1 ?? d.ifi_obytes, speed: d.ifi_baudrate,
                                         up: (h2.pointee.ifm_flags & IFF_UP) != 0)
                     }
                 }
@@ -56,6 +59,13 @@ public final class NetworkSampler {
             }
         }
         return out
+    }
+
+    static func counters64(index: Int32) -> (UInt64, UInt64)? {
+        var mib: [Int32] = [CTL_NET, PF_LINK, NETLINK_GENERIC, IFMIB_IFDATA, index, IFDATA_GENERAL]
+        var d = ifmibdata(); var len = MemoryLayout<ifmibdata>.size
+        guard sysctl(&mib, 6, &d, &len, nil, 0) == 0 else { return nil }
+        return (d.ifmd_data.ifi_ibytes, d.ifmd_data.ifi_obytes)
     }
 
     private func addresses() -> ([String: [String]], [String: String]) {
@@ -97,7 +107,10 @@ public final class NetworkSampler {
         var ti = 0.0, to = 0.0, si: UInt64 = 0, so: UInt64 = 0
         for (name, r) in cur.sorted(by: { $0.key < $1.key }) {
             var ib = 0.0, ob = 0.0
-            if let dt, let p = previous[name] { ib = Double(r.ib &- p.0) / dt; ob = Double(r.ob &- p.1) / dt }
+            if let dt, let p = previous[name] {
+                ib = r.ib >= p.0 ? Double(r.ib - p.0) / dt : 0   // counter reset: no invented spike
+                ob = r.ob >= p.1 ? Double(r.ob - p.1) / dt : 0
+            }
             if !name.hasPrefix("lo") { ti += ib; to += ob; si += r.ib; so += r.ob }
             ifs.append(InterfaceSample(name: name, inBps: ib, outBps: ob, totalIn: r.ib, totalOut: r.ob,
                                        linkSpeed: r.speed, isUp: r.up, addresses: addrs[name] ?? [], mac: macs[name]))

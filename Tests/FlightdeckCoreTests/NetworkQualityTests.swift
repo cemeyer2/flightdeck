@@ -33,3 +33,23 @@ final class NetworkQualityTests: XCTestCase {
         XCTAssertNil(back.wifi)
     }
 }
+
+final class InterfaceCounterTests: XCTestCase {
+    /// Byte counters must be the full 64-bit values (NET_RT_IFLIST2 alone wraps at 4 GB).
+    func testCountersMatchNetstat() throws {
+        let n = NetworkSampler().sample()
+        guard let out = Shell.run("/usr/sbin/netstat", ["-ib"]) else { throw XCTSkip("no netstat") }
+        var checked = 0
+        for line in out.split(separator: "\n") where line.contains("<Link#") {
+            let f = line.split(separator: " ")
+            let name = String(f[0]).replacingOccurrences(of: "*", with: "")
+            let nums = f.compactMap { UInt64($0) }   // ... Ipkts Ierrs Ibytes Opkts Oerrs Obytes Coll
+            guard nums.count >= 7, let mine = n.interfaces.first(where: { $0.name == name }) else { continue }
+            let nIn = Double(nums[nums.count - 5]), nOut = Double(nums[nums.count - 2])
+            XCTAssertEqual(Double(mine.totalIn), nIn, accuracy: max(nIn * 0.01, 50e6), "\(name) in")
+            XCTAssertEqual(Double(mine.totalOut), nOut, accuracy: max(nOut * 0.01, 50e6), "\(name) out")
+            checked += 1
+        }
+        XCTAssertGreaterThan(checked, 0)
+    }
+}
