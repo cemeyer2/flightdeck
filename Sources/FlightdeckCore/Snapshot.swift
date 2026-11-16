@@ -33,9 +33,17 @@ public final class Sampler: @unchecked Sendable {
     /// Opt-in; its latest results are attached to each snapshot while running.
     public let probe = NetworkProbe()
     private let gpuSampler = GPUSampler()
+    // Slow-changing sources refresh on their own cadence to keep Flightdeck's own overhead low.
+    private var hangs: [Int32: Bool] = [:], hangsRead: Date?
+    private var wifi: WiFiInfo?, wifiRead: Date?
     private var drives: [DriveHealth]?
     private var drivesRead: Date?
     public init() {}
+
+    private func currentWiFi() -> WiFiInfo? {
+        if wifiRead.map({ Date().timeIntervalSince($0) >= 5 }) ?? true { wifi = WiFiInfo.current(); wifiRead = Date() }
+        return wifi
+    }
 
     public func sample() -> Snapshot {
         var procs = processes.sample()
@@ -45,7 +53,7 @@ public final class Sampler: @unchecked Sendable {
             }
             processNetwork.retain(pids: Set(procs.map(\.pid)))
         }
-        let hangs = HangDetector.check()
+        if hangsRead.map({ Date().timeIntervalSince($0) >= 2 }) ?? true { hangs = HangDetector.check(); hangsRead = Date() }
         if !hangs.isEmpty { for i in procs.indices { procs[i].notResponding = hangs[procs[i].pid] } }
         if drivesRead.map({ Date().timeIntervalSince($0) > 300 }) ?? true { drives = DriveHealthReader.read(); drivesRead = Date() }
         let assertions = PowerAssertions.byPID()
@@ -56,7 +64,7 @@ public final class Sampler: @unchecked Sendable {
         let lat = probe.results
         return Snapshot(time: Date(), cpu: cpu.sample(), memory: memory.sample(), disk: disk.sample(),
                         network: network.sample(), power: power.sample(), gpu: SystemInfo.gpuUtilization(),
-                        processes: procs, wifi: WiFiInfo.current(), latency: lat.isEmpty ? nil : lat, drives: drives?.isEmpty == false ? drives : nil, gpuDetail: gd)
+                        processes: procs, wifi: currentWiFi(), latency: lat.isEmpty ? nil : lat, drives: drives?.isEmpty == false ? drives : nil, gpuDetail: gd)
     }
 }
 
