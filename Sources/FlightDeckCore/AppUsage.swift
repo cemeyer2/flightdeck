@@ -90,3 +90,29 @@ public enum KnownProcess {
         table.first { $0.match.contains(name) }?.text
     }
 }
+
+
+/// Exact per-app totals from cumulative per-process counters (CPU time, energy, disk bytes) in recorded frames.
+/// The black box keeps only the busiest processes and, in its 24 h tier, one frame per 10 s; integrating *rates* over
+/// that undercounts and is biased by bursts. A cumulative counter's difference between any two appearances of the same
+/// process is exact however many frames are missing in between. A process's first appearance only sets its baseline
+/// (what it used before isn't known), and a counter that goes down (shouldn't happen) is ignored.
+public enum Cumulative {
+    public struct Total: Sendable { public var name: String; public var icon: String; public var amount: Double; public var first: Date; public var last: Date }
+
+    public static func perApp(_ frames: [Snapshot], _ counter: (ProcessSample) -> Double?) -> [String: Total] {
+        var lastValue: [ProcessIdentity: Double] = [:]
+        var out: [String: Total] = [:]
+        for f in frames {
+            for (p, k) in zip(f.processes, AppUsage.groupKeys(f.processes)) {
+                guard let v = counter(p) else { continue }
+                defer { lastValue[p.identity] = v }
+                var t = out[k.key] ?? Total(name: k.name, icon: k.icon, amount: 0, first: f.time, last: f.time)
+                t.last = f.time
+                if let prev = lastValue[p.identity], v >= prev { t.amount += v - prev }
+                out[k.key] = t
+            }
+        }
+        return out
+    }
+}

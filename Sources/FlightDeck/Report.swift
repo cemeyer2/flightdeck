@@ -125,7 +125,7 @@ extension Engine {
     /// `blackBoxQueue` as Engine's other black box reads do).
     func exportTrace() -> Trace? {
         if mode == .replay, let trace { return trace }
-        // via the black box queue, so frames being flushed to a segment at this moment aren't missed
+        // Exports are user-initiated and the panel is modal anyway; reading on the black box queue includes pending frames.
         let t = blackBoxQueue.sync { blackBox.trace(.fine, from: Date().addingTimeInterval(-3600)) }
         if t == nil { lastError = "Nothing to export yet: open a recording, or let the black box collect some data." }
         return t

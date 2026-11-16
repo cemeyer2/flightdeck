@@ -160,3 +160,35 @@ final class RuleSafetyTests: XCTestCase {
         XCTAssertEqual(RuleEngine.dryRun(r, frames: frames).count, 1)
     }
 }
+
+/// Long-range totals from sparse, trimmed recordings must be exact when cumulative counters are available.
+final class FidelityTests: XCTestCase {
+    let t = AnalyzerTests()
+    func testEnergyFromCumulativeCountersIsExactDespiteGapsAndTrimming() {
+        let t0 = Date(timeIntervalSince1970: 16_000_000)
+        var frames: [Snapshot] = []
+        // A process drawing exactly 2 W for an hour, recorded only every 10 s and missing from 2 of every 3 frames.
+        for i in 0..<360 where i % 3 == 0 || i == 359 {
+            var p = t.proc("Busy", path: "/Applications/Busy.app/Contents/MacOS/Busy", pid: 70)
+            p.energyTotal = Double(i) * 10 * 2          // joules so far
+            p.energyWatts = i % 30 == 0 ? 50 : 0.1      // misleading instantaneous rates (bursty)
+            var s = t.snap(t0.addingTimeInterval(Double(i) * 10), procs: [p]); s.power.systemWatts = .value(5)
+            frames.append(s)
+        }
+        let b = EnergyBudget.compute(Trace(host: "h", model: "m", interval: 10, frames: frames))
+        XCTAssertEqual(b.apps.first?.wattHours ?? 0, 2.0 * 3590 / 3600, accuracy: 0.01, "2 W × the recorded span, from the counter")
+        XCTAssertEqual(b.apps.first?.averageWatts ?? 0, 2.0, accuracy: 0.01)
+        XCTAssertNotNil(b.unattributedWattHours)
+    }
+
+    func testAverageCPUFromCumulativeCPUTime() {
+        let t0 = Date(timeIntervalSince1970: 17_000_000)
+        let frames = (0..<61).filter { $0 % 4 == 0 || $0 == 60 }.map { i -> Snapshot in
+            var p = t.proc("Half", path: "/Applications/Half.app/Contents/MacOS/Half", pid: 80, cpu: i % 8 == 0 ? 400 : 0)
+            p.cpuTime = Double(i) * 0.5                  // half a core, steadily
+            return t.snap(t0.addingTimeInterval(Double(i)), procs: [p])
+        }
+        let st = TraceStats.compute(Trace(host: "h", model: "m", interval: 1, frames: frames))
+        XCTAssertEqual(st.topCPU.first?.avg ?? 0, 50, accuracy: 0.5)
+    }
+}

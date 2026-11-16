@@ -516,22 +516,30 @@ final class Engine: ObservableObject {
     /// Saves the last `minutes` of the black box (full resolution up to an hour, 10 s resolution beyond).
     /// Shows a save panel (modal, main actor).
     func saveBlackBox(minutes: Int) {
-        guard let t = blackBoxTrace(minutes: minutes) else { return }
-        save(t, prefix: "Black Box \(minutes >= 60 ? "\(minutes / 60)h" : "\(minutes)m")")
+        Task {
+            guard let t = await blackBoxTrace(minutes: minutes) else { return }
+            save(t, prefix: "Black Box \(minutes >= 60 ? "\(minutes / 60)h" : "\(minutes)m")")
+        }
     }
 
     /// Loads the last `minutes` of the black box into replay, positioned at the most recent frame.
     func replayBlackBox(minutes: Int) {
-        guard let t = blackBoxTrace(minutes: minutes) else { return }
-        load(t, startAtEnd: true)
+        Task { if let t = await blackBoxTrace(minutes: minutes) { load(t, startAtEnd: true) } }
     }
 
-    /// Reads from the black box synchronously on its queue (so it waits for pending writes). The fine tier is used when
-    /// it covers the whole range. Returns nil and sets `lastError` when there's nothing to show.
-    private func blackBoxTrace(minutes: Int) -> FlightDeckCore.Trace? {
+    /// Reads (and decompresses) black-box segments on the black box's own queue, never the main thread, so loading 24 h
+    /// doesn't freeze the UI; the queue also means pending writes are included.
+    func readBlackBox(_ tier: BlackBox.Tier, from: Date, to: Date = Date()) async -> FlightDeckCore.Trace? {
+        await withCheckedContinuation { c in
+            blackBoxQueue.async { [blackBox] in c.resume(returning: blackBox.trace(tier, from: from, to: to)) }
+        }
+    }
+
+    /// The fine tier is used when it covers the whole range. Returns nil and sets `lastError` when there's nothing to show.
+    private func blackBoxTrace(minutes: Int) async -> FlightDeckCore.Trace? {
         let from = Date().addingTimeInterval(-Double(minutes) * 60)
         let tier: BlackBox.Tier = Double(minutes) * 60 <= blackBox.config.fineRetention ? .fine : .coarse
-        let t = blackBoxQueue.sync { blackBox.trace(tier, from: from) }
+        let t = await readBlackBox(tier, from: from)
         if t == nil { lastError = blackBoxEnabled ? "The black box has no data for the last \(minutes) minutes yet." : "The black box is turned off (Settings)." }
         return t
     }
@@ -541,11 +549,13 @@ final class Engine: ObservableObject {
     func replayBlackBox(from start: Date, to end: Date) {
         let from = start.addingTimeInterval(-120), to = end.addingTimeInterval(120)
         let tier: BlackBox.Tier = Date().timeIntervalSince(from) <= blackBox.config.fineRetention ? .fine : .coarse
-        guard let t = blackBoxQueue.sync(execute: { blackBox.trace(tier, from: from, to: to) }) else {
-            lastError = "The black box no longer has data for that time (it keeps 1 hour in full detail and 24 hours in 10 s steps)."
-            return
+        Task {
+            guard let t = await readBlackBox(tier, from: from, to: to) else {
+                lastError = "The black box no longer has data for that time (it keeps 1 hour in full detail and 24 hours in 10 s steps)."
+                return
+            }
+            load(t, startAt: start)
         }
-        load(t, startAt: start)
     }
 
     /// Clears the persisted incident log on the queue and the published copy immediately.
@@ -590,6 +600,7 @@ final class Engine: ObservableObject {
         guard !t.frames.isEmpty else { lastError = "Trace is empty"; return }
         playing = false; playTimer?.invalidate()
         trace = t; mode = .replay
+        analyzeReplay(t)
         let start = startAtEnd ? t.frames.count - 1
             : startAt.map { d in t.frames.firstIndex { $0.time >= d } ?? 0 }
             ?? UserDefaults.standard.integer(forKey: "replayIndex")   // debug/automation hook
@@ -631,10 +642,33 @@ final class Engine: ObservableObject {
         window = Array(window.suffix(Self.historyLength))
         frames = Array(repeating: nil, count: Self.historyLength - window.count) + window
         current = t.frames[idx]
-        // Recompute findings as they would have looked at this moment, by running a fresh Analyzer over up to the
-        // preceding 900 frames. This runs on the main actor on every scrub step.
-        let a = Analyzer()
-        for f in t.frames[max(0, idx - 900)...idx] { a.ingest(f) }
-        replayFindings = a.findings
+        // Findings as they were at this moment: a lookup into the per-frame analysis done once in the background.
+        replayFindings = replayTimeline.flatMap { idx < $0.count ? $0[idx] : nil } ?? []
+    }
+
+    // MARK: Replay analysis
+    /// Findings for every frame of the loaded trace (nil while the background pass runs).
+    private var replayTimeline: [[Finding]]?
+    /// True while the loaded trace is being analysed (the replay bar can say so).
+    @Published private(set) var replayAnalyzing = false
+    /// Bumped on every load, so a slow pass for a previous trace can't overwrite the current one.
+    private var replayGeneration = 0
+
+    /// Runs the Analyzer over the whole trace once, off the main actor, recording what it found at each frame. Scrubbing
+    /// is then a lookup instead of re-analysing hundreds of frames per step. The trace is its own baseline (if it covers
+    /// ≥ 30 minutes), so "unusual for this Mac" findings also appear in replay.
+    private func analyzeReplay(_ t: FlightDeckCore.Trace) {
+        replayGeneration += 1
+        let gen = replayGeneration, frames = t.frames
+        replayTimeline = nil; replayAnalyzing = true; replayFindings = []
+        Task {
+            let timeline = await Task.detached(priority: .userInitiated) { () -> [[Finding]] in
+                let a = Analyzer(); a.seed(history: frames)
+                return frames.map { a.ingest($0) }
+            }.value
+            guard gen == self.replayGeneration else { return }
+            self.replayTimeline = timeline; self.replayAnalyzing = false
+            if self.mode == .replay { self.applyReplay() }
+        }
     }
 }

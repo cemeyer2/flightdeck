@@ -92,7 +92,9 @@ public struct Trace: Codable, Sendable {
     /// Same format, written before the rename from Meterline. Still opened, never written.
     public static let legacyFileExtensions = ["mltrace"]
     /// File format version. New fields are added as optionals (see `Snapshot`) so old files keep decoding.
-    public var version = 1
+    /// Format version. 1: original. 2: process samples may carry cumulative `energyTotal`, and snapshots may carry the
+    /// optional GPU/Wi-Fi/drive fields. Readers accept any version: newer fields are optional, older traces decode fine.
+    public var version = 2
     public var host: String
     public var model: String
     /// Nominal seconds between frames. Consumers use it to tell a normal step from a gap (e.g. > 3 intervals).

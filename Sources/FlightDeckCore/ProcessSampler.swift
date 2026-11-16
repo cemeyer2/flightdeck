@@ -40,6 +40,9 @@ public struct ProcessSample: Codable, Sendable, Identifiable, Hashable {
     public var diskRead: UInt64
     public var diskWritten: UInt64
     public var energyWatts: Double?   // from billed energy, nil if not reported
+    /// Cumulative billed energy since the process started, in joules (nil if not reported). Recorded so long-range
+    /// totals can be computed exactly from any two recorded frames, however sparse (see `Cumulative`).
+    public var energyTotal: Double? = nil
     public var wakeups: Double        // idle wakeups/s
     public var restricted: Bool       // couldn't read full info (other user's process)
     /// nil = network sampling unavailable or warming up. Present for every process once nettop works.
@@ -219,6 +222,7 @@ public final class ProcessSampler {
                 diskReadBps: rb, diskWriteBps: wb, diskRead: cur.r, diskWritten: cur.w,
                 energyWatts: energy, wakeups: wk, restricted: restricted && !ruOK))
             out[out.count - 1].translated = translatedCache[ident]
+            if ruOK { out[out.count - 1].energyTotal = Double(cur.energy) / 1e9 }   // nJ -> J
         }
         // Replace (not merge) the previous counters, which also forgets exited processes; prune caches the same way.
         prev = next; lastTime = now

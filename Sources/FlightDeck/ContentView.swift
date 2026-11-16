@@ -177,6 +177,11 @@ struct ReplayBar: View {
             HStack(spacing: 12) {
                 Image(systemName: "film").foregroundStyle(p.accent)
                 Text("REPLAY · \(t.host)").font(.system(size: 11, weight: .bold, design: .monospaced))
+                if engine.replayAnalyzing {
+                    // findings for the recording are being computed in the background; scrubbing already works
+                    ProgressView().controlSize(.small)
+                    Text("analysing…").font(.system(size: 10, design: .monospaced)).foregroundStyle(p.dim)
+                }
                 Button { engine.togglePlay() } label: { Image(systemName: engine.playing ? "pause.fill" : "play.fill") }
                 Button { engine.replayIndex = max(0, engine.replayIndex - 1) } label: { Image(systemName: "backward.frame.fill") }
                 Button { engine.replayIndex = min(t.frames.count - 1, engine.replayIndex + 1) } label: { Image(systemName: "forward.frame.fill") }

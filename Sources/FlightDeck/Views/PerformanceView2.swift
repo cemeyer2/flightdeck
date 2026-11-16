@@ -478,6 +478,16 @@ struct EnergyBudgetPanel: View {
                         Text(String(format: "avg %.2f W", a.averageWatts)).foregroundStyle(p.dim).frame(width: 90, alignment: .trailing)
                     }.font(.system(size: 12, design: .monospaced))
                 }
+                if let u = b.unattributedWattHours, u > 0.01 {
+                    // Energy the recorded apps don't explain: display, quieter processes, macOS itself.
+                    HStack(spacing: 8) {
+                        Image(systemName: "display").frame(width: 16, height: 16).foregroundStyle(p.dim)
+                        Text("Display, system and others").lineLimit(1).frame(width: 200, alignment: .leading).foregroundStyle(p.dim)
+                        VFDMeter(fraction: u / top, segments: 30, color: p.dim, height: 6)
+                        Text(String(format: "%.2f Wh", u)).frame(width: 80, alignment: .trailing).foregroundStyle(p.dim)
+                        Text("").frame(width: 90)
+                    }.font(.system(size: 12, design: .monospaced))
+                }
                 if b.charge.count > 2 {
                     // Bucketed by time (240 slices), so periods with no recording (sleep) show as gaps.
                     HistoryGraph(traces: [GraphTrace(name: "charge", values: timeBuckets(b.charge, buckets: 240), color: p.accent)],

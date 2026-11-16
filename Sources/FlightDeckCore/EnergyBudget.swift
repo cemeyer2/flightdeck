@@ -20,7 +20,9 @@ public struct AppEnergy: Sendable, Identifiable, Hashable {
 /// (no system power sensor, no battery), rather than 0.
 public struct EnergyBudget: Sendable {
     public var apps: [AppEnergy]
-    public var systemWattHours: Double?           // measured system draw, if reported
+    public var systemWattHours: Double?
+    /// System energy not attributed to any recorded app (display, unrecorded processes, macOS itself); nil if unknown.
+    public var unattributedWattHours: Double?           // measured system draw, if reported
     /// Wall-clock length from first to last frame, including any gaps.
     public var span: TimeInterval
     /// Counted (non-gap) seconds spent on battery power.
@@ -62,11 +64,22 @@ public struct EnergyBudget: Sendable {
             for k in Set(AppUsage.groupKeys(f.processes).map(\.key)) where perApp[k] != nil { perApp[k]!.activeTime += dt }
         }
         // Average over active time, not over the whole span, so a short heavy burst reads as heavy.
-        let apps = perApp.values.map { a -> AppEnergy in
+        var apps = perApp.values.map { a -> AppEnergy in
             var a = a; a.averageWatts = a.activeTime > 0 ? a.wattHours * 3600 / a.activeTime : 0; return a
         }.sorted { $0.wattHours > $1.wattHours }
+        // Recordings that carry cumulative energy (newer black boxes) are integrated exactly from those counters instead.
+        // (Only if the counters actually show energy being used; otherwise keep the rate-based figures.)
+        if frames.contains(where: { $0.processes.contains { $0.energyTotal != nil } }) {
+            let exact = Cumulative.perApp(frames, \.energyTotal).map { k, v in
+                let active = max(v.last.timeIntervalSince(v.first), 1)
+                return AppEnergy(id: k, name: v.name, iconPath: v.icon, wattHours: v.amount / 3600, averageWatts: v.amount / active, activeTime: active)
+            }.filter { $0.wattHours > 0 }.sorted { $0.wattHours > $1.wattHours }
+            if !exact.isEmpty { apps = exact }
+        }
         let span = (frames.last?.time).flatMap { l in frames.first.map { l.timeIntervalSince($0.time) } } ?? 0
-        return EnergyBudget(apps: apps, systemWattHours: sysSeen ? sys : nil, span: span, onBattery: onBatt,
+        // What the recorded apps don't account for: the display, quieter processes the black box didn't keep, the system.
+        let unattributed = sysSeen ? max(sys - apps.reduce(0) { $0 + $1.wattHours }, 0) : nil
+        return EnergyBudget(apps: apps, systemWattHours: sysSeen ? sys : nil, unattributedWattHours: unattributed, span: span, onBattery: onBatt,
                             batteryDropPercent: dropSeen ? drop : nil, charge: charge)
     }
 }

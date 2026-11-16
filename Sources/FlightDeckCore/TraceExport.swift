@@ -55,7 +55,15 @@ public struct TraceStats: Sendable {
             hottest: stat(f.compactMap { $0.power.hottest.value }),
             gpu: stat(f.compactMap { $0.gpu.value }),
             worstThermalState: f.map(\.power.thermalState).max() ?? 0,
-            topCPU: cpuByApp.values.map { ($0.0, $0.1 / n) }.sorted { $0.1 > $1.1 }.prefix(10).map { ($0.0, $0.1) },
+            // Average CPU per app from cumulative CPU time (exact even for sparse, trimmed frames): CPU-seconds over the
+            // span as % of one core. Falls back to averaging per-frame rates if the trace is too short to have deltas.
+            topCPU: {
+                let span = max((f.last?.time).flatMap { l in f.first.map { l.timeIntervalSince($0.time) } } ?? 0, 1)
+                let exact = Cumulative.perApp(f, { $0.restricted ? nil : $0.cpuTime }).values.filter { $0.amount > 0 }
+                    .map { ($0.name, $0.amount / span * 100) }
+                let fallback = cpuByApp.values.map { ($0.0, $0.1 / n) }
+                return (exact.isEmpty ? fallback : exact).sorted { $0.1 > $1.1 }.prefix(10).map { ($0.0, $0.1) }
+            }(),
             topMemory: memByApp.values.sorted { $0.1 > $1.1 }.prefix(10).map { ($0.0, $0.1) },
             findings: log.incidents)
     }
