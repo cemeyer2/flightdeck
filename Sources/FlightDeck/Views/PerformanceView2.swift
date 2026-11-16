@@ -179,6 +179,7 @@ struct EnergyPerf: View {
                 }
             }
             EnergyBudgetPanel()
+            ChargeDrainPanel()   // per-app shares since unplugged (daily log)
             Panel(title: "Top energy processes (measured energy)") {
                 // Processes without an energy reading count as 0 W for ranking only.
                 ProcessMiniList(metric: { $0.energyWatts ?? 0 }, include: { $0.energyWatts != nil }, format: { String(format: "%.2f W", $0) }, count: 10)

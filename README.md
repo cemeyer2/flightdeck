@@ -158,6 +158,16 @@ After each wake, a restless or draining night (30+ dark wakes, or 10%+ battery l
 each dark wake (screen-off wakes for network upkeep, Power Nap, Bluetooth) in plain English, battery used overnight,
 which processes scheduled wakes, and which apps kept the Mac awake and for how long.
 
+**Trends** keeps one compact record per day for 90 days (`~/Library/Application Support/Flightdeck/daily-log.json`),
+folded from the samples FlightDeck already takes: average and 95th-percentile CPU, memory pressure, peak swap, energy,
+hottest sensor, sleep, crashes, hangs and incidents, macOS version, battery health and cycles, and the top ~30 apps' CPU
+time, energy, peak memory and version. Charts cover 7, 30 or 90 days, with markers on days macOS or an app changed
+version; pick an update for a **before/after** comparison in plain English ("Since Safari 26.2: energy +44%, 2 hangs
+vs 0"). After 5 days it learns what is **normal for this Mac** per app and raises a finding when an app stays far above
+it for 10 minutes ("Safari is using 3× its usual memory (usually ~1.8 GB)"). Performance › Energy and Trends show
+**where this charge went**: each app's share of the energy since the Mac was unplugged. Days FlightDeck didn't run are
+gaps, never zeros.
+
 **Rules** automate responses: "when app *Chrome* has CPU % above 300 for 10 minutes, notify me / lower its priority /
 suspend / quit / force quit / run a command". Commands get `FD_RULE`, `FD_SUBJECT`, `FD_PIDS`, `FD_METRIC` and `FD_VALUE`
 in their environment (names are never spliced into the shell). Rules fire once per occurrence with a cooldown, signals

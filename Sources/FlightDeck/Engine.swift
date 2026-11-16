@@ -78,8 +78,9 @@ final class Engine: ObservableObject {
     /// Reads the power log off the main thread and refreshes `sleepFindings`.
     private func refreshSleepFindings() {
         Task {
-            let f = await Task.detached(priority: .utility) { SleepLog.read(days: 1).map { SleepLog.findings($0) } ?? [] }.value
-            sleepFindings = f
+            let r = await Task.detached(priority: .utility) { SleepLog.read(days: 1) }.value
+            sleepFindings = r.map { SleepLog.findings($0) } ?? []
+            if let r { dailyLog.note(sleep: r) }   // hours asleep per day, from the log already read
         }
     }
     /// macOS diagnostic reports from the last 7 days (rescanned every 5 minutes).
@@ -141,9 +142,13 @@ final class Engine: ObservableObject {
 
     /// `headless`: no timers, no black box, no Dock tile; frames are fed with `feed(_:)` (UI benchmark).
     let headless: Bool
+    /// 90-day daily rollups, per-app baselines and battery sessions (Trends view). Internally locked: ingested on
+    /// `queue`, read by views on demand. In-memory only (never written) for a headless engine.
+    nonisolated let dailyLog: DailyLog
 
     init(headless: Bool = false) {
         self.headless = headless
+        dailyLog = DailyLog(dir: headless ? nil : DailyLog.defaultDirectory)
         if headless { rules = []; return }   // never show the user's saved rules, rule log or incidents in a headless engine
         ruleLog = Engine.loadRuleLog()
         // The first sample only establishes baselines for delta-based counters (CPU ticks, bytes); its result is discarded.
@@ -163,6 +168,7 @@ final class Engine: ObservableObject {
             while !Task.isCancelled {
                 let r = await Task.detached(priority: .utility) { DiagnosticReports.scan(since: Date().addingTimeInterval(-7 * 86_400)) }.value
                 self?.reports = r; self?.reportFindings = DiagnosticReports.findings(r)
+                self?.dailyLog.note(reports: r, incidents: self?.incidents ?? [])   // per-day crash/hang/incident counts
                 try? await Task.sleep(for: .seconds(300))
             }
         }
@@ -179,9 +185,10 @@ final class Engine: ObservableObject {
         }
         Timer.scheduledTimer(withTimeInterval: 1800, repeats: true) { [weak self] _ in Task { @MainActor in self?.refreshSleepFindings() } }
         // On quit, flush the black box and close/save the incident log synchronously so nothing buffered is lost.
-        NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: nil) { [blackBox, blackBoxQueue, queue, incidentLog] _ in
+        NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: nil) { [blackBox, blackBoxQueue, queue, incidentLog, dailyLog] _ in
             blackBoxQueue.sync { blackBox.flush() }
             queue.sync { incidentLog.closeAll(at: Date()); incidentLog.save() }
+            dailyLog.flush()
         }
         // Anything a Suspend rule stopped is resumed when FlightDeck quits.
         NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
@@ -381,15 +388,16 @@ final class Engine: ObservableObject {
         let visible = uiVisible
         let front = NSWorkspace.shared.frontmostApplication?.processIdentifier
         resumeSuspended()
-        queue.async { [sampler, analyzer, incidentLog, ruleEngine] in
+        queue.async { [sampler, analyzer, incidentLog, ruleEngine, dailyLog] in
             sampler.processes.includeSelf = includeSelf
             sampler.networkInterval = visible ? 0 : 5   // per-process network every 5 s while no window is visible
             sampler.background = !visible
             let s = sampler.sample()
             self.processHistory.record(s.processes)
             self.launchLog.ingest(s.processes, at: s.time)
-            // Respawn loops join the analyzer's findings, so they reach the banner, alerts and the Flight Log the same way.
-            let found = analyzer.ingest(s) + self.launchLog.findings(now: s.time)
+            // Respawn loops and baseline findings ("3× its usual memory") join the Analyzer's, so they reach the banner,
+            // alerts and the Flight Log the same way.
+            let found = analyzer.ingest(s) + dailyLog.ingest(s) + self.launchLog.findings(now: s.time)
             ruleEngine.frontmostPID = front
             let firings = ruleEngine.evaluate(s)
             let fullDays = analyzer.daysUntilFull()

@@ -46,6 +46,13 @@ enum UIBench {
             for f in Demo.frames(template: template, count: 30) { demo.feed(f, findings: a.ingest(f)) }
             out("thermals-demo", height: 1300, engine: demo, VStack { ThermalPerf() })
         }
+        // Trends: first with this headless engine's empty in-memory log (the "needs more days" states), then with
+        // demo history and a demo battery session (the headless log is never persisted).
+        out("trends-empty", height: 1300, TrendsPreview(log: e.dailyLog))
+        e.dailyLog.replaceForDemo(days: Demo.trendDays(), charge: Demo.chargeStatus())
+        out("trends", height: 2300, TrendsPreview(log: e.dailyLog))
+        out("trends-90", height: 2300, TrendsPreview(log: e.dailyLog, days: 90))
+        out("charge-drain", height: 400, ChargeDrainPanel(preview: Demo.chargeStatus()))
         if ProcessInfo.processInfo.environment["FD_RENDER_ALL"] != nil {
             for d in [Destination.systemInfo, .startup, .users, .services, .power, .connections, .apps, .diskSpace, .benchmarks] {
                 let v: AnyView
@@ -117,6 +124,8 @@ enum UIBench {
         bench("· ConnectionQuality", ConnectionQualityPanel())
         bench("· DriveHealth", DriveHealthPanel())
         bench("· EnergyBudget", EnergyBudgetPanel())
+        e.dailyLog.replaceForDemo(days: Demo.trendDays(), charge: Demo.chargeStatus())
+        bench("Trends (demo data)", TrendsPreview(log: e.dailyLog, days: 90))
         // Micro-benchmarks of pieces that views compute on every render.
         let g = e.current!
         bench("· aggregate x1", Text("\(AppUsage.aggregate(g.processes).count)"))
