@@ -40,7 +40,8 @@ public enum DiagnosticReports {
                 files.append((u, m))
             }
         }
-        return files.sorted { $0.1 > $1.1 }.prefix(limit).compactMap { parse($0.0, modified: $0.1) }
+        // newest files first for the limit, then by when the event happened (a report can be written hours later)
+        return files.sorted { $0.1 > $1.1 }.prefix(limit).compactMap { parse($0.0, modified: $0.1) }.sorted { $0.time > $1.time }
     }
 
     static let headerDate: DateFormatter = { let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "yyyy-MM-dd HH:mm:ss.SS Z"; return f }()

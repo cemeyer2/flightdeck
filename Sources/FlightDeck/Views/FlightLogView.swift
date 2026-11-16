@@ -72,12 +72,12 @@ struct FlightLogView: View {
                     Text("Nothing logged yet. Anything that lasts 20 seconds or more (a busy app, memory pressure, heat, a filling disk) is logged here, with a replay of what the Mac was doing.")
                         .foregroundStyle(p.dim).fixedSize(horizontal: false, vertical: true)
                 }
-                ReportsPanel()
                 ForEach(days.keys.sorted(by: >), id: \.self) { day in
                     Panel(title: day.formatted(date: .complete, time: .omitted)) {
                         ForEach(days[day]!) { IncidentRow(i: $0) }
                     }
                 }
+                ReportsPanel()
             }.padding(16)
         }
         .confirmationDialog("Clear the flight log?", isPresented: $confirmClear) {

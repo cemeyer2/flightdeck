@@ -63,7 +63,8 @@ struct ProcessOutline: NSViewRepresentable {
         ov.rowHeight = 20
         ov.allowsMultipleSelection = false
         ov.autosaveExpandedItems = false
-        ov.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
+        // The last column absorbs spare width; columns beyond the window scroll horizontally instead of being cut off.
+        ov.columnAutoresizingStyle = .lastColumnOnlyAutoresizingStyle
         for c in ProcColumn.allCases {
             let col = NSTableColumn(identifier: .init(c.rawValue))
             col.title = c.rawValue; col.width = c.width; col.minWidth = 40
@@ -86,7 +87,7 @@ struct ProcessOutline: NSViewRepresentable {
         ov.menu = NSMenu(); ov.menu?.delegate = context.coordinator
         ov.target = context.coordinator
         ov.doubleAction = #selector(Coordinator.doubleClicked(_:))
-        let sv = NSScrollView(); sv.documentView = ov; sv.hasVerticalScroller = true; sv.autohidesScrollers = true
+        let sv = NSScrollView(); sv.documentView = ov; sv.hasVerticalScroller = true; sv.hasHorizontalScroller = true; sv.autohidesScrollers = true
         context.coordinator.outline = ov
         return sv
     }
