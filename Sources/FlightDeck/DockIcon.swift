@@ -34,7 +34,14 @@ final class DockIconController {
     }
 
     /// Main actor, once per live sample. `caution` is the worst live finding's severity raw value (0 when none).
+    private var lastLamps: (Bool, Int)?
+
     func ingest(_ s: Snapshot, recording: Bool, caution: Int = 0) {
+        // The static App Icon mode shows no live data: only redraw when the recording or caution lamp changes.
+        if mode == .appIcon {
+            defer { lastLamps = (recording, caution) }
+            if let l = lastLamps, l == (recording, caution) { return }
+        }
         cpu.removeFirst(); cpu.append(s.cpu.total.value)
         sys.removeFirst(); sys.append(s.cpu.system.value)
         var d = DockData()

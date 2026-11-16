@@ -30,8 +30,12 @@ final class CompareModel: ObservableObject {
     func load(_ url: URL, into which: Int) {
         do {
             let t = try Trace.read(from: url)
-            let side = Side(url: url, trace: t, stats: TraceStats.compute(t))
-            if which == 0 { a = side } else { b = side }
+            // Replaying the analyzer over a long recording takes a while: compute stats off the main actor.
+            Task {
+                let stats = await Task.detached(priority: .userInitiated) { TraceStats.compute(t) }.value
+                let side = Side(url: url, trace: t, stats: stats)
+                if which == 0 { a = side } else { b = side }
+            }
         } catch { self.error = "Could not open \(url.lastPathComponent): \(error.localizedDescription)" }
     }
 }

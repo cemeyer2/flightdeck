@@ -15,11 +15,9 @@ struct FlightReportView: View {
     /// Frames where the metric is unavailable are left out of the average; a chunk with no measured frames becomes nil
     /// (a gap). Chunks are by frame index, not by time.
     func downsample(_ f: (Snapshot) -> Double?) -> [Double?] {
-        let step = max(trace.frames.count / 300, 1)
-        return stride(from: 0, to: trace.frames.count, by: step).map { i in
-            let chunk = trace.frames[i..<min(i + step, trace.frames.count)].compactMap(f)
-            return chunk.isEmpty ? nil : chunk.reduce(0, +) / Double(chunk.count)
-        }
+        // by time, not by frame index: periods without samples stay visible as gaps
+        timeBuckets(trace.frames.compactMap { s in f(s).map { (s.time, $0) } }, buckets: 300,
+                    from: trace.frames.first?.time, to: trace.frames.last?.time)
     }
 
     /// One stats table row: average, 95th percentile and peak, or "—" for a metric the trace never measured.
@@ -127,7 +125,8 @@ extension Engine {
     /// `blackBoxQueue` as Engine's other black box reads do).
     func exportTrace() -> Trace? {
         if mode == .replay, let trace { return trace }
-        let t = blackBox.trace(.fine, from: Date().addingTimeInterval(-3600))
+        // via the black box queue, so frames being flushed to a segment at this moment aren't missed
+        let t = blackBoxQueue.sync { blackBox.trace(.fine, from: Date().addingTimeInterval(-3600)) }
         if t == nil { lastError = "Nothing to export yet: open a recording, or let the black box collect some data." }
         return t
     }

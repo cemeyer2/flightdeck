@@ -115,7 +115,8 @@ struct ProcessOutline: NSViewRepresentable {
         let key = "\(frameTime?.timeIntervalSince1970 ?? 0)|\(tree)|\(byApp)|\(filter)|\(processes.count)|\(palette.id)"
         // Compares the previous binding with the new one. Both read the same underlying state, so this can be false even
         // when the selection did change; the selection is in any case re-applied at the end of every rebuild.
-        let selChanged = c.parent.selection != selection
+        // Compare with what the table last applied: both bindings point at the same state, so comparing them is always equal.
+        let selChanged = c.appliedSelection != selection
         c.parent = self
         // Don't rebuild a table nobody can see (window hidden, minimised or fully covered); catch up when visible.
         let visible = sv.window?.occlusionState.contains(.visible) ?? true
@@ -139,6 +140,8 @@ struct ProcessOutline: NSViewRepresentable {
         var updating = false
         /// See `ProcessOutline.updateNSView`.
         var lastKey = ""
+        /// The selection most recently applied to (or read from) the table.
+        var appliedSelection: ProcessIdentity?
         /// Sort in effect at the last rebuild; a different sort forces a full reload rather than a long series of moves.
         var lastSort: (ProcColumn, Bool) = (.cpu, false)
         init(_ p: ProcessOutline) { parent = p }
@@ -212,6 +215,7 @@ struct ProcessOutline: NSViewRepresentable {
 
         /// Mirrors `parent.selection` into the outline view (deselecting if that process is gone or not displayed).
         func applySelection() {
+            appliedSelection = parent.selection
             guard let ov = outline else { return }
             updating = true; defer { updating = false }
             if let sel = parent.selection, let it = items[sel] {
@@ -363,6 +367,7 @@ struct ProcessOutline: NSViewRepresentable {
             guard !updating, let ov = outline else { return }
             let it = ov.item(atRow: ov.selectedRow) as? ProcItem
             // Deferred: the outline view can call this during a SwiftUI update, and writing a binding then is not allowed.
+            appliedSelection = it?.s.identity   // the table already shows this; don't re-apply it on the next update
             DispatchQueue.main.async { self.parent.selection = it?.s.identity }
         }
 

@@ -161,12 +161,12 @@ struct AnnunciatorPanel: View {
     static let lights: [(label: String, match: [String], dest: String)] = [
         ("CPU", ["cpu:", "cpu-saturated", "unusual-cpu", "cpu-throttled", "wakeups:"], "Performance:CPU"),
         ("MEM", ["mem-pressure", "leak:"], "Performance:Memory"),
-        ("SWAP", ["swap", "swapping"], "Performance:Memory"),
+        ("SWAP", ["swap-", "swapping"], "Performance:Memory"),
         ("THERM", ["thermal", "gpu-thermal", "cpu-throttled"], "Performance:Thermals"),
         ("DISK", ["disk-busy", "drive:"], "Performance:Disk"),
         ("STORAGE", ["disk-low", "disk-full"], "Disk Space"),
         ("NET", ["net-", "wifi-weak"], "Performance:Network"),
-        ("GPU", ["gpu"], "Performance:GPU"),
+        ("GPU", ["gpu:", "gpu-recovery", "gpu-memory"], "Performance:GPU"),
         ("POWER", ["unusual-power", "battery-health"], "Performance:Energy"),
         ("HANG", ["hang:", "report:Hang"], "Processes"),
         ("CRASH", ["report:Crash"], "Flight Log"),
@@ -177,7 +177,7 @@ struct AnnunciatorPanel: View {
         let f = e.findings
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 6), spacing: 6) {
             ForEach(Self.lights, id: \.label) { light in
-                let hits = f.filter { x in light.match.contains { x.id.hasPrefix($0) } }
+                let hits = f.filter { x in light.match.contains { x.id.hasPrefix($0) } }.sorted { $0.severity > $1.severity }
                 let sev = hits.map(\.severity).max()
                 Button { e.navigationRequest = hits.first?.destination ?? light.dest } label: {
                     Text(light.label)

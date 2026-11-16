@@ -122,9 +122,11 @@ final class ProcessNetworkTests: XCTestCase {
         cfg.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData; cfg.urlCache = nil
         let session = URLSession(configuration: cfg)
         let url = URL(string: "https://www.apple.com/?ml=\(UUID().uuidString)")!
-        let task = session.dataTask(with: url) { _, _, _ in exp.fulfill() }
+        var failed = false
+        let task = session.dataTask(with: url) { _, _, err in failed = err != nil; exp.fulfill() }
         task.resume()
         wait(for: [exp], timeout: 20)
+        if failed { throw XCTSkip("no internet access") }   // the test needs real traffic to measure
         guard let net = s.sample() else { return XCTFail("nettop unavailable") }
         let mine = net[getpid()]
         print("NET self", mine as Any)

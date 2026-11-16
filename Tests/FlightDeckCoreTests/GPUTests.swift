@@ -7,10 +7,12 @@ final class GPUTests: XCTestCase {
     /// After a warm-up sample: device utilisation is measured, the clock lies within the GPU's own DVFS range, the
     /// per-state residencies add up to the active residency (so the P-state chart is consistent), and per-client
     /// GPU shares are real percentages. Needs a real GPU with at least one client (e.g. WindowServer).
-    func testGPUSample() {
+    func testGPUSample() throws {
         let g = GPUSampler()
         _ = g.sample(); Thread.sleep(forTimeInterval: 1)
         let d = g.sample()
+        // VMs and headless CI machines expose no accelerator statistics: that's "unavailable", not a failure.
+        guard d.deviceUtilization != nil else { throw XCTSkip("no GPU statistics on this machine") }
         print("GPU util", d.deviceUtilization as Any, "active", d.activeResidency as Any, "MHz", d.frequencyMHz as Any, "W", d.powerWatts as Any,
               "cltm", d.thermalLimited as Any, "mem", d.memoryInUse as Any, "recov", d.recoveryCount as Any)
         print("GPU states", d.stateResidency?.map { Int($0) } as Any, d.stateMHz as Any)

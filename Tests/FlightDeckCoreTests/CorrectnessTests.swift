@@ -95,3 +95,14 @@ final class CorrectnessTests: XCTestCase {
         XCTAssertTrue(daemons.contains(where: \.loaded), "at least one installed daemon is running")
     }
 }
+
+final class TimeBucketTests: XCTestCase {
+    /// Downsampling for reports and charts keeps time gaps as nil instead of squeezing them out.
+    func testGapsSurvive() {
+        let t0 = Date(timeIntervalSince1970: 0)
+        let pts = (0..<10).map { (t0.addingTimeInterval(Double($0)), 1.0) } + (90..<100).map { (t0.addingTimeInterval(Double($0)), 3.0) }
+        let b = timeBuckets(pts, buckets: 10)
+        XCTAssertEqual(b.first!, 1); XCTAssertEqual(b.last!, 3)
+        XCTAssertTrue(b[2...7].allSatisfy { $0 == nil })
+    }
+}

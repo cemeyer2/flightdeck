@@ -46,7 +46,7 @@ final class InspectorModel: ObservableObject {
         let p = s.processes.first { $0.identity == identity }
         // Missing from one snapshot isn't proof of exit, so confirm by re-reading the PID's identity: only a different
         // start time (PID recycled) or no process at all counts as exited.
-        if p == nil && sample != nil { exited = ProcessSampler.identity(of: identity.pid) != identity }
+        if p == nil { exited = ProcessSampler.identity(of: identity.pid) != identity }
         if let p { sample = p; exited = false }
         history = engine?.processHistory.series(identity) ?? []
         // A child must have started after this process; an older process with the same ppid would be a leftover from a

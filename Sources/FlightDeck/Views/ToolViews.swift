@@ -117,11 +117,16 @@ struct InstalledAppsView: View {
     }
     /// Starts one detached utility task per app not yet sized (all at once); each result lands on the main actor.
     func computeSizes(_ apps: [InstalledApp]) {
-        for a in apps where sizes[a.path] == nil {
-            let path = a.path
-            Task.detached(priority: .utility) {
-                let s = InstalledApps.size(of: path)
-                await MainActor.run { sizes[path] = s }
+        // At most 4 bundle walks at a time: hundreds in parallel would thrash the disk and the thread pool.
+        let paths = apps.filter { sizes[$0.path] == nil }.map(\.path)
+        Task.detached(priority: .utility) {
+            await withTaskGroup(of: (String, UInt64).self) { group in
+                var next = paths.makeIterator()
+                for _ in 0..<4 { if let p = next.next() { group.addTask { (p, InstalledApps.size(of: p)) } } }
+                while let (p, s) = await group.next() {
+                    await MainActor.run { sizes[p] = s }
+                    if let n = next.next() { group.addTask { (n, InstalledApps.size(of: n)) } }
+                }
             }
         }
     }

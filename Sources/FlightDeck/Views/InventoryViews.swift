@@ -124,11 +124,13 @@ struct UsersView: View {
     @Environment(\.palette) var p
     @StateObject var loader = Loader { Connections.sessions() }
     /// Per-user totals: `procs` is every process, `measured` the readable ones that the CPU/memory/energy sums cover.
-    struct Agg: Identifiable { var id: String { user }; var user: String; var procs: Int; var measured: Int; var cpu: Double; var mem: UInt64; var energy: Double }
+    struct Agg: Identifiable { var id: String { user }; var user: String; var procs: Int; var measured: Int; var cpu: Double; var mem: UInt64; var energy: Double? }
     var body: some View {
         let aggs: [Agg] = Dictionary(grouping: e.current?.processes ?? [], by: \.user).map { u, all in
             let ps = all.filter { !$0.restricted }
-            return Agg(user: u, procs: all.count, measured: ps.count, cpu: ps.reduce(0) { $0 + $1.cpu }, mem: ps.reduce(0) { $0 + $1.memory }, energy: ps.reduce(0) { $0 + ($1.energyWatts ?? 0) })
+            return Agg(user: u, procs: all.count, measured: ps.count, cpu: ps.reduce(0) { $0 + $1.cpu }, mem: ps.reduce(0) { $0 + $1.memory },
+                       // nil (shown "—") when no process of this user reports energy, rather than an invented 0 W
+                       energy: ps.contains { $0.energyWatts != nil } ? ps.reduce(0) { $0 + ($1.energyWatts ?? 0) } : nil)
         // Users with nothing readable sort to the bottom rather than ranking as 0% CPU.
         }.sorted { ($0.measured > 0 ? $0.cpu : -1) > ($1.measured > 0 ? $1.cpu : -1) }
         ScrollView {
@@ -155,7 +157,7 @@ struct UsersView: View {
                                 Text(ok ? Fmt.pct(a.cpu) : "—")
                                 // Process CPU is % of one core, so the meter is scaled against all logical cores.
                                 VFDMeter(fraction: ok ? min(a.cpu / Double(100 * ProcessInfo.processInfo.activeProcessorCount), 1) : nil, segments: 20, height: 6).frame(width: 140)
-                                Text(ok ? Fmt.bytes(a.mem) : "—"); Text(ok ? String(format: "%.2f W", a.energy) : "—")
+                                Text(ok ? Fmt.bytes(a.mem) : "—"); Text(ok ? (a.energy.map { String(format: "%.2f W", $0) } ?? "—") : "—")
                             }.font(.system(size: 12, design: .monospaced))
                         }
                     }
@@ -196,7 +198,8 @@ struct ServicesView: View {
                     Button("Copy Label") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(id, forType: .string) }
                     // Restarts the job in the user's GUI domain, then reloads the list to pick up its new PID.
                     Button("Restart (kickstart -k)") {
-                        _ = Shell.run("/bin/launchctl", ["kickstart", "-k", "gui/\(getuid())/\(id)"]); loader.load()
+                        let target = "gui/\(getuid())/\(id)"
+                        Task { await Task.detached { _ = Shell.run("/bin/launchctl", ["kickstart", "-k", target]) }.value; loader.load() }
                     }
                 }
             }

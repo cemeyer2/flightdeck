@@ -56,8 +56,9 @@ final class Alerts: NSObject, UNUserNotificationCenterDelegate {
             // Mark the occurrence as handled before the cooldown check: an occurrence suppressed by the cooldown is not
             // notified later, even once the cooldown has passed.
             guard notifiedSince[f.id] != f.since else { continue }
-            notifiedSince[f.id] = f.since
+            // Still in the cooldown: wait (don't mark it notified), so it's sent once the cooldown passes if it persists.
             if let last = lastSent[f.id], now.timeIntervalSince(last) < Self.cooldown { continue }
+            notifiedSince[f.id] = f.since
             lastSent[f.id] = now
             let c = UNMutableNotificationContent()
             c.title = f.severity == .warning ? "Warning" : "Caution"

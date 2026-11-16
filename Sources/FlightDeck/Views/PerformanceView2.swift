@@ -73,10 +73,12 @@ struct ProcessMiniList: View {
     @EnvironmentObject var e: Engine
     @Environment(\.palette) var p
     var metric: (ProcessSample) -> Double
+    /// Which processes have the metric at all (e.g. energy is only reported for some); others are left out, not shown as 0.
+    var include: (ProcessSample) -> Bool = { _ in true }
     var format: (Double) -> String
     var count = 6
     var body: some View {
-        let procs = (e.current?.processes ?? []).filter { !$0.restricted }.sorted { metric($0) > metric($1) }.prefix(count)
+        let procs = (e.current?.processes ?? []).filter { !$0.restricted && include($0) }.sorted { metric($0) > metric($1) }.prefix(count)
         let top = procs.first.map(metric) ?? 1
         VStack(spacing: 5) {
             ForEach(Array(procs)) { pr in
@@ -179,7 +181,7 @@ struct EnergyPerf: View {
             EnergyBudgetPanel()
             Panel(title: "Top energy processes (measured energy)") {
                 // Processes without an energy reading count as 0 W for ranking only.
-                ProcessMiniList(metric: { $0.energyWatts ?? 0 }, format: { String(format: "%.2f W", $0) }, count: 10)
+                ProcessMiniList(metric: { $0.energyWatts ?? 0 }, include: { $0.energyWatts != nil }, format: { String(format: "%.2f W", $0) }, count: 10)
             }
         }
     }
@@ -404,7 +406,7 @@ struct ConnectionQualityPanel: View {
                     ForEach(lat) { r in
                         // Warn above 50 ms to the router or 150 ms to the internet; a missing average also warns.
                         Readout(label: "\(r.role) latency", value: r.avgMs.map { String(format: "%.0f", $0) }, unit: "ms",
-                                color: (r.avgMs ?? 999) > (r.role == "Router" ? 50 : 150) ? p.warn : nil)
+                                color: r.avgMs.map { $0 > (r.role == "Router" ? 50 : 150) } == true ? p.warn : nil)
                         Readout(label: "Jitter", value: r.jitterMs.map { String(format: "%.1f", $0) }, unit: "ms")
                         Readout(label: "Loss", value: String(format: "%.0f", r.loss), unit: "%", color: r.loss >= 5 ? p.crit : nil)
                     }
@@ -477,10 +479,8 @@ struct EnergyBudgetPanel: View {
                     }.font(.system(size: 12, design: .monospaced))
                 }
                 if b.charge.count > 2 {
-                    // Downsampled to at most ~240 points for drawing. Points are evenly spaced by index, not by time,
-                    // so periods with no recording (sleep) are compressed rather than shown as gaps.
-                    let step = max(b.charge.count / 240, 1)
-                    HistoryGraph(traces: [GraphTrace(name: "charge", values: stride(from: 0, to: b.charge.count, by: step).map { Optional(b.charge[$0].1) }, color: p.accent)],
+                    // Bucketed by time (240 slices), so periods with no recording (sleep) show as gaps.
+                    HistoryGraph(traces: [GraphTrace(name: "charge", values: timeBuckets(b.charge, buckets: 240), color: p.accent)],
                                  maxValue: 100, format: { String(format: "%.0f%%", $0) }).frame(height: 70)
                     Text("Battery charge over the period").font(.caption).foregroundStyle(p.dim)
                 }

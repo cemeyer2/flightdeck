@@ -107,7 +107,7 @@ final class Engine: ObservableObject {
     /// Recent history of every process (for the inspector).
     /// Thread-safe (internally locked): recorded on `queue`, read from views.
     let processHistory = ProcessHistory()
-    private let blackBoxQueue = DispatchQueue(label: "flightdeck.blackbox", qos: .background)
+    let blackBoxQueue = DispatchQueue(label: "flightdeck.blackbox", qos: .background)
     // Confined to `queue`. They are `nonisolated` so the sampling closures can use them without hopping to the main actor;
     // `nonisolated(unsafe)` marks vars whose safety comes from that confinement rather than from the compiler.
     // Confined to `queue`.
@@ -335,8 +335,11 @@ final class Engine: ObservableObject {
         guard visible != uiVisible else { return }
         uiVisible = visible
         if visible {   // catch up in one publish, so graphs have no hole
-            if let f = hiddenFrames { frames = f }
-            if let c = hiddenCurrent { current = c }
+            // …but only in live mode: a replay started while hidden owns `frames`/`current` and must not be overwritten.
+            if mode == .live {
+                if let f = hiddenFrames { frames = f }
+                if let c = hiddenCurrent { current = c }
+            }
             hiddenFrames = nil; hiddenCurrent = nil
         } else if mode == .live {
             hiddenFrames = frames; hiddenCurrent = current
@@ -355,26 +358,45 @@ final class Engine: ObservableObject {
             // In replay, live samples only reach `liveSnapshot`; `frames`/`current` belong to the trace.
             if s.time.timeIntervalSince(lastHiddenLivePublish) >= 5 { liveSnapshot = s; lastHiddenLivePublish = s.time }
             guard mode == .live else { return }
-            if hiddenFrames == nil { hiddenFrames = frames }
-            hiddenFrames!.removeFirst(); hiddenFrames!.append(light); hiddenCurrent = s
+            markGapIfNeeded(s.time)
+            appendFrame(light); hiddenCurrent = s
             return
         }
         liveSnapshot = s
         guard mode == .live else { return }
+        markGapIfNeeded(s.time)
         current = s
-        frames.removeFirst(); frames.append(light)
+        appendFrame(light)
+    }
+
+    /// Time of the last live frame added to graph history, to detect sleep and other stalls.
+    private var lastFrameTime: Date?
+
+    /// The Mac slept (or sampling stalled): break the line instead of joining across hours of missing data.
+    /// The threshold allows for the slower background interval.
+    private func markGapIfNeeded(_ t: Date) {
+        defer { lastFrameTime = t }
+        guard let last = lastFrameTime, t.timeIntervalSince(last) > max(interval, backgroundInterval) * 2.5 + 1 else { return }
+        appendFrame(nil)
+    }
+
+    /// Appends to whichever live history is current: the staged one while no window is visible, else the published one.
+    private func appendFrame(_ f: Snapshot?) {
+        if !uiVisible {
+            if hiddenFrames == nil { hiddenFrames = frames }
+            hiddenFrames!.removeFirst(); hiddenFrames!.append(f)
+        } else {
+            frames.removeFirst(); frames.append(f)
+        }
     }
 
     /// Inserts a gap marker (after a pause) into graph history, per-process history and the Dock tile graph.
     private func pushGap() {
         processHistory.gap()
         DockIconController.shared.gap()
-        if mode == .live { frames.removeFirst(); frames.append(nil) }
+        if mode == .live { appendFrame(nil) }   // staged history too, so a pause while hidden still shows as a gap
     }
 
-    /// Forces an immediate sample even while paused. Note: assigning `paused` triggers its didSet, so this also pushes gaps
-    /// and, when restoring a paused state, closes open incidents. Currently not called anywhere.
-    func sampleNow() { let p = paused; paused = false; tick(); paused = p }
 
     // MARK: series helpers
     /// One value per frame of `frames`; `nil` where the frame is a gap or the metric is unavailable.
@@ -485,9 +507,8 @@ final class Engine: ObservableObject {
         let start = startAtEnd ? t.frames.count - 1
             : startAt.map { d in t.frames.firstIndex { $0.time >= d } ?? 0 }
             ?? UserDefaults.standard.integer(forKey: "replayIndex")   // debug/automation hook
-        // `mode` is already .replay here, so assigning replayIndex runs applyReplay through its didSet; the explicit call
-        // after it recomputes the same moment a second time.
-        replayIndex = min(max(start, 0), t.frames.count - 1); applyReplay()
+        // `mode` is already .replay here, so assigning replayIndex runs applyReplay through its didSet.
+        replayIndex = min(max(start, 0), t.frames.count - 1)
     }
 
     /// Back to live. History is cleared (not restored), so graphs start filling again from the next sample.
