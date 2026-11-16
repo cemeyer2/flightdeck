@@ -10,19 +10,17 @@ struct VFDMeter: View {
     var height: CGFloat = 10
 
     var body: some View {
-        GeometryReader { geo in
+        // One Canvas instead of a view (plus a shadow pass) per segment: meters appear dozens of times per screen.
+        Canvas { ctx, size in
             let gap: CGFloat = 2
-            let w = (geo.size.width - gap * CGFloat(segments - 1)) / CGFloat(segments)
-            let lit = Int(((fraction ?? 0) * Double(segments)).rounded())
-            HStack(spacing: gap) {
-                ForEach(0..<segments, id: \.self) { i in
-                    let on = fraction != nil && i < lit
-                    let c = color ?? p.level(Double(i + 1) / Double(segments))
-                    RoundedRectangle(cornerRadius: 1.5)
-                        .fill(on ? c : p.meterOff)
-                        .frame(width: max(w, 1))
-                        .shadow(color: on ? c.opacity(0.8) : .clear, radius: p.glow)
-                }
+            let w = max((size.width - gap * CGFloat(segments - 1)) / CGFloat(segments), 1)
+            let lit = fraction == nil ? 0 : Int(((fraction ?? 0) * Double(segments)).rounded())
+            func rect(_ i: Int) -> Path { Path(roundedRect: CGRect(x: CGFloat(i) * (w + gap), y: 0, width: w, height: size.height), cornerRadius: 1.5) }
+            for i in lit..<max(segments, lit) { ctx.fill(rect(i), with: .color(p.meterOff)) }
+            guard lit > 0 else { return }
+            ctx.drawLayer { layer in
+                if p.glow > 0 { layer.addFilter(.shadow(color: (color ?? p.accent).opacity(0.8), radius: p.glow)) }
+                for i in 0..<min(lit, segments) { layer.fill(rect(i), with: .color(color ?? p.level(Double(i + 1) / Double(segments)))) }
             }
         }
         .frame(height: height)

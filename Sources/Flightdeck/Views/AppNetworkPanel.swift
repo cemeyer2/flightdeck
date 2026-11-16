@@ -15,6 +15,14 @@ enum AppGrouping {
     /// Outermost `.app` bundle in a path, so helpers (…/Chrome.app/…/Helper.app/…) roll up to the app.
     static func bundle(of path: String) -> String? { AppUsage.bundle(of: path) }
 
+    /// Localized app names hit the file system; cache them (the view re-renders every second).
+    nonisolated(unsafe) static var names: [String: String] = [:]
+    static func displayName(_ bundle: String) -> String {
+        if let n = names[bundle] { return n }
+        let n = (FileManager.default.displayName(atPath: bundle) as NSString).deletingPathExtension
+        names[bundle] = n; return n
+    }
+
     static func traffic(_ procs: [ProcessSample], byApp: Bool) -> [AppTraffic]? {
         guard procs.contains(where: { $0.network != nil }) else { return nil }
         var groups: [String: AppTraffic] = [:]
@@ -23,7 +31,7 @@ enum AppGrouping {
             let key: String, name: String, icon: String
             if byApp, let b = bundle(of: p.path) {
                 key = b; icon = b
-                name = (FileManager.default.displayName(atPath: b) as NSString).deletingPathExtension
+                name = displayName(b)
             } else {
                 key = "\(p.pid)"; name = p.name; icon = p.path
             }

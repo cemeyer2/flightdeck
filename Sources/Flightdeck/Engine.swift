@@ -64,7 +64,12 @@ final class Engine: ObservableObject {
     nonisolated(unsafe) private var incidentRevision = -1
     nonisolated(unsafe) private var lastIncidentSave = Date()
 
-    init() {
+    /// `headless`: no timers, no black box, no Dock tile; frames are fed with `feed(_:)` (UI benchmark).
+    let headless: Bool
+
+    init(headless: Bool = false) {
+        self.headless = headless
+        if headless { return }
         queue.async { [sampler] in _ = sampler.sample() }   // prime deltas
         restartTimer()
         blackBoxQueue.async { [blackBox, queue, analyzer] in
@@ -133,6 +138,13 @@ final class Engine: ObservableObject {
                 self.ingest(s)
             }
         }
+    }
+
+    /// Headless: push a snapshot (with its findings) as if it had just been sampled.
+    func feed(_ s: Snapshot, findings: [Finding]) {
+        liveFindings = findings; liveSnapshot = s; current = s
+        var light = s; light.processes = Array(s.processes.sorted { $0.cpu > $1.cpu }.prefix(12))
+        frames.removeFirst(); frames.append(light)
     }
 
     private func ingest(_ s: Snapshot) {

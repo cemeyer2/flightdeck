@@ -26,6 +26,7 @@ enum CLI {
             return Array(a[(i + 1)...(i + n)])
         }
         if a.contains("--help") { print(usage); exit(0) }
+        if a.contains("--bench-ui") { UIBench.run(renders: Int(value("--bench-ui")?.first ?? "") ?? 20) }
         if a.contains("--snapshot") || a.contains("--findings") {
             let s = warmSample()
             let findings = Analyzer().ingest(s)

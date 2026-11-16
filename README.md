@@ -93,6 +93,7 @@ flightdeck --findings               # what's wrong right now
 flightdeck --stats rec.flightlog    # statistics and findings of a recording
 flightdeck --csv rec.flightlog out.csv [--processes]
 flightdeck --report rec.flightlog out.pdf
+flightdeck --bench-ui [N]           # render every main view off-screen N times with live data; ms per frame
 ```
 
 Six themes: Light, Dark, Green, Amber, Blue, Mono.
