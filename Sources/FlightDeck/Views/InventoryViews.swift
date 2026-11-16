@@ -66,7 +66,13 @@ struct StartupView: View {
     @State private var sortOrder = [KeyPathComparator(\StartupItem.label)]
     var body: some View {
         VStack(spacing: 0) {
-            ViewHeader(text: "Launch agents, launch daemons and login items that start automatically.") {
+            let items = loader.value ?? []
+            let orphans = items.filter(\.orphaned).count
+            let unsigned = items.filter { $0.signer?.hasPrefix("Not signed") == true }.count
+            let thirdParty = items.filter { $0.signer != nil && !$0.signedByApple }.count
+            ViewHeader(text: "Launch agents, launch daemons and login items that start automatically."
+                       + (items.isEmpty ? "" : " \(items.count) items · \(thirdParty) not from Apple"
+                          + (unsigned > 0 ? " · \(unsigned) unsigned" : "") + (orphans > 0 ? " · \(orphans) point to missing programs (leftovers from removed apps)" : ""))) {
                 Button("Refresh") { loader.load() }
             }
             Table((loader.value ?? []).sorted(using: sortOrder), selection: $selection, sortOrder: $sortOrder) {
@@ -75,7 +81,15 @@ struct StartupView: View {
                 TableColumn("Status") { i in Text(i.disabled ? "Disabled" : (i.loaded ? "Loaded" : "Not loaded")).foregroundStyle(i.loaded ? .primary : .secondary) }.width(90)
                 TableColumn("Run at load") { Text($0.runAtLoad ? "Yes" : "No") }.width(80)
                 TableColumn("Keep alive") { Text($0.keepAlive ? "Yes" : "No") }.width(80)
-                TableColumn("Program", value: \.program) { Text($0.program).lineLimit(1).truncationMode(.middle) }
+                TableColumn("Signed by") { i in
+                    Text(i.signer ?? "—").lineLimit(1)
+                        .foregroundStyle(i.signer?.hasPrefix("Not signed") == true ? Color.orange : (i.signedByApple ? .secondary : .primary))
+                        .help(i.signer ?? "")
+                }.width(min: 140, ideal: 220)
+                TableColumn("Program", value: \.program) { i in
+                    Text(i.orphaned ? "missing: " + i.program : i.program).lineLimit(1).truncationMode(.middle)
+                        .foregroundStyle(i.orphaned ? Color.red : .primary).help(i.program)
+                }
             }
             .contextMenu(forSelectionType: StartupItem.ID.self) { ids in
                 if let id = ids.first {

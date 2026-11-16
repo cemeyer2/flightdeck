@@ -20,6 +20,12 @@ public struct StartupItem: Identifiable, Hashable, Sendable {
     public var disabled: Bool
     public var loaded: Bool
     public var vendor: String
+    /// nil = can't tell (e.g. a program inside an app bundle referenced by BundleProgram).
+    public var programExists: Bool? = nil
+    /// Code-signature summary of the program ("Signed by Apple", "Signed: Developer ID Application: …", "Not signed…").
+    public var signer: String? = nil
+    public var signedByApple = false
+    public var orphaned: Bool { programExists == false }
 }
 
 public enum Launchd {
@@ -47,7 +53,8 @@ public enum Launchd {
                 let path = "\(dir)/\(f)"
                 guard let d = NSDictionary(contentsOfFile: path) as? [String: Any] else { continue }
                 let label = d["Label"] as? String ?? (f as NSString).deletingPathExtension
-                let program = (d["Program"] as? String) ?? ((d["ProgramArguments"] as? [String])?.first ?? "")
+                let program = (d["Program"] as? String) ?? ((d["ProgramArguments"] as? [String])?.first
+                    ?? (d["BundleProgram"] as? String).map { "(in app bundle) " + $0 } ?? "")
                 let keep: Bool = (d["KeepAlive"] as? Bool) ?? (d["KeepAlive"] is [String: Any])
                 out.append(StartupItem(label: label, path: path, program: program, kind: kind,
                                        runAtLoad: d["RunAtLoad"] as? Bool ?? false, keepAlive: keep,
@@ -56,6 +63,15 @@ public enum Launchd {
             }
         }
         out.append(contentsOf: loginItems())
+        // Who signed what starts automatically, and which items point at programs that no longer exist
+        for i in out.indices where !out[i].program.isEmpty && out[i].program.hasPrefix("/") {
+            out[i].programExists = FileManager.default.fileExists(atPath: out[i].program)
+            if out[i].programExists == true, let sig = ProcessInspector.signature(out[i].program) {
+                out[i].signer = sig.summary; out[i].signedByApple = sig.isApple
+            } else if out[i].programExists == true {
+                out[i].signer = "Not signed"
+            }
+        }
         return out.sorted { $0.label.lowercased() < $1.label.lowercased() }
     }
 

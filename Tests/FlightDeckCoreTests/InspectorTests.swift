@@ -101,3 +101,11 @@ final class DiagnosticReportTests: XCTestCase {
         print("REAL", DiagnosticReports.scan(since: now.addingTimeInterval(-7 * 86_400)).prefix(6).map { "\($0.kind.rawValue): \($0.process) \($0.summary ?? "")" })
     }
 }
+
+final class StartupItemTests: XCTestCase {
+    func testSignersAndOrphans() {
+        let items = Launchd.startupItems()
+        print("STARTUP", items.count, "orphans", items.filter(\.orphaned).map(\.label), "unsigned", items.filter { $0.signer?.hasPrefix("Not signed") == true }.map(\.label))
+        XCTAssertTrue(items.filter { $0.programExists == true }.allSatisfy { $0.signer != nil }, "every existing program gets a signature verdict")
+    }
+}

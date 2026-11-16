@@ -27,6 +27,18 @@ enum UIBench {
         out("memory", height: 1900, VStack { MemoryPerf() })
         out("gpu", height: 2200, VStack { GPUPerf() })
         out("thermals", VStack { ThermalPerf() })
+        if ProcessInfo.processInfo.environment["FD_RENDER_ALL"] != nil {
+            for d in [Destination.systemInfo, .startup, .users, .services, .power, .connections, .apps, .diskSpace, .benchmarks] {
+                let v: AnyView
+                switch d {
+                case .systemInfo: v = AnyView(SystemInfoView()); case .startup: v = AnyView(StartupView()); case .users: v = AnyView(UsersView())
+                case .services: v = AnyView(ServicesView()); case .power: v = AnyView(PowerView()); case .connections: v = AnyView(ConnectionsView())
+                case .apps: v = AnyView(InstalledAppsView()); case .diskSpace: v = AnyView(DiskSpaceView()); default: v = AnyView(BenchmarksView())
+                }
+                RunLoop.main.run(until: Date().addingTimeInterval(2))   // loaders
+                out(d.rawValue.replacingOccurrences(of: " ", with: "_"), height: 1300, v)
+            }
+        }
         if let me = e.current?.processes.first(where: { $0.pid == getpid() }) {
             let model = InspectorModel(identity: me.identity, engine: e)
             for _ in 0..<2 {   // let the background detail loads finish (two, so rates exist)

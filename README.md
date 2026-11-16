@@ -108,6 +108,9 @@ and temperature), or the static App Icon. It follows the current theme and shows
 Flight Recorder is recording. The static `AppIcon.icns` is rendered by the same code at build time
 (`FlightDeck --render-iconset <dir>`); `--render-dock-previews <dir>` writes every mode × theme as a PNG.
 
+**Startup Apps** shows who signed every launch agent, daemon and login item, flags unsigned ones, and marks items
+whose program no longer exists (leftovers from removed apps), with a summary at the top.
+
 ## Measurement principles
 
 - **No invented zeros.** Every value is `Measured<T>`, either `.value` or `.unavailable(reason)`. Unmeasured
