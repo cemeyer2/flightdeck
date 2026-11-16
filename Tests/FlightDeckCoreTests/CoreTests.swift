@@ -66,7 +66,10 @@ final class CoreTests: XCTestCase {
 final class EnergyTests: XCTestCase {
     /// A process burning CPU must show a positive measured energy (from the kernel's billed-energy counter), so
     /// energy readings aren't silently 0 or missing for busy processes.
-    func testBusyProcessReportsEnergy() {
+    func testBusyProcessReportsEnergy() throws {
+        // Virtual machines (such as GitHub's macOS runners) report no billed energy for any process.
+        var vm: Int32 = 0; var size = MemoryLayout<Int32>.size
+        if sysctlbyname("kern.hv_vmm_present", &vm, &size, nil, 0) == 0, vm == 1 { throw XCTSkip("no energy accounting in a virtual machine") }
         let s = ProcessSampler(); _ = s.sample()
         let end = Date().addingTimeInterval(0.6); var x = 0.0
         while Date() < end { x += sin(x) }   // burn CPU in this process
@@ -122,11 +125,13 @@ final class ProcessNetworkTests: XCTestCase {
         cfg.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData; cfg.urlCache = nil
         let session = URLSession(configuration: cfg)
         let url = URL(string: "https://www.apple.com/?ml=\(UUID().uuidString)")!
-        var failed = false
-        let task = session.dataTask(with: url) { _, _, err in failed = err != nil; exp.fulfill() }
+        // A class box: the completion handler runs on another thread, so it can't mutate a captured local var.
+        final class Flag: @unchecked Sendable { var value = false }
+        let failed = Flag()
+        let task = session.dataTask(with: url) { _, _, err in failed.value = err != nil; exp.fulfill() }
         task.resume()
         wait(for: [exp], timeout: 20)
-        if failed { throw XCTSkip("no internet access") }   // the test needs real traffic to measure
+        if failed.value { throw XCTSkip("no internet access") }   // the test needs real traffic to measure
         guard let net = s.sample() else { return XCTFail("nettop unavailable") }
         let mine = net[getpid()]
         print("NET self", mine as Any)
