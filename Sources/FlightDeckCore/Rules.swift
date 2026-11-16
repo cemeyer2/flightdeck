@@ -135,12 +135,12 @@ public final class RuleEngine: @unchecked Sendable {
                 guard sub.value > r.threshold else { continue }
                 seen.insert(k)
                 let start = since[k] ?? t; since[k] = start
-                // Fire at most once per occurrence: `fired` remembers the start of the occurrence already handled. It is
-                // set before the cooldown check, so an occurrence that reaches its time during the cooldown is consumed
-                // without firing, and does not fire later even if it keeps going after the cooldown ends.
+                // Fire at most once per occurrence: `fired` remembers the start of the occurrence already handled. An
+                // occurrence that becomes due during the cooldown waits (it is not marked fired), so it still fires
+                // when the cooldown ends if the condition is still true.
                 guard t.timeIntervalSince(start) >= r.minutes * 60, fired[k] != start else { continue }
-                fired[k] = start
                 if let lf = lastFire[k], t.timeIntervalSince(lf) < r.cooldownMinutes * 60 { continue }
+                fired[k] = start
                 lastFire[k] = t
                 out.append(RuleFiring(rule: r, subject: sub.name, targets: sub.targets, value: sub.value, time: t))
             }
@@ -148,6 +148,7 @@ public final class RuleEngine: @unchecked Sendable {
         // Forget countdowns for subjects that are below threshold, gone, or belong to a disabled/deleted rule.
         since = since.filter { seen.contains($0.key) }
         fired = fired.filter { seen.contains($0.key) }
+        lastFire = lastFire.filter { t.timeIntervalSince($0.value) < 86_400 }   // per-process keys would otherwise accumulate
         return out
     }
 

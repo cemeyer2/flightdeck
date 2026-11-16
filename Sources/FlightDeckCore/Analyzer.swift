@@ -144,6 +144,8 @@ public final class Analyzer {
             if let v = Self.startupVolume(f) { volumeFree.append((f.time, Double(v.available))) }
             lastT = f.time
         }
+        // Live points may already be in the list; keep it in time order so the trend uses the full history.
+        volumeFree.sort { $0.0 < $1.0 }
     }
 
     /// The volume mounted at "/", or the first internal volume if "/" isn't listed.
@@ -295,7 +297,8 @@ public final class Analyzer {
         if let sw = s.memory.swapUsed.value {
             // Compare with the oldest point at least 9 minutes old; since `swap` keeps 20 minutes, that can be up to
             // 20 minutes back even though the title says 10.
-            if let old = swap.first(where: { t.timeIntervalSince($0.0) >= 540 }), sw - old.1 > 1e9 {
+            // The newest point that is at least ~10 minutes old (not the oldest, which can be up to 20 minutes back).
+            if let old = swap.last(where: { t.timeIntervalSince($0.0) >= 540 }), sw - old.1 > 1e9 {
                 add("swap-growing", .caution, "arrow.left.arrow.right", "Swap grew by \(Fmt.bytes(sw - old.1)) in 10 minutes",
                     "The Mac is running out of memory and moving it to disk.", "Performance:Memory")
             } else if sw > 2e9 {
@@ -436,6 +439,7 @@ public final class Analyzer {
     /// themselves. Long-term histories (memory trend, swap, disk space, GPU recoveries) are kept; they are time-stamped
     /// and pruned by age, and the memory trend drops stale apps on its own.
     private func resetShortTerm() {
+        swap = []   // a gap (e.g. sleep) would make "swap grew in 10 minutes" compare across it
         appCPU = [:]; appGPU = [:]; gpuThermal = EMA(); swapOutRate = EMA(); lastSwapOuts = nil; pClockRatio = EMA(); cpuEMA = EMA(); cpuSlow = EMA(); diskEMA = EMA(); netEMA = EMA(); wattsEMA = EMA(); since = [:]
     }
 }

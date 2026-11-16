@@ -37,6 +37,9 @@ public final class IncidentLog {
     /// Findings that are usually intentional (e.g. an app keeping the Mac awake) aren't incidents.
     public var excludedPrefixes = ["awake:"]
     private var open: [String: Int] = [:]   // finding id -> index of ongoing incident
+    /// When each finding's last incident was closed. A finding that comes back (e.g. after a pause) starts a new incident
+    /// no earlier than this, so incidents for the same finding never overlap.
+    private var closedAt: [String: Date] = [:]
     /// Unsaved changes. The Engine calls `save()` about once a minute and at quit, so small edits don't each hit disk.
     private var dirty = false
     /// Bumped on every change, so callers can skip copying an unchanged log.
@@ -67,17 +70,18 @@ public final class IncidentLog {
         // A logged finding that is no longer reported has ended. (Iterating `open` while mutating it is safe: the loop
         // walks a copy.)
         for (id, idx) in open where !ids.contains(id) {
-            incidents[idx].end = now; open[id] = nil; dirty = true; revision += 1
+            incidents[idx].end = now; closedAt[id] = now; open[id] = nil; dirty = true; revision += 1
         }
         // Findings shorter than `minDuration` aren't logged yet; once one is, its incident is backdated to `f.since`.
         // Title/detail refreshes don't mark the log dirty or bump `revision`: they ride along with the next real change.
         for f in findings where now.timeIntervalSince(f.since) >= minDuration && !excludedPrefixes.contains(where: { f.id.hasPrefix($0) }) {
             if let idx = open[f.id] {
                 if f.severity > incidents[idx].severity { incidents[idx].severity = f.severity; dirty = true; revision += 1 }
+                if incidents[idx].title != f.title || incidents[idx].detail != f.detail { dirty = true; revision += 1 }
                 incidents[idx].title = f.title; incidents[idx].detail = f.detail
             } else {
                 let inc = Incident(id: UUID(), key: f.id, severity: f.severity, icon: f.icon, title: f.title, detail: f.detail,
-                                   destination: f.destination, start: f.since, end: nil)
+                                   destination: f.destination, start: max(f.since, closedAt[f.id] ?? .distantPast), end: nil)
                 incidents.append(inc); open[f.id] = incidents.count - 1; newlyLogged.append(inc); dirty = true; revision += 1
             }
         }
@@ -91,7 +95,7 @@ public final class IncidentLog {
     /// Ends every ongoing incident (sampling paused, app quitting, or the end of a replayed trace). If the same finding
     /// is still active on the next update it starts a new incident, backdated to the finding's `since`.
     public func closeAll(at now: Date) {
-        for (_, idx) in open { incidents[idx].end = now }
+        for (id, idx) in open { incidents[idx].end = now; closedAt[id] = now }
         if !open.isEmpty { dirty = true; revision += 1 }
         open = [:]
     }

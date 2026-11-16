@@ -28,7 +28,7 @@ public struct DriveHealth: Codable, Sendable, Hashable, Identifiable {
     /// Human-readable reasons behind `healthy` being false; the bit meanings are from the NVMe spec's Critical Warning byte.
     public var warnings: [String] {
         var w: [String] = []
-        if criticalWarning & 0x01 != 0 { w.append("spare capacity below threshold") }
+        if criticalWarning & 0x01 != 0 || availableSpare < spareThreshold { w.append("spare capacity below threshold") }
         if criticalWarning & 0x02 != 0 { w.append("temperature out of range") }
         if criticalWarning & 0x04 != 0 { w.append("reliability degraded") }
         if criticalWarning & 0x08 != 0 { w.append("drive is read-only") }

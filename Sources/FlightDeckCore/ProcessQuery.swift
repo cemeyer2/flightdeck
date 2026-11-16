@@ -58,19 +58,19 @@ public struct ProcessQuery: Sendable {
             switch term {
             case .compare(let f, let op, let v):
                 // Units match ProcessSample: cpu/gpu in % (cpu is % of one core), mem in bytes, disk/net in bytes/s,
-                // energy in W. A missing optional reading (gpu, net, energy) compares as 0 here, which suits the usual
-                // "above X" filters but means "gpu<1" also lists processes whose GPU use is unknown.
+                // energy in W. A missing optional reading (gpu, net, energy) never matches: "gpu<1" must not list
+                // processes whose GPU use is simply unknown.
                 let x: Double
                 switch f {
                 case "cpu": x = p.cpu
-                case "gpu": x = p.gpu ?? 0
+                case "gpu": guard let g = p.gpu else { return false }; x = g
                 case "mem", "memory": x = Double(p.memory)
                 case "disk": x = p.diskReadBps + p.diskWriteBps
-                case "net": x = (p.network?.inBps ?? 0) + (p.network?.outBps ?? 0)
+                case "net": guard let n = p.network else { return false }; x = n.inBps + n.outBps
                 case "threads": x = Double(p.threads)
                 case "pid": x = Double(p.pid)
                 case "wakeups": x = p.wakeups
-                default: x = p.energyWatts ?? 0
+                default: guard let e = p.energyWatts else { return false }; x = e
                 }
                 switch op { case ">": return x > v; case "<": return x < v; case ">=": return x >= v; case "<=": return x <= v; default: return x == v }
             case .user(let u): return p.user.lowercased() == u || p.user.lowercased().hasPrefix(u)

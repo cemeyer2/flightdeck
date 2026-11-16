@@ -125,7 +125,7 @@ public final class GPUSampler: @unchecked Sendable {
             for c in chans {
                 switch (c.group, c.subgroup) {
                 case ("Energy Model", _):
-                    if c.name != "GPU Energy" { otherEnergy += abs(c.value) }
+                    if c.name != "GPU Energy" && c.name != "GPU" { otherEnergy += abs(c.value) }
                     if c.name == "GPU Energy" || c.name == "GPU" { d.powerWatts = watts(c) }
                     else if c.name.hasPrefix("ANE") { d.anePowerWatts = (d.anePowerWatts ?? 0) + watts(c) }
                     else if c.name.hasPrefix("DRAM") { d.dramPowerWatts = (d.dramPowerWatts ?? 0) + watts(c) }

@@ -115,8 +115,21 @@ public final class ProcessSampler {
         var bsd = proc_bsdinfo()
         let r = proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &bsd, Int32(MemoryLayout<proc_bsdinfo>.size))
         // proc_pidinfo returns the number of bytes filled; anything short of the full struct is a failure.
-        guard r == Int32(MemoryLayout<proc_bsdinfo>.size) else { return nil }
-        return ProcessIdentity(pid: pid, startTime: bsd.pbi_start_tvsec * 1_000_000 + bsd.pbi_start_tvusec)
+        if r == Int32(MemoryLayout<proc_bsdinfo>.size) {
+            return ProcessIdentity(pid: pid, startTime: bsd.pbi_start_tvsec * 1_000_000 + bsd.pbi_start_tvusec)
+        }
+        // Other users' processes refuse proc_bsdinfo; the kernel's kinfo_proc record still has their start time.
+        return startTime(pid).map { ProcessIdentity(pid: pid, startTime: $0) }
+    }
+
+    /// Start time (µs since 1970) from `sysctl kern.proc.pid`, which works for every user's processes.
+    static func startTime(_ pid: Int32) -> UInt64? {
+        var info = kinfo_proc(); var size = MemoryLayout<kinfo_proc>.size
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
+        guard sysctl(&mib, 4, &info, &size, nil, 0) == 0, size > 0 else { return nil }
+        let tv = info.kp_proc.p_un.__p_starttime
+        guard tv.tv_sec > 0 else { return nil }
+        return UInt64(tv.tv_sec) * 1_000_000 + UInt64(tv.tv_usec)
     }
 
     /// Samples every process. The first call (and a process's first appearance) has no previous counters, so its rates
@@ -146,7 +159,7 @@ public final class ProcessSampler {
                 let r = proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &bsd, Int32(MemoryLayout<proc_bsdinfo>.size))
                 if r != Int32(MemoryLayout<proc_bsdinfo>.size) {
                     // shortbsdinfo works for other users' processes
-                    // It carries no start time, so the identity built below has startTime 0 for these processes.
+                    // It carries no start time, so that comes from kinfo_proc instead (below), keeping identities real.
                     // A process that fails even this has exited; PID 0 is kept regardless so kernel_task always shows.
                     var sb = proc_bsdshortinfo()
                     let r2 = proc_pidinfo(pid, PROC_PIDT_SHORTBSDINFO, 0, &sb, Int32(MemoryLayout<proc_bsdshortinfo>.size))
@@ -156,7 +169,9 @@ public final class ProcessSampler {
                 }
                 restricted = true
             }
-            let ident = ProcessIdentity(pid: pid, startTime: bsd.pbi_start_tvsec * 1_000_000 + bsd.pbi_start_tvusec)
+            var start = bsd.pbi_start_tvsec * 1_000_000 + bsd.pbi_start_tvusec
+            if start == 0, let s = Self.startTime(pid) { start = s }
+            let ident = ProcessIdentity(pid: pid, startTime: start)
 
             // rusage v6 is the source for CPU time, physical footprint, disk I/O, billed energy and idle wakeups. It
             // can succeed even where task info was refused, so it is tried for every process. The C API takes a

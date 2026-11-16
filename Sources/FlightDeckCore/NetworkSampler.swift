@@ -117,6 +117,8 @@ public final class NetworkSampler {
         return (addrs, macs)
     }
 
+    static func isVirtual(_ name: String) -> Bool { ["lo", "utun", "ipsec", "gif", "stf"].contains { name.hasPrefix($0) } }
+
     public func sample() -> NetworkSample {
         let now = Date()
         let cur = readCounters()
@@ -132,7 +134,9 @@ public final class NetworkSampler {
                 ib = r.ib >= p.0 ? Double(r.ib - p.0) / dt : 0   // counter reset: no invented spike
                 ob = r.ob >= p.1 ? Double(r.ob - p.1) / dt : 0
             }
-            if !name.hasPrefix("lo") { ti += ib; to += ob; si += r.ib; so += r.ob }
+            // Machine totals skip loopback and tunnels (VPN utun/ipsec): tunnel bytes also cross the physical interface,
+            // so counting both would double VPN traffic. Per-interface rows still show tunnels.
+            if !Self.isVirtual(name) { ti += ib; to += ob; si += r.ib; so += r.ob }
             ifs.append(InterfaceSample(name: name, inBps: ib, outBps: ob, totalIn: r.ib, totalOut: r.ob,
                                        linkSpeed: r.speed, isUp: r.up, addresses: addrs[name] ?? [], mac: macs[name]))
         }

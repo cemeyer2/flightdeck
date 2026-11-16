@@ -51,7 +51,9 @@ public enum Launchd {
     /// Reads the plists in the three standard launchd folders plus login items, then checks each absolute program path
     /// for existence and signature. Blocking (signature checks, launchctl, osascript); call off the main thread.
     public static func startupItems() -> [StartupItem] {
-        let loaded = Set(services().map(\.label))
+        // `launchctl list` as a normal user only covers this user's gui domain; Launch Daemons live in the system domain,
+        // which `launchctl print system` lists (label in the last column) without root.
+        let loaded = Set(services().map(\.label)).union(systemDomainLabels())
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         let dirs: [(String, String)] = [
             ("\(home)/Library/LaunchAgents", "Launch Agent (User)"),
@@ -96,6 +98,17 @@ public enum Launchd {
     }
 
     /// The second component of a reverse-DNS label, capitalised; the whole label if it has no dots.
+    static func systemDomainLabels() -> Set<String> {
+        guard let out = Shell.run("/bin/launchctl", ["print", "system"], timeout: 5) else { return [] }
+        var inServices = false, labels = Set<String>()
+        for line in out.split(separator: "\n") {
+            if line.hasPrefix("\tservices = {") { inServices = true; continue }
+            if inServices && line.hasPrefix("\t}") { break }
+            if inServices, let label = line.split(separator: "\t").last?.trimmingCharacters(in: .whitespaces), !label.isEmpty { labels.insert(label) }
+        }
+        return labels
+    }
+
     static func vendor(_ label: String) -> String {
         let parts = label.split(separator: ".")
         return parts.count >= 2 ? String(parts[1]).capitalized : label

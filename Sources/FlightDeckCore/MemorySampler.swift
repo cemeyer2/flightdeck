@@ -62,7 +62,9 @@ public final class MemorySampler {
                                 pageIns: 0, pageOuts: 0, compressions: 0, decompressions: 0)
         }
         // Wrapping subtraction so a momentary purgeable > internal reading can't trap.
-        let internalPages = UInt64(stats.internal_page_count) &- UInt64(stats.purgeable_count)
+        // Purgeable can momentarily exceed internal between the kernel's counter updates; clamp instead of wrapping.
+        let internalPages = UInt64(stats.internal_page_count) > UInt64(stats.purgeable_count)
+            ? UInt64(stats.internal_page_count) - UInt64(stats.purgeable_count) : 0
         let app = internalPages * page
         let wired = UInt64(stats.wire_count) * page
         let compressed = UInt64(stats.compressor_page_count) * page

@@ -10,17 +10,17 @@ public struct DiagnosticReport: Sendable, Hashable, Identifiable {
     /// or the system recorded without the process dying. cpuLimit/diskWrites/wakeups are the resource-limit violations
     /// macOS logs when a process exceeds its CPU, disk-write or wake-up budget.
     public enum Kind: String, Sendable, CaseIterable {
-        case crash = "Crash", userFault = "Fault (not fatal)", hang = "Hang", jetsam = "Killed for memory",
+        case crash = "Crash", panic = "Kernel panic", userFault = "Fault (not fatal)", hang = "Hang", jetsam = "Killed for memory",
              cpuLimit = "CPU limit", diskWrites = "Disk-write limit", wakeups = "Wake-up limit", other = "Report"
         public var icon: String {
             switch self {
-            case .crash: "xmark.octagon"; case .userFault: "exclamationmark.bubble"; case .hang: "hourglass"
+            case .crash: "xmark.octagon"; case .panic: "exclamationmark.octagon.fill"; case .userFault: "exclamationmark.bubble"; case .hang: "hourglass"
             case .jetsam: "memorychip"; case .cpuLimit: "cpu"; case .diskWrites: "internaldrive"; case .wakeups: "alarm"; case .other: "doc.text"
             }
         }
         /// Only events that hurt the user directly (crash, hang, memory kill) rise above informational.
         public var severity: Finding.Severity {
-            switch self { case .crash, .hang, .jetsam: .caution; default: .info }
+            switch self { case .panic: .warning; case .crash, .hang, .jetsam: .caution; default: .info }
         }
     }
     public var id: String { path }
@@ -83,7 +83,8 @@ public enum DiagnosticReports {
             let simulated = (hdr["is_simulated"] as? Int) == 1 || u.lastPathComponent.hasPrefix("ExcUserFault")
             let kind: DiagnosticReport.Kind
             switch bug {
-            case "309", "109", "210": kind = simulated ? .userFault : .crash
+            case "309", "109": kind = simulated ? .userFault : .crash
+            case "210": kind = .panic   // kernel panic report (the whole Mac restarted)
             case "298": kind = .jetsam
             case "288", "228": kind = .hang
             case "202": kind = .cpuLimit

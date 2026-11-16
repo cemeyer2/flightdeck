@@ -12,11 +12,19 @@ public enum StackSummary {
     static let noise = ["start", "main", "thread_start", "_pthread_start", "NSApplicationMain", "-[NSApplication run]", "RunCurrentEventLoopInMode",
                         "ReceiveNextEventCommon", "_DPSNextEvent", "CFRunLoopRunSpecific", "__CFRunLoopRun", "__CFRunLoopServiceMachPort",
                         "_BlockUntilNextEventMatchingListInModeWithFilter", "-[NSApplication(NSEventRouting) _nextEventMatchingEventMask:untilDate:inMode:dequeue:]",
-                        "_dispatch_main_queue_drain", "_dispatch_main_queue_callback_4CF", "__CFRUNLOOP_IS_SERVICING_THE_MAIN_DISPATCH_QUEUE__"]
+                        "_dispatch_main_queue_drain", "_dispatch_main_queue_callback_4CF", "__CFRUNLOOP_IS_SERVICING_THE_MAIN_DISPATCH_QUEUE__",
+                        // the run loop's own wait: a main thread sitting here is idle, not stuck
+                        "mach_msg", "mach_msg2_trap", "mach_msg_overwrite", "mach_msg2_internal", "__CFRunLoopServiceMachPort"]
 
     /// One line of sample's call graph. `depth` is the column of the sample count (deeper calls are indented further),
     /// `count` is how many samples were in that frame.
     struct Frame { var depth: Int; var count: Int; var symbol: String; var library: String? }
+
+    /// Whether a leaf frame is a blocking call. Long names match as prefixes (mach_msg2_trap, kevent_qos); short ones
+    /// ("read", "poll") only exactly or with a variant suffix ("read$NOCANCEL"), so "pthread_…" or "spread" don't count.
+    static func isWait(_ s: String) -> Bool {
+        waits.contains { w in s == w || (w.count >= 6 && s.hasPrefix(w)) || s.hasPrefix(w + "_") || s.hasPrefix(w + "$") }
+    }
 
     /// Parses call-graph lines of the form `    + ! : 1234 symbol  (in Library) + 56  [0x...]`. The tree-drawing
     /// characters (`+ ! : |`) are skipped by measuring indentation up to the first digit; lines without a count are dropped.
@@ -60,7 +68,7 @@ public enum StackSummary {
         let meaningful = path.filter { f in !noise.contains(f.symbol) && !f.symbol.hasPrefix("???") }
         let named = meaningful.suffix(4).reversed().map { f in f.library.map { "\(f.symbol) (\($0))" } ?? f.symbol }
         // Waiting vs busy is decided by the leaf (innermost frame of the heaviest path) alone.
-        let waiting = waits.contains { leaf.symbol.hasPrefix($0) || leaf.symbol.contains($0) }
+        let waiting = isWait(leaf.symbol)
         let share = Int((Double(leaf.count) / Double(total) * 100).rounded())
         // If nothing but run-loop plumbing remains, the thread was just idling in its event loop.
         let idleLoop = meaningful.isEmpty
