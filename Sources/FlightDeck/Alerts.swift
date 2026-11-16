@@ -75,7 +75,6 @@ final class Alerts: NSObject, UNUserNotificationCenterDelegate {
         // Forget occurrences that have ended, so a recurrence counts as new. Done even while alerts are disabled.
         notifiedSince = notifiedSince.filter { ids.contains($0.key) }
         guard enabled, let center else { return }
-        let muted = self.muted
         pruneMutes(seen: ids, now: now)
         for f in findings where f.severity.rawValue >= minSeverity && now.timeIntervalSince(f.since) >= after && !isMuted(f) {
             // Mark the occurrence as handled before the cooldown check: an occurrence suppressed by the cooldown is not

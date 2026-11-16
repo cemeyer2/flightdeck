@@ -68,7 +68,7 @@ struct FlightLogView: View {
         // review), where a ScrollView would come out empty.
         MaybeScroll {
             VStack(alignment: .leading, spacing: 12) {
-                TimelinePanel()
+                TimelinePanel(preview: e.demoTimeline)
                 Panel(title: "Right now", trailing: e.mode == .replay ? "at the replayed moment" : nil) {
                     if e.findings.isEmpty {
                         Label("All systems normal.", systemImage: "checkmark.seal").foregroundStyle(p.text)
@@ -148,6 +148,13 @@ struct TimelinePanel: View {
     @State private var buckets: [TimelineBucket] = []
     /// The window the buckets cover; updated together with `buckets` after each load.
     @State private var range: (Date, Date) = (Date(), Date())
+    /// Precomputed buckets (demo screenshots): shown as-is instead of loading from the black box.
+    var preview: (buckets: [TimelineBucket], range: (Date, Date))? = nil
+
+    init(preview: (buckets: [TimelineBucket], range: (Date, Date))? = nil) {
+        self.preview = preview
+        if let preview { _buckets = State(initialValue: preview.buckets); _range = State(initialValue: preview.range) }
+    }
     /// Index of the bucket under the pointer, shared by all strips so they highlight the same column.
     @State private var hover: Int?
     let n = 240
@@ -175,6 +182,7 @@ struct TimelinePanel: View {
         // Reloads every 60 s, and restarts immediately when the hour range changes (task id). The task is
         // cancelled when the view disappears, so a hidden Flight Log costs nothing.
         .task(id: hours) {
+            guard preview == nil else { return }
             while !Task.isCancelled { await load(); try? await Task.sleep(for: .seconds(60)) }
         }
     }

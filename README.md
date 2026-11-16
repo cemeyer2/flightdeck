@@ -3,6 +3,17 @@
 A native macOS task manager and system monitor (Swift, SwiftUI + AppKit). It answers "why is my Mac slow?"
 by showing which process and which subsystem is responsible.
 
+## Screenshots
+
+These are taken in demo mode, which feeds the real UI invented data (a busy "Demo Mac"), so nothing here describes a real machine.
+
+| | |
+|---|---|
+| ![Summary](docs/screenshots/summary.png) **Summary:** every subsystem at a glance, with what's wrong right now | ![Stress Map](docs/screenshots/stress-map.png) **Stress Map:** which apps are straining which parts of the Mac |
+| ![Flight Log](docs/screenshots/flight-log.png) **Flight Log:** a 24 h timeline, past incidents with stack evidence, and macOS crash/hang reports | ![Processes](docs/screenshots/processes.png) **Processes:** grouped by app, with GPU, disk, network and energy per process |
+| ![CPU](docs/screenshots/cpu.png) **Performance › CPU:** per-core load, coloured by performance/efficiency core | ![Memory](docs/screenshots/memory.png) **Performance › Memory:** composition, pressure, swap and paging |
+| ![Sleep & Wake](docs/screenshots/sleep-wake.png) **Sleep & Wake:** dark wakes, battery drain overnight, and who kept the Mac awake | ![Rules](docs/screenshots/rules.png) **Rules:** automatic responses to sustained problems |
+
 ## Build & run
 
 ```sh
@@ -168,3 +179,8 @@ suspended apps resume automatically (and when FlightDeck quits); commands time o
   table is an AppKit `NSOutlineView` updated by diffing, for low overhead.
 
 Automation hooks: `open build/FlightDeck.app --args -destination "Processes" -theme green -replayIndex 10`.
+
+**Demo mode:** `open build/FlightDeck.app --args -demo YES -skipWelcome YES` runs the UI on synthetic data
+(`Sources/FlightDeck/Demo.swift`) for screenshots. It never saves rules, never posts alerts and can't act on real
+processes. Only the views above are fully synthetic; System Info, Disk Space, Connections, the GPU tab and the process
+inspector still read this Mac, so don't screenshot those in demo mode.

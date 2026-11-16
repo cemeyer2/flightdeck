@@ -8,6 +8,7 @@ import IOKit.pwr_mgt
 public struct PowerAssertion: Codable, Sendable, Hashable {
     public var type: String          // e.g. PreventUserIdleSystemSleep
     public var name: String          // the reason the app gave
+    public init(type: String, name: String) { self.type = type; self.name = name }
     /// True for the modern system-sleep assertion types (PreventUserIdleSystemSleep, PreventSystemSleep) and the
     /// legacy NoIdleSleepAssertion name that older apps still create.
     public var preventsSystemSleep: Bool { type.contains("SystemSleep") || type == "NoIdleSleepAssertion" || type == "PreventSystemSleep" }

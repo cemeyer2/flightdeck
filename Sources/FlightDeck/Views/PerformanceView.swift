@@ -53,7 +53,7 @@ struct CPUPerf: View {
     var body: some View {
         let s = e.current?.cpu
         VStack(spacing: 12) {
-            Panel(title: "Processor", trailing: Sysctl.string("machdep.cpu.brand_string")) {
+            Panel(title: "Processor", trailing: Engine.chipName) {
                 HStack(spacing: 28) {
                     Readout(label: "Utilization", value: s?.total.value.map { String(format: "%.1f", $0) }, unit: "%")
                     Readout(label: "User", value: s?.user.value.map { String(format: "%.1f", $0) }, unit: "%", color: p.accent)

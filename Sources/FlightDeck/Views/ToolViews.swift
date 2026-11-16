@@ -240,7 +240,7 @@ struct BenchmarksView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 12) {
-                Panel(title: "Benchmarks", trailing: Sysctl.string("machdep.cpu.brand_string")) {
+                Panel(title: "Benchmarks", trailing: Engine.chipName) {
                     Text("Short synthetic tests. Close other apps for repeatable numbers. Results stay on this Mac.")
                         .font(.system(size: 11)).foregroundStyle(p.dim)
                     HStack {

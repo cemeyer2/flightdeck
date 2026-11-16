@@ -91,13 +91,16 @@ final class Engine: ObservableObject {
     // UserDefaults on every change; a copy is pushed to the queue-confined RuleEngine.
     // Rules: user automations evaluated on every sample.
     @Published var rules: [Rule] = RuleEngine.load(UserDefaults.standard.data(forKey: "rules")) {
-        didSet { UserDefaults.standard.set(RuleEngine.save(rules), forKey: "rules"); let r = rules; queue.async { [ruleEngine] in ruleEngine.rules = r } }
+        didSet {
+            guard !headless else { return }   // a headless (benchmark/demo) engine never persists anything
+            UserDefaults.standard.set(RuleEngine.save(rules), forKey: "rules"); let r = rules; queue.async { [ruleEngine] in ruleEngine.rules = r }
+        }
     }
     /// One line in the rule activity log: what fired and what the action did.
     /// One automatic action, as shown in the Rules view and kept on disk (last 200).
     struct RuleLogEntry: Identifiable, Codable { var id: UUID; var time: Date; var rule: String; var action: String; var subject: String; var result: String }
     /// Most recent rule actions first, capped at 100.
-    @Published private(set) var ruleLog: [RuleLogEntry] = Engine.loadRuleLog()
+    @Published private(set) var ruleLog: [RuleLogEntry] = []
     /// Set to a Destination raw value (optionally "Performance:<tab>") to navigate there.
     @Published var navigationRequest: String?
 
@@ -138,7 +141,8 @@ final class Engine: ObservableObject {
 
     init(headless: Bool = false) {
         self.headless = headless
-        if headless { return }
+        if headless { rules = []; return }   // never show the user's saved rules, rule log or incidents in a headless engine
+        ruleLog = Engine.loadRuleLog()
         // The first sample only establishes baselines for delta-based counters (CPU ticks, bytes); its result is discarded.
         queue.async { [sampler] in _ = sampler.sample() }   // prime deltas
         restartTimer()
@@ -342,7 +346,13 @@ final class Engine: ObservableObject {
     }
 
     /// Maps a CPU index to performance/efficiency core kind (for per-core graphs).
-    var cpuKind: (Int) -> CoreKind { { [sampler] in sampler.cpu.kind(of: $0) } }
+    /// Demo mode reads the kind from the synthetic snapshot instead, so the core layout isn't this Mac's.
+    var cpuKind: (Int) -> CoreKind {
+        if Demo.isEnabled { let cores = current?.cpu.cores ?? []; return { $0 < cores.count ? cores[$0].kind : .unknown } }
+        return { [sampler] in sampler.cpu.kind(of: $0) }
+    }
+    /// The processor name shown in panel headers; generic in demo mode so screenshots don't reveal this Mac's chip.
+    static var chipName: String? { Demo.isEnabled ? "Apple silicon" : Sysctl.string("machdep.cpu.brand_string") }
 
     /// The timer always fires at `interval`; when no window is visible `tick()` skips ticks to approximate
     /// `backgroundInterval`. 10% tolerance lets macOS coalesce wakeups for lower energy use.
@@ -396,6 +406,16 @@ final class Engine: ObservableObject {
     }
 
     /// Used by UIBench (no timers): bypasses the queue, analysis and visibility staging entirely.
+    /// Demo mode only: timeline buckets and a sleep history to show instead of reading the black box / power log.
+    @Published var demoTimeline: (buckets: [TimelineBucket], range: (Date, Date))?
+    @Published var demoSleep: SleepReport?
+
+    /// Headless only: show the given state (for demo screenshots). Nothing is persisted.
+    func demoInject(incidents: [Incident], reports: [DiagnosticReport], rules: [Rule], ruleLog: [RuleLogEntry]) {
+        guard headless else { return }
+        self.incidents = incidents; self.reports = reports; self.rules = rules; self.ruleLog = ruleLog
+    }
+
     /// Headless: push a snapshot (with its findings) as if it had just been sampled.
     func feed(_ s: Snapshot, findings: [Finding]) {
         processHistory.record(s.processes)
@@ -526,7 +546,7 @@ final class Engine: ObservableObject {
 
     func saveRecording() {
         guard !recorded.isEmpty else { return }
-        save(FlightDeckCore.Trace(host: Host.current().localizedName ?? "Mac", model: Sysctl.string("hw.model") ?? "",
+        save(FlightDeckCore.Trace(host: Demo.isEnabled ? "Demo Mac" : Host.current().localizedName ?? "Mac", model: Demo.isEnabled ? "" : Sysctl.string("hw.model") ?? "",
                                   interval: interval, frames: recorded), prefix: "Recording")
     }
 

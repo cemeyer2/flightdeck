@@ -8,6 +8,7 @@ import FlightDeckCore
 /// Reads the log on a detached utility task when the view appears, when the period changes, and on Refresh;
 /// there is no periodic refresh. A nil report (pmset failed or produced nothing parseable) shows a message.
 struct SleepView: View {
+    @EnvironmentObject var e: Engine
     @Environment(\.palette) var p
     @State private var report: SleepReport?
     @State private var loading = false
@@ -49,7 +50,7 @@ struct SleepView: View {
                 }
             }.padding(16)
         }
-        .task(id: days) { await load() }
+        .task(id: days) { if let demo = e.demoSleep { report = demo } else { await load() } }
     }
 
     /// `SleepLog.read` shells out to pmset (can take seconds on a long log), so it runs off the main actor.

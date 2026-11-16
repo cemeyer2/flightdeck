@@ -73,8 +73,10 @@ struct ContentView: View {
             if parts.count > 1, let t = PerfTab(rawValue: parts[1]) { perfTab = t }
         }
         .onAppear {
+            if Demo.isEnabled && engine.demoSleep == nil { Demo.start(engine) }   // screenshot mode: synthetic data only
             // The inspector WindowGroup is opened by value (a ProcessIdentity), which only a SwiftUI view can do.
-            AppActions.openInspector = { openWindow(id: "inspector", value: $0) }
+            // (Not in demo mode: demo PIDs are invented and could match real processes, whose details must not be shown.)
+            AppActions.openInspector = Demo.isEnabled ? nil : { openWindow(id: "inspector", value: $0) }
             // automation hook: `-inspectPID 123` opens the inspector for that process
             let ipid = UserDefaults.standard.integer(forKey: "inspectPID")
             if ipid > 0, let id = ProcessSampler.identity(of: Int32(ipid)) {

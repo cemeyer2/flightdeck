@@ -10,7 +10,9 @@ import FlightDeckCore
 struct FlightDeckApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
     /// The one Engine for the whole app; all windows and the menu bar extra observe the same instance.
-    @StateObject private var engine = Engine()
+    /// In demo mode (`-demo YES`, for screenshots) the engine is headless and fed only synthetic data: nothing on this
+    /// Mac is sampled, read from its logs, or written.
+    @StateObject private var engine = Engine(headless: Demo.isEnabled)
     @AppStorage("theme") private var theme: ThemeID = .dark
     @AppStorage("dockMode") private var dockMode: DockMode = .cpuHistory
     @AppStorage("menuBarEnabled") private var menuBarEnabled = true
@@ -122,7 +124,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Activation policy is set explicitly so the app gets a Dock icon and menus even when launched as a bare binary.
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
-        Alerts.shared.start()
+        if !Demo.isEnabled { Alerts.shared.start() }   // demo mode never posts notifications
     }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
         if !hasVisibleWindows { AppActions.showMain() }

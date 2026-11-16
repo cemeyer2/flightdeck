@@ -30,6 +30,10 @@ public struct DiagnosticReport: Sendable, Hashable, Identifiable {
     public var time: Date
     /// Short detail when the header has one (exception type / signal, writes, CPU used, hang duration).
     public var summary: String?
+
+    public init(path: String, kind: Kind, process: String, time: Date, summary: String?) {
+        self.path = path; self.kind = kind; self.process = process; self.time = time; self.summary = summary
+    }
 }
 
 public enum DiagnosticReports {
