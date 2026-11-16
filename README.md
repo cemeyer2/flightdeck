@@ -49,6 +49,10 @@ and TCP state, threads (CPU, state, priority, times), the environment, and call-
 `/usr/bin/sample` to see why it's busy or hung. Actions: quit, force quit, suspend, resume, lower priority (nice).
 Anything macOS doesn't let a normal user read for other users' processes is shown as unavailable.
 
+**Connection quality** (Performance › Network): Wi-Fi signal, noise, SNR, link rate, channel, band, width, PHY and
+security from CoreWLAN, plus router and DNS servers, all local. An opt-in probe (off by default) pings the router and
+an internet host every 10 s, so Flightdeck can tell "your Wi-Fi is the problem" from "your internet provider is".
+
 Six themes: Light, Dark, Green, Amber, Blue, Mono.
 
 **Live Dock icon:** right-click the Dock icon (or use Monitor › Dock Icon, or Settings) to pick a mode:
@@ -65,7 +69,7 @@ Flight Recorder is recording. The static `AppIcon.icns` is rendered by the same 
 - **Gaps, not interpolation.** Pausing or missed samples are stored as `nil` and drawn as line breaks, both live and in replay.
 - **Self-monitoring.** Flightdeck appears in its own process list by default (Settings → toggle).
 - **Identity-safe actions.** Signals are sent only if the PID still has the same start time (`ProcessIdentity`).
-- **Private by design.** Flightdeck makes no network requests at all.
+- **Private by design.** Flightdeck sends no data anywhere. By default it makes no network requests at all; the only exception is the opt-in latency probe (Settings › Network quality), which pings your router and one host you choose.
 
 ## Known limits
 

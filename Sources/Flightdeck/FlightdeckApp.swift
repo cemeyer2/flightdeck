@@ -152,7 +152,15 @@ struct SettingsView: View {
                     Button("Clear…") { confirmClear = true }
                 }
             }
-            Text("Flightdeck sends no data anywhere. All measurements stay on this Mac.")
+            Section("Network quality") {
+                Toggle("Measure latency and packet loss", isOn: $engine.netProbeEnabled)
+                TextField("Internet host to ping", text: $engine.netProbeHost).disabled(!engine.netProbeEnabled)
+                Text("Off by default. When on, Flightdeck pings your router and this host every 10 seconds (5 small ICMP packets each) to tell Wi-Fi problems from internet-provider problems.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            Text(engine.netProbeEnabled
+                 ? "Flightdeck sends no data anywhere. The only network traffic it creates is the latency pings above. All measurements stay on this Mac."
+                 : "Flightdeck sends no data anywhere and makes no network requests. All measurements stay on this Mac.")
                 .font(.caption).foregroundStyle(.secondary)
         }
         .padding(20).frame(width: 480)

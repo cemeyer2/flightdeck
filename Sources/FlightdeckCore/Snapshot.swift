@@ -11,6 +11,10 @@ public struct Snapshot: Codable, Sendable {
     public var power: PowerSample
     public var gpu: Measured<Double>
     public var processes: [ProcessSample]
+    // Optional so traces recorded before these existed still decode.
+    public var wifi: WiFiInfo? = nil
+    /// Latest opt-in probe results (empty when probing is off).
+    public var latency: [LatencyResult]? = nil
 }
 
 /// Not thread-safe; the app confines it to one serial queue.
@@ -22,6 +26,8 @@ public final class Sampler: @unchecked Sendable {
     let power = PowerSampler()
     public let processes = ProcessSampler()
     let processNetwork = ProcessNetworkSampler()
+    /// Opt-in; its latest results are attached to each snapshot while running.
+    public let probe = NetworkProbe()
     public init() {}
 
     public func sample() -> Snapshot {
@@ -32,9 +38,10 @@ public final class Sampler: @unchecked Sendable {
             }
             processNetwork.retain(pids: Set(procs.map(\.pid)))
         }
+        let lat = probe.results
         return Snapshot(time: Date(), cpu: cpu.sample(), memory: memory.sample(), disk: disk.sample(),
                         network: network.sample(), power: power.sample(), gpu: SystemInfo.gpuUtilization(),
-                        processes: procs)
+                        processes: procs, wifi: WiFiInfo.current(), latency: lat.isEmpty ? nil : lat)
     }
 }
 

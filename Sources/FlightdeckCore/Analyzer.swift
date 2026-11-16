@@ -214,6 +214,26 @@ public final class Analyzer {
                 "Frequent wake-ups keep the CPU from resting and cost battery, even at low CPU %.", "Processes")
         }
 
+        // Network quality: Wi-Fi signal (local) and, when the opt-in probe runs, where the trouble is
+        if let w = s.wifi, w.rssi < -75 {
+            add("wifi-weak", .info, "wifi.exclamationmark", "Wi-Fi signal is weak (\(w.rssi) dBm)",
+                "Signal-to-noise \(w.snr) dB, link \(Int(w.txRate)) Mbps. Moving closer to the router or switching to 5/6 GHz usually helps.",
+                "Performance:Network")
+        }
+        let fresh = (s.latency ?? []).filter { t.timeIntervalSince($0.time) < 45 }
+        let router = fresh.first { $0.role == "Router" }, internet = fresh.first { $0.role == "Internet" }
+        func bad(_ r: LatencyResult?, ms: Double) -> Bool { r.map { $0.loss >= 5 || ($0.avgMs ?? 0) > ms } ?? false }
+        func show(_ r: LatencyResult) -> String { String(format: "%.0f%% loss", r.loss) + (r.avgMs.map { String(format: ", %.0f ms", $0) } ?? "") }
+        if let router, bad(router, ms: 50) {
+            add("net-local", .caution, "wifi.exclamationmark", "Your Wi-Fi or local network is unhealthy (router: \(show(router)))",
+                "The problem is between this Mac and the router" + (s.wifi.map { ", Wi-Fi signal \($0.quality.lowercased()) (\($0.rssi) dBm)" } ?? "") + ".",
+                "Performance:Network")
+        } else if let internet, bad(internet, ms: 150) {
+            add("net-internet", .caution, "globe", "Internet connection is unhealthy (\(show(internet)))",
+                router.map { "Your local network is fine (router: \(show($0))), so the problem is likely your internet provider." } ?? nil,
+                "Performance:Network")
+        }
+
         // Compared with what's normal for this Mac
         if let b = baseline {
             if let p = b.cpu, let c = cpuSlow.value, c > 40, c > max(p.p90 * 1.5, p.p90 + 25) {

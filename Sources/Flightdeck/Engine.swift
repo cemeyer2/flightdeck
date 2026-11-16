@@ -19,6 +19,9 @@ final class Engine: ObservableObject {
     @AppStorage("includeSelf") var includeSelf = true
     @AppStorage("blackBoxEnabled") var blackBoxEnabled = true
     @AppStorage("appCPUThreshold") var appCPUThreshold = 80.0 { didSet { applyThresholds() } }
+    /// Opt-in: pings the router and `netProbeHost` every 10 s. Off by default (privacy).
+    @AppStorage("netProbeEnabled") var netProbeEnabled = false { didSet { applyProbe() } }
+    @AppStorage("netProbeHost") var netProbeHost = "1.1.1.1" { didSet { applyProbe() } }
 
     // Flight Recorder
     @Published private(set) var mode: Mode = .live
@@ -66,10 +69,18 @@ final class Engine: ObservableObject {
         }
         incidents = incidentLog.incidents
         applyThresholds()
+        applyProbe()
         NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: nil) { [blackBox, blackBoxQueue, queue, incidentLog] _ in
             blackBoxQueue.sync { blackBox.flush() }
             queue.sync { incidentLog.closeAll(at: Date()); incidentLog.save() }
         }
+    }
+
+    private func applyProbe() {
+        let p = sampler.probe
+        p.stop()
+        p.internetHost = netProbeHost.trimmingCharacters(in: .whitespaces).isEmpty ? "1.1.1.1" : netProbeHost
+        if netProbeEnabled { p.start() }
     }
 
     private func applyThresholds() {

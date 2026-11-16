@@ -87,6 +87,7 @@ struct NetworkPerf: View {
     var body: some View {
         let n = e.current?.network
         VStack(spacing: 12) {
+            ConnectionQualityPanel()
             Panel(title: "Bandwidth") {
                 HStack(spacing: 28) {
                     Readout(label: "Receive", value: n?.inBps.value.map(Fmt.bits), color: p.accent)
@@ -204,6 +205,74 @@ struct GPUPerf: View {
                 Readout(label: "Utilization", value: e.current?.gpu.value.map { String(format: "%.0f", $0) }, unit: "%")
                 VFDMeter(fraction: e.current?.gpu.value.map { $0 / 100 }, segments: 40)
                 HistoryGraph(traces: [GraphTrace(name: "g", values: e.series { $0.gpu.value }, color: p.accent)], maxValue: 100).frame(height: 220)
+            }
+        }
+    }
+}
+
+/// Wi-Fi link, router and DNS, and (opt-in) latency / loss to the router and the internet.
+struct ConnectionQualityPanel: View {
+    @EnvironmentObject var e: Engine
+    @Environment(\.palette) var p
+    @State private var route: (gateway: String, interface: String)?
+    @State private var dns: [String] = []
+
+    var body: some View {
+        let s = e.current
+        Panel(title: "Connection quality", trailing: route.map { "via \($0.interface)" }) {
+            if let w = s?.wifi {
+                HStack(spacing: 24) {
+                    Readout(label: "Wi-Fi signal", value: w.quality, color: w.rssi < -75 ? p.warn : p.accent)
+                    Readout(label: "RSSI", value: "\(w.rssi)", unit: "dBm")
+                    Readout(label: "Noise", value: "\(w.noise)", unit: "dBm")
+                    Readout(label: "SNR", value: "\(w.snr)", unit: "dB", color: w.snr < 20 ? p.warn : nil)
+                    Readout(label: "Link rate", value: String(format: "%.0f", w.txRate), unit: "Mbps")
+                    Spacer()
+                }
+                HistoryGraph(traces: [GraphTrace(name: "rssi", values: e.series { $0.wifi.map { Double($0.rssi + 100) } }, color: p.accent),
+                                      GraphTrace(name: "noise", values: e.series { $0.wifi.map { Double($0.noise + 100) } }, color: p.accent2, fill: false)],
+                             maxValue: 80, format: { String(format: "%.0f dBm", $0 - 100) }).frame(height: 90)
+                Text([w.phy, w.band, w.width, w.channel.map { "channel \($0)" }, w.security, "network name: " + (w.ssid ?? "hidden by macOS (needs Location permission)")]
+                    .compactMap { $0 }.joined(separator: " · "))
+                    .font(.system(size: 11, design: .monospaced)).foregroundStyle(p.dim)
+            } else {
+                Text("Not on Wi-Fi (or Wi-Fi is off).").foregroundStyle(p.dim)
+            }
+            Text("Router \(route?.gateway ?? "—") · DNS \(dns.isEmpty ? "—" : dns.joined(separator: ", "))")
+                .font(.system(size: 11, design: .monospaced)).foregroundStyle(p.dim).textSelection(.enabled)
+            Divider()
+            if e.netProbeEnabled {
+                let lat = s?.latency ?? []
+                HStack(spacing: 24) {
+                    ForEach(lat) { r in
+                        Readout(label: "\(r.role) latency", value: r.avgMs.map { String(format: "%.0f", $0) }, unit: "ms",
+                                color: (r.avgMs ?? 999) > (r.role == "Router" ? 50 : 150) ? p.warn : nil)
+                        Readout(label: "Jitter", value: r.jitterMs.map { String(format: "%.1f", $0) }, unit: "ms")
+                        Readout(label: "Loss", value: String(format: "%.0f", r.loss), unit: "%", color: r.loss >= 5 ? p.crit : nil)
+                    }
+                    if lat.isEmpty { Text("Measuring…").foregroundStyle(p.dim) }
+                    Spacer()
+                }
+                HistoryGraph(traces: [
+                    GraphTrace(name: "router", values: e.series { $0.latency?.first { $0.role == "Router" }?.avgMs }, color: p.accent),
+                    GraphTrace(name: "internet", values: e.series { $0.latency?.first { $0.role == "Internet" }?.avgMs }, color: p.accent2, fill: false)],
+                             minHeadroom: 20, format: { String(format: "%.0f ms", $0) }).frame(height: 90)
+                Text("Pinging your router and \(e.netProbeHost) every 10 s (5 small packets each). Router trouble means Wi-Fi or local network; internet-only trouble means your provider.")
+                    .font(.caption).foregroundStyle(p.dim)
+            } else {
+                HStack {
+                    Text("Latency and packet-loss measurement is off. When on, Flightdeck pings your router and one internet host (\(e.netProbeHost)) every 10 seconds. Nothing else is sent.")
+                        .font(.caption).foregroundStyle(p.dim).fixedSize(horizontal: false, vertical: true)
+                    Spacer()
+                    Button("Turn On") { e.netProbeEnabled = true }
+                }
+            }
+        }
+        .task {
+            while !Task.isCancelled {
+                let r = await Task.detached { (NetworkConfig.defaultRoute(), NetworkConfig.dnsServers()) }.value
+                route = r.0; dns = r.1
+                try? await Task.sleep(for: .seconds(15))
             }
         }
     }
