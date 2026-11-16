@@ -8,13 +8,14 @@ import FlightDeckCore
 /// `Engine.navigationRequest`, finding destinations, notification payloads and the `-destination` launch argument,
 /// so renaming a case changes those strings too.
 enum Destination: String, CaseIterable, Identifiable, Hashable {
-    case summary = "Summary", flightLog = "Flight Log", rules = "Rules", performance = "Performance", processes = "Processes", systemInfo = "System Info",
+    case summary = "Summary", stressMap = "Stress Map", flightLog = "Flight Log", rules = "Rules", performance = "Performance", processes = "Processes", systemInfo = "System Info",
          startup = "Startup Apps", users = "Users", services = "Services", power = "Power & Freq", sleep = "Sleep & Wake",
          connections = "Connections", apps = "Installed Apps", diskSpace = "Disk Space", benchmarks = "Benchmarks"
     var id: String { rawValue }
     var icon: String {
         switch self {
         case .summary: "gauge.with.dots.needle.50percent"
+        case .stressMap: "circle.hexagongrid"
         case .flightLog: "list.bullet.clipboard"
         case .rules: "bolt.badge.automatic"
         case .performance: "waveform.path.ecg"
@@ -93,6 +94,7 @@ struct ContentView: View {
     @ViewBuilder var detail: some View {
         switch selection {
         case .summary: SummaryView()
+        case .stressMap: StressMapView()
         case .flightLog: FlightLogView()
         case .rules: RulesView()
         case .performance: PerformanceView()

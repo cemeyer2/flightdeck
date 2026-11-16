@@ -27,6 +27,7 @@ enum UIBench {
             }
         }
         out("summary", SummaryView())
+        out("stressmap", height: 900, StressMapView())
         out("welcome", height: 640, WelcomeView())
         out("sleep", height: 1500, SleepPreview())
         out("flightlog", FlightLogView())
