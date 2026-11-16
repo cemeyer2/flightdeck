@@ -96,7 +96,9 @@ struct ProcessOutline: NSViewRepresentable {
         let key = "\(frameTime?.timeIntervalSince1970 ?? 0)|\(tree)|\(byApp)|\(filter)|\(processes.count)|\(palette.id)"
         let selChanged = c.parent.selection != selection
         c.parent = self
-        if key != c.lastKey { c.lastKey = key; c.rebuild() } else if selChanged { c.applySelection() }
+        // Don't rebuild a table nobody can see (window hidden, minimised or fully covered); catch up when visible.
+        let visible = sv.window?.occlusionState.contains(.visible) ?? true
+        if key != c.lastKey && visible { c.lastKey = key; c.rebuild() } else if selChanged { c.applySelection() }
     }
 
     final class Coordinator: NSObject, NSOutlineViewDataSource, NSOutlineViewDelegate, NSMenuDelegate {
@@ -113,6 +115,9 @@ struct ProcessOutline: NSViewRepresentable {
         /// Stable synthetic identities for app group rows (negative PIDs never collide with real ones).
         var groupIDs: [String: Int32] = [:]
         var groupItems: [ProcessIdentity: ProcItem] = [:]
+        /// Parent of every nested row at the last rebuild, to detect re-parenting.
+        var lastParents: [ProcessIdentity: ProcessIdentity] = [:]
+        var oldIDs: Set<ProcessIdentity> = []
         func groupIdentity(_ key: String) -> ProcessIdentity {
             if groupIDs[key] == nil { groupIDs[key] = -Int32(groupIDs.count + 1) }
             return ProcessIdentity(pid: groupIDs[key]!, startTime: 0)
@@ -155,6 +160,8 @@ struct ProcessOutline: NSViewRepresentable {
                 return item
             }
         }
+
+        static let cellFont = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
 
         @objc func doubleClicked(_ ov: NSOutlineView) {
             guard ov.clickedRow >= 0, let it = ov.item(atRow: ov.clickedRow) as? ProcItem else { return }
@@ -215,16 +222,29 @@ struct ProcessOutline: NSViewRepresentable {
                 func sortRec(_ a: [ProcItem]) -> [ProcItem] { let s = sorted(a); s.forEach { $0.children = sortRec($0.children) }; return s }
                 roots = sortRec(r)
             }
-            // Incremental sync assumes rows keep their parent; in Apps mode a process moves into a group as soon
-            // as a sibling appears, so reload there (expansion and selection are restored below).
-            if lastSort != sortKey() || ov.numberOfRows == 0 || parent.byApp {
+            // Incremental sync (cheap: reuses cells, animates moves) assumes rows keep their parent. When any row
+            // changed parent (e.g. a process joins a new app group, or is re-parented to launchd), reload instead.
+            var parents: [ProcessIdentity: ProcessIdentity] = [:]
+            func walk(_ items: [ProcItem], _ parentID: ProcessIdentity?) {
+                for it in items { if let parentID { parents[it.s.identity] = parentID }; walk(it.children, it.s.identity) }
+            }
+            walk(roots, nil)
+            let reparented = parents.contains { id, p in lastParents[id].map { $0 != p } ?? (lastParents.keys.contains(id) == false && oldIDs.contains(id)) }
+                || lastParents.contains { id, _ in parents[id] == nil && next[id] != nil }
+            lastParents = parents; oldIDs = Set(items.keys)
+            if lastSort != sortKey() || ov.numberOfRows == 0 || reparented {
                 ov.reloadData()
                 for id in expanded { if let it = items[id] { ov.expandItem(it) } }
                 lastSort = sortKey()
             } else {
-                ov.beginUpdates()
-                sync(ov, parent: nil, old: oldRoots, new: roots, oldChildren: oldChildren)
-                ov.endUpdates()
+                // No animation: rows re-sort every second, and animated moves both overlap visually and cost a
+                // full layout pass per frame.
+                NSAnimationContext.runAnimationGroup { ctx in
+                    ctx.duration = 0; ctx.allowsImplicitAnimation = false
+                    ov.beginUpdates()
+                    sync(ov, parent: nil, old: oldRoots, new: roots, oldChildren: oldChildren)
+                    ov.endUpdates()
+                }
                 let visible = ov.rows(in: ov.visibleRect)
                 if visible.length > 0 {
                     ov.reloadData(forRowIndexes: IndexSet(integersIn: visible.location..<(visible.location + visible.length)),
@@ -277,7 +297,7 @@ struct ProcessOutline: NSViewRepresentable {
 
         func outlineView(_ ov: NSOutlineView, viewFor col: NSTableColumn?, item: Any) -> NSView? {
             guard let col, let c = ProcColumn(rawValue: col.identifier.rawValue), let it = item as? ProcItem else { return nil }
-            let font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+            let font = Self.cellFont
             if c == .cpu {
                 let v = (ov.makeView(withIdentifier: col.identifier, owner: nil) as? BarCellView) ?? BarCellView()
                 v.identifier = col.identifier
