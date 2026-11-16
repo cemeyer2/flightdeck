@@ -17,6 +17,8 @@ struct ProcessesView: View {
     /// Pending confirmation for Quit / Force Quit: (process, signal, verb).
     @State private var confirm: (ProcessSample, Int32, String)?
     @State private var error: String?
+    /// App-level quit awaiting confirmation (the app, and whether it's a force quit).
+    @State private var confirmApp: (NSRunningApplication, Bool)?
 
     /// The processes handed to the outline, optionally only the current user's.
     var visibleProcesses: [ProcessSample] {
@@ -37,8 +39,9 @@ struct ProcessesView: View {
         // App rows quit immediately, as the Dock's Quit does: the app itself can still prompt to save.
         if s.pid < 0 {   // app group row
             let app = runningApp(s)
-            m.addItem(ClosureMenuItem("Quit App", enabled: app != nil) { app?.terminate() })
-            m.addItem(ClosureMenuItem("Force Quit App", enabled: app != nil) { app?.forceTerminate() })
+            // Same confirmation as per-process Quit: quitting an app group can lose unsaved work in any of its windows.
+            m.addItem(ClosureMenuItem("Quit App…", enabled: app != nil) { if let app { confirmApp = (app, false) } })
+            m.addItem(ClosureMenuItem("Force Quit App…", enabled: app != nil) { if let app { confirmApp = (app, true) } })
             m.addItem(ClosureMenuItem("Reveal in Finder") { NSWorkspace.shared.selectFile(AppUsage.bundle(of: s.path), inFileViewerRootedAtPath: "") })
             return m
         }
@@ -83,6 +86,14 @@ struct ProcessesView: View {
             Button(confirm?.2 ?? "OK", role: .destructive) { if let c = confirm { send(c.1, c.0) }; confirm = nil }
             Button("Cancel", role: .cancel) { confirm = nil }
         } message: { Text("PID \(confirm?.0.pid ?? 0). Unsaved work in this process may be lost.") }
+        .alert("\(confirmApp?.1 == true ? "Force Quit" : "Quit") “\(confirmApp?.0.localizedName ?? "")”?",
+               isPresented: Binding(get: { confirmApp != nil }, set: { if !$0 { confirmApp = nil } })) {
+            Button(confirmApp?.1 == true ? "Force Quit" : "Quit", role: .destructive) {
+                if let (app, force) = confirmApp { _ = force ? app.forceTerminate() : app.terminate() }
+                confirmApp = nil
+            }
+            Button("Cancel", role: .cancel) { confirmApp = nil }
+        } message: { Text(confirmApp?.1 == true ? "Unsaved work in all of its windows will be lost." : "The app will ask to save any unsaved work.") }
         .alert("Action failed", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) { Button("OK") {} } message: { Text(error ?? "") }
     }
 
