@@ -11,6 +11,10 @@ public struct FanReading: Codable, Sendable, Hashable, Identifiable {
     public var minRPM: Double?
     public var maxRPM: Double?
     public var targetRPM: Double?
+    /// Public so demo mode and tests can describe a fan this Mac may not have.
+    public init(index: Int, rpm: Double, minRPM: Double?, maxRPM: Double?, targetRPM: Double?) {
+        self.index = index; self.rpm = rpm; self.minRPM = minRPM; self.maxRPM = maxRPM; self.targetRPM = targetRPM
+    }
     /// Current speed as a 0...1 fraction of the fan's maximum (for gauges); nil without a max.
     public var fraction: Double? { maxRPM.map { max(0, min(rpm / max($0, 1), 1)) } }
 }
