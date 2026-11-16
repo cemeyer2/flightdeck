@@ -47,6 +47,20 @@ enum UIBench {
                 out(d.rawValue.replacingOccurrences(of: " ", with: "_"), height: 1300, v)
             }
         }
+        // Checkup, Peripherals and the listening-ports panel read the real machine; their loaders run asynchronously,
+        // so the run loop is spun until each has a result (Checkup waits on the black box and ~17 tools).
+        CheckupModel.shared.run(engine: e)
+        let until = Date().addingTimeInterval(30)
+        while CheckupModel.shared.running && Date() < until { RunLoop.main.run(until: Date().addingTimeInterval(0.2)) }
+        out("checkup", height: 2000, CheckupView())
+        // The loaders are started and awaited here and handed to the views, since ImageRenderer doesn't run onAppear.
+        func ready<T>(_ l: Loader<T>) -> Loader<T> {
+            l.load(); let until = Date().addingTimeInterval(30)
+            while l.value == nil && Date() < until { RunLoop.main.run(until: Date().addingTimeInterval(0.2)) }
+            return l
+        }
+        out("peripherals", height: 1500, PeripheralsView(loader: ready(Loader { Peripherals.collect() })))
+        out("listening_ports", height: 420, ListeningPortsPanel(loader: ready(Loader { ListeningPorts.scan() })).frame(maxHeight: .infinity, alignment: .top))
         // The inspector is rendered for FlightDeck's own process, which is always present.
         if let me = e.current?.processes.first(where: { $0.pid == getpid() }) {
             let model = InspectorModel(identity: me.identity, engine: e)
