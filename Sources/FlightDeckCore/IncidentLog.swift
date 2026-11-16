@@ -22,6 +22,8 @@ public final class IncidentLog {
     public var minDuration: TimeInterval = 20
     public var retention: TimeInterval = 7 * 86_400
     public var maxCount = 1000
+    /// Findings that are usually intentional (e.g. an app keeping the Mac awake) aren't incidents.
+    public var excludedPrefixes = ["awake:"]
     private var open: [String: Int] = [:]   // finding id -> index of ongoing incident
     private var dirty = false
     /// Bumped on every change, so callers can skip copying an unchanged log.
@@ -50,7 +52,7 @@ public final class IncidentLog {
         for (id, idx) in open where !ids.contains(id) {
             incidents[idx].end = now; open[id] = nil; dirty = true; revision += 1
         }
-        for f in findings where now.timeIntervalSince(f.since) >= minDuration {
+        for f in findings where now.timeIntervalSince(f.since) >= minDuration && !excludedPrefixes.contains(where: { f.id.hasPrefix($0) }) {
             if let idx = open[f.id] {
                 if f.severity > incidents[idx].severity { incidents[idx].severity = f.severity; dirty = true; revision += 1 }
                 incidents[idx].title = f.title; incidents[idx].detail = f.detail

@@ -90,7 +90,8 @@ public final class DiskSampler {
         var tr = 0.0, tw = 0.0
         for (name, v) in cur.sorted(by: { $0.key < $1.key }) {
             let p = previous[name] ?? v
-            let r = Double(v.0 &- p.0) / dt, w = Double(v.1 &- p.1) / dt
+            // a device's counters can reset (e.g. a disk image remounted): that is 0, not a 50 PB/s spike
+            let r = v.0 >= p.0 ? Double(v.0 - p.0) / dt : 0, w = v.1 >= p.1 ? Double(v.1 - p.1) / dt : 0
             tr += r; tw += w
             devices.append(DiskDevice(name: name, readBps: r, writeBps: w, totalRead: v.0, totalWritten: v.1))
         }

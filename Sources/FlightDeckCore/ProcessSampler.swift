@@ -128,11 +128,12 @@ public final class ProcessSampler {
             var cpu = 0.0, rb = 0.0, wb = 0.0, wk = 0.0
             var energy: Double? = nil
             if let dt, let p = prev[ident] {
-                cpu = Double(cur.cpuNs &- p.cpuNs) / 1e9 / dt * 100
-                rb = Double(cur.r &- p.r) / dt
-                wb = Double(cur.w &- p.w) / dt
-                wk = Double(cur.wake &- p.wake) / dt
-                if ruOK { energy = Double(cur.energy &- p.energy) / 1e9 / dt }   // nJ -> W
+                func d(_ a: UInt64, _ b: UInt64) -> Double { a >= b ? Double(a - b) : 0 }   // never a wrap-around spike
+                cpu = d(cur.cpuNs, p.cpuNs) / 1e9 / dt * 100
+                rb = d(cur.r, p.r) / dt
+                wb = d(cur.w, p.w) / dt
+                wk = d(cur.wake, p.wake) / dt
+                if ruOK { energy = d(cur.energy, p.energy) / 1e9 / dt }   // nJ -> W
             }
             let comm = withUnsafeBytes(of: bsd.pbi_comm) { String(decoding: $0.prefix(while: { $0 != 0 }), as: UTF8.self) }
             let (name, path) = names(pid: pid, ident: ident, comm: comm)

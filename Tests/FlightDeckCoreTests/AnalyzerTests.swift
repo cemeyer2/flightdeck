@@ -224,3 +224,12 @@ final class ThrottleTests: XCTestCase {
         XCTAssertFalse(run(mhz: 1800, hot: 60), "cool and slow is just power management")
     }
 }
+
+final class NoiseTests: XCTestCase {
+    func testAwakeIsNotAnIncident() {
+        let log = IncidentLog(url: nil); let t0 = Date(timeIntervalSince1970: 12_000_000)
+        let f = Finding(id: "awake:/Applications/x.app", severity: .info, icon: "x", title: "x keeps the display awake", detail: nil, since: t0, destination: nil)
+        for i in 0..<60 { log.update([f], at: t0.addingTimeInterval(Double(i))) }
+        XCTAssertTrue(log.incidents.isEmpty)
+    }
+}
