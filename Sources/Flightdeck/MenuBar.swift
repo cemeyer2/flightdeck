@@ -11,6 +11,7 @@ enum MenuBarStyle: String, CaseIterable, Identifiable {
 /// Global hooks for things AppKit callbacks need but only SwiftUI views can do.
 @MainActor enum AppActions {
     static var openMain: (() -> Void)?
+    static var openInspector: ((ProcessIdentity) -> Void)?
     static func showMain(navigate: String? = nil, engine: Engine? = nil) {
         NSApp.activate(ignoringOtherApps: true)
         if let w = NSApp.windows.first(where: { $0.identifier?.rawValue.hasPrefix("main") == true && $0.canBecomeMain }) {

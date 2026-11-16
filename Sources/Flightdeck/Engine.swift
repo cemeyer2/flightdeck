@@ -47,6 +47,8 @@ final class Engine: ObservableObject {
 
     // Black box: always-on rolling recorder, written off the sampling queue.
     let blackBox = BlackBox(dir: BlackBox.defaultDirectory)
+    /// Recent history of every process (for the inspector).
+    let processHistory = ProcessHistory()
     private let blackBoxQueue = DispatchQueue(label: "flightdeck.blackbox", qos: .background)
     // Confined to `queue`.
     nonisolated private let analyzer = Analyzer()
@@ -92,6 +94,7 @@ final class Engine: ObservableObject {
         queue.async { [sampler, analyzer, incidentLog] in
             sampler.processes.includeSelf = includeSelf
             let s = sampler.sample()
+            self.processHistory.record(s.processes)
             let found = analyzer.ingest(s)
             let fresh = incidentLog.update(found, at: s.time)
             if s.time.timeIntervalSince(self.lastIncidentSave) > 60 { incidentLog.save(); self.lastIncidentSave = s.time }
@@ -120,6 +123,7 @@ final class Engine: ObservableObject {
     }
 
     private func pushGap() {
+        processHistory.gap()
         DockIconController.shared.gap()
         if mode == .live { frames.removeFirst(); frames.append(nil) }
     }

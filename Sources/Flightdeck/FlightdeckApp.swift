@@ -51,6 +51,13 @@ struct FlightdeckApp: App {
                 Picker("Dock Icon", selection: $dockMode) { ForEach(DockMode.allCases) { Text($0.rawValue).tag($0) } }
             }
         }
+        WindowGroup("Inspector", id: "inspector", for: ProcessIdentity.self) { $id in
+            InspectorWindow(identity: id)
+                .environmentObject(engine)
+                .environment(\.palette, Palette.of(theme))
+                .preferredColorScheme(Palette.of(theme).scheme)
+        }
+        .defaultSize(width: 900, height: 760)
         MenuBarExtra(isInserted: $menuBarEnabled) {
             MenuBarPanel().environmentObject(engine).environment(\.palette, Palette.of(theme))
         } label: {

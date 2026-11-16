@@ -41,6 +41,14 @@ keeps Flightdeck running, so the black box and alerts continue (Settings › Ope
 warnings also post a notification (after 2 minutes by default, once per occurrence, at most every 30 minutes per
 problem; click to jump to the right view), and light an amber or red caution lamp on the Dock icon.
 
+**Process inspector:** double-click a process (or ⌘I, or Inspect… in its menu) to open it in its own window:
+CPU, memory, disk and network history (every process's last 300 samples are kept, not just the busiest), PID,
+parent and children, user, start time, CPU time, energy, wake-ups, arguments, working directory, code signature
+(Apple, Developer ID, ad-hoc or invalid; team; hardened runtime), every open file descriptor, sockets with addresses
+and TCP state, threads (CPU, state, priority, times), the environment, and call-stack sampling via
+`/usr/bin/sample` to see why it's busy or hung. Actions: quit, force quit, suspend, resume, lower priority (nice).
+Anything macOS doesn't let a normal user read for other users' processes is shown as unavailable.
+
 Six themes: Light, Dark, Green, Amber, Blue, Mono.
 
 **Live Dock icon:** right-click the Dock icon (or use Monitor › Dock Icon, or Settings) to pick a mode:

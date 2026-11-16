@@ -46,6 +46,7 @@ struct ProcessOutline: NSViewRepresentable {
     var palette: Palette
     @Binding var selection: ProcessIdentity?
     var menu: (ProcessSample) -> NSMenu
+    var onOpen: ((ProcessSample) -> Void)? = nil
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -74,6 +75,7 @@ struct ProcessOutline: NSViewRepresentable {
         ov.delegate = context.coordinator
         ov.menu = NSMenu(); ov.menu?.delegate = context.coordinator
         ov.target = context.coordinator
+        ov.doubleAction = #selector(Coordinator.doubleClicked(_:))
         let sv = NSScrollView(); sv.documentView = ov; sv.hasVerticalScroller = true; sv.autohidesScrollers = true
         context.coordinator.outline = ov
         return sv
@@ -97,6 +99,11 @@ struct ProcessOutline: NSViewRepresentable {
         var lastKey = ""
         var lastSort: (ProcColumn, Bool) = (.cpu, false)
         init(_ p: ProcessOutline) { parent = p }
+
+        @objc func doubleClicked(_ ov: NSOutlineView) {
+            guard ov.clickedRow >= 0, let it = ov.item(atRow: ov.clickedRow) as? ProcItem else { return }
+            parent.onOpen?(it.s)
+        }
 
         func applySelection() {
             guard let ov = outline else { return }

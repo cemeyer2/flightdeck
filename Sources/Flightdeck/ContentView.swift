@@ -31,6 +31,7 @@ struct ContentView: View {
     @SceneStorage("destination") private var selection: Destination = .summary
     @SceneStorage("perfTab") private var perfTab: PerfTab = .cpu
     @EnvironmentObject var engine: Engine
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         NavigationSplitView {
@@ -58,6 +59,12 @@ struct ContentView: View {
             if parts.count > 1, let t = PerfTab(rawValue: parts[1]) { perfTab = t }
         }
         .onAppear {
+            AppActions.openInspector = { openWindow(id: "inspector", value: $0) }
+            // automation hook: `-inspectPID 123` opens the inspector for that process
+            let ipid = UserDefaults.standard.integer(forKey: "inspectPID")
+            if ipid > 0, let id = ProcessSampler.identity(of: Int32(ipid)) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2) { openWindow(id: "inspector", value: id) }
+            }
             if Alerts.shared.onOpen == nil { Alerts.shared.onOpen = { [engine] d in AppActions.showMain(navigate: d, engine: engine) } }
             // Debug/automation hook: `open Flightdeck.app --args -destination "Processes"`
             if let d = UserDefaults.standard.string(forKey: "destination").flatMap(Destination.init(rawValue:)) {

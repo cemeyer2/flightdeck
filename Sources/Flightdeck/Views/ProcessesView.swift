@@ -18,6 +18,8 @@ struct ProcessesView: View {
 
     func nsMenu(_ s: ProcessSample) -> NSMenu {
         let m = NSMenu()
+        m.addItem(ClosureMenuItem("Inspect…") { AppActions.openInspector?(s.identity) })
+        m.addItem(.separator())
         m.addItem(ClosureMenuItem("Quit") { confirm = (s, SIGTERM, "Quit") })
         m.addItem(ClosureMenuItem("Force Quit") { confirm = (s, SIGKILL, "Force Quit") })
         m.addItem(.separator())
@@ -42,7 +44,8 @@ struct ProcessesView: View {
                         .font(.system(size: 11, design: .monospaced)).foregroundStyle(p.dim)
                 }
             }.padding(10)
-            ProcessOutline(frameTime: e.current?.time, processes: visibleProcesses, tree: tree, filter: filter, palette: p, selection: $selection, menu: nsMenu)
+            ProcessOutline(frameTime: e.current?.time, processes: visibleProcesses, tree: tree, filter: filter, palette: p, selection: $selection, menu: nsMenu,
+                           onOpen: { AppActions.openInspector?($0.identity) })
             if let selected { ProcessDetailBar(s: selected, actions: { AnyView(actions(selected)) }) }
         }
         .alert("\(confirm?.2 ?? "") “\(confirm?.0.name ?? "")”?", isPresented: Binding(get: { confirm != nil }, set: { if !$0 { confirm = nil } })) {
@@ -53,6 +56,8 @@ struct ProcessesView: View {
     }
 
     @ViewBuilder func actions(_ s: ProcessSample) -> some View {
+        Button("Inspect…") { AppActions.openInspector?(s.identity) }
+        Divider()
         Button("Quit") { confirm = (s, SIGTERM, "Quit") }
         Button("Force Quit") { confirm = (s, SIGKILL, "Force Quit") }
         Divider()
@@ -119,6 +124,7 @@ struct ProcessDetailBar: View {
             Readout(label: "Started", value: s.startDate.formatted(date: .omitted, time: .standard), size: 13)
             Readout(label: "Disk R/W total", value: s.restricted ? nil : "\(Fmt.bytes(s.diskRead)) / \(Fmt.bytes(s.diskWritten))", size: 13)
             Spacer()
+            Button("Inspect") { AppActions.openInspector?(s.identity) }.keyboardShortcut("i")
             Menu("Actions") { actions() }.frame(width: 90)
         }
         .padding(10).background(p.panel).overlay(alignment: .top) { Divider() }
