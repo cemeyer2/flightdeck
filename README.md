@@ -13,6 +13,12 @@ swift test                   # core sampler tests
 
 Requires macOS 14+, Xcode 16+ toolchain.
 
+**Distributing:** `./scripts/release.sh` builds `build/FlightDeck.dmg` (drag-to-Applications). With
+`SIGN_ID="Developer ID Application: … (TEAMID)"` it signs with the hardened runtime (`scripts/FlightDeck.entitlements`);
+add `NOTARY_PROFILE=<notarytool keychain profile>` to notarize and staple, so it opens on any Mac without Gatekeeper
+warnings. Without them the app is ad-hoc signed, which is fine for your own Mac. Open at login works best from
+/Applications.
+
 ## Views
 
 Summary · Performance (CPU per core with P/E colouring, overall/logical/cluster modes; Memory; Disk; Network with per-app traffic;
