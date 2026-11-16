@@ -66,6 +66,10 @@ final class Engine: ObservableObject {
     nonisolated private let incidentLog = IncidentLog(url: IncidentLog.defaultURL)
     nonisolated(unsafe) private var incidentRevision = -1
     nonisolated(unsafe) private var lastIncidentSave = Date()
+    // Evidence capture (confined to `queue`): one capture at a time, at most one per finding every 10 minutes.
+    nonisolated(unsafe) private var evidenceBusy = false
+    nonisolated(unsafe) private var lastEvidence: [String: Date] = [:]
+    private let evidenceQueue = DispatchQueue(label: "flightdeck.evidence", qos: .utility)
 
     /// `headless`: no timers, no black box, no Dock tile; frames are fed with `feed(_:)` (UI benchmark).
     let headless: Bool
@@ -76,7 +80,7 @@ final class Engine: ObservableObject {
         queue.async { [sampler] in _ = sampler.sample() }   // prime deltas
         restartTimer()
         blackBoxQueue.async { [blackBox, queue, analyzer] in
-            blackBox.prune()
+            blackBox.prune(); EvidenceStore.prune()
             let history = blackBox.trace(.coarse, from: Date().addingTimeInterval(-86_400))?.frames ?? []
             queue.async { analyzer.seed(history: history) }
         }
@@ -94,6 +98,29 @@ final class Engine: ObservableObject {
         NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: nil) { [blackBox, blackBoxQueue, queue, incidentLog] _ in
             blackBoxQueue.sync { blackBox.flush() }
             queue.sync { incidentLog.closeAll(at: Date()); incidentLog.save() }
+        }
+    }
+
+    /// On the sampling queue: when a hang or a sustained CPU/GPU hog is first logged, sample its call stacks.
+    nonisolated private func captureEvidence(for fresh: [Incident], findings: [Finding], snapshot s: Snapshot) {
+        let debug = ProcessInfo.processInfo.environment["FD_DEBUG_EVIDENCE"] != nil
+        if debug && !fresh.isEmpty { NSLog("FDEV fresh=%@ busy=%d", fresh.map(\.key).joined(separator: ","), evidenceBusy ? 1 : 0) }
+        guard UserDefaults.standard.object(forKey: "autoEvidence") as? Bool ?? true, !evidenceBusy else { return }
+        for inc in fresh where ["hang:", "cpu:", "gpu:"].contains(where: { inc.key.hasPrefix($0) }) {
+            if let last = lastEvidence[inc.key], s.time.timeIntervalSince(last) < 600 { continue }
+            guard let pid = findings.first(where: { $0.id == inc.key })?.pids?.first, pid != getpid(),
+                  let p = s.processes.first(where: { $0.pid == pid }) else { continue }
+            evidenceBusy = true; lastEvidence[inc.key] = s.time
+            let id = inc.id, name = p.name
+            evidenceQueue.async { [queue, incidentLog] in
+                let r = EvidenceStore.capture(pid: pid, name: name, incident: id)
+                if debug { NSLog("FDEV captured pid=%d ok=%d", pid, r == nil ? 0 : 1) }
+                queue.async {
+                    if let (url, summary) = r { incidentLog.attach(evidence: url.path, summary: summary, to: id) }
+                    self.evidenceBusy = false
+                }
+            }
+            break
         }
     }
 
@@ -132,6 +159,7 @@ final class Engine: ObservableObject {
             let found = analyzer.ingest(s)
             let fullDays = analyzer.daysUntilFull()
             let fresh = incidentLog.update(found, at: s.time)
+            self.captureEvidence(for: fresh, findings: found, snapshot: s)
             if s.time.timeIntervalSince(self.lastIncidentSave) > 60 { incidentLog.save(); self.lastIncidentSave = s.time }
             let log: [Incident]? = incidentLog.revision != self.incidentRevision ? incidentLog.incidents : nil
             self.incidentRevision = incidentLog.revision

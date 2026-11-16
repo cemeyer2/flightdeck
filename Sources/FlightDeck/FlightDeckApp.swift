@@ -132,6 +132,7 @@ struct SettingsView: View {
     @AppStorage("alertAfterMinutes") private var alertAfterMinutes = 2.0
     @State private var loginItem = LoginItem.isEnabled
     @State private var mutedCount = 0
+    @AppStorage("autoEvidence") private var autoEvidence = true
     @State private var loginError: String?
     @State private var blackBoxBytes: UInt64 = 0
     @State private var confirmClear = false
@@ -168,6 +169,7 @@ struct SettingsView: View {
                     Spacer()
                     Button("Unmute All") { Alerts.shared.muted = []; mutedCount = 0 }.disabled(mutedCount == 0)
                 }.onAppear { mutedCount = Alerts.shared.muted.count }
+                Toggle("Capture call stacks automatically when an app hangs or hogs the CPU", isOn: $autoEvidence)
                 Text("Right-click any finding to mute its alerts, inspect the responsible process or quit its app.")
                     .font(.caption).foregroundStyle(.secondary)
                 Picker("An app is \"busy\" above", selection: $engine.appCPUThreshold) {

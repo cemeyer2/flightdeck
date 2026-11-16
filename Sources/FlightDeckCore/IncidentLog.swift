@@ -11,6 +11,9 @@ public struct Incident: Codable, Sendable, Identifiable, Hashable {
     public var destination: String?
     public var start: Date
     public var end: Date?          // nil while ongoing
+    /// Call stacks captured automatically while it was happening (hangs and hogs), and their one-line summary.
+    public var evidencePath: String? = nil
+    public var evidenceSummary: String? = nil
     public var duration: TimeInterval { (end ?? Date()).timeIntervalSince(start) }
 }
 
@@ -81,6 +84,12 @@ public final class IncidentLog {
         for (newIdx, old) in keep.enumerated() { remap[old.offset] = newIdx }
         incidents = keep.map(\.element)
         open = open.compactMapValues { remap[$0] }
+        dirty = true; revision += 1
+    }
+
+    public func attach(evidence path: String, summary: String?, to id: UUID) {
+        guard let i = incidents.firstIndex(where: { $0.id == id }) else { return }
+        incidents[i].evidencePath = path; incidents[i].evidenceSummary = summary
         dirty = true; revision += 1
     }
 

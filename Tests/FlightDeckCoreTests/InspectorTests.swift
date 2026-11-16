@@ -109,3 +109,34 @@ final class StartupItemTests: XCTestCase {
         XCTAssertTrue(items.filter { $0.programExists == true }.allSatisfy { $0.signer != nil }, "every existing program gets a signature verdict")
     }
 }
+
+final class EvidenceTests: XCTestCase {
+    func testSummarizesHeaviestMainThreadPath() {
+        let text = """
+        Call graph:
+            2622 Thread_1: Main Thread   DispatchQueue_1: com.apple.main-thread  (serial)
+            + 2622 start  (in dyld) + 6992  [0x1]
+            +   2622 main  (in Busy) + 20  [0x2]
+            +     2600 -[Model recompute]  (in Busy) + 40  [0x3]
+            +     ! 2590 -[Model sortItems:]  (in Busy) + 12  [0x4]
+            +     ! : 2500 __psynch_mutexwait  (in libsystem_kernel.dylib) + 8  [0x5]
+            +     ! : 90 objc_msgSend  (in libobjc.A.dylib) + 4  [0x6]
+            +     22 -[Model other]  (in Busy) + 1  [0x7]
+            2622 Thread_2
+        Total number in stack (recursive counted multiple times):
+        """
+        let s = StackSummary.summarize(text)
+        XCTAssertEqual(s, "Main thread waiting (95% of samples) in __psynch_mutexwait (libsystem_kernel.dylib) ← -[Model sortItems:] (Busy) ← -[Model recompute] (Busy)")
+    }
+
+    func testRealCaptureOfAnotherProcess() throws {
+        let p = Process(); p.executableURL = URL(fileURLWithPath: "/bin/sleep"); p.arguments = ["10"]
+        try p.run(); defer { p.terminate() }
+        Thread.sleep(forTimeInterval: 0.3)
+        let id = UUID()
+        let r = EvidenceStore.capture(pid: p.processIdentifier, name: "sleep", incident: id, seconds: 1)
+        print("EVIDENCE", r?.1 as Any)
+        XCTAssertNotNil(r)
+        if let u = r?.0 { try? FileManager.default.removeItem(at: u) }
+    }
+}

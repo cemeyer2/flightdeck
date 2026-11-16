@@ -99,8 +99,16 @@ struct IncidentRow: View {
                 Text(i.title).font(.system(size: 12, weight: .medium, design: .monospaced)).foregroundStyle(p.text)
                 Text((i.end == nil ? "ongoing · " : "") + shortDuration(i.duration) + (i.detail.map { " · " + $0 } ?? ""))
                     .font(.system(size: 11)).foregroundStyle(p.dim).lineLimit(2)
+                if let ev = i.evidenceSummary {
+                    Label(ev, systemImage: "list.bullet.indent").font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(p.accent).lineLimit(2).help(ev)
+                }
             }
             Spacer()
+            if let path = i.evidencePath, FileManager.default.fileExists(atPath: path) {
+                Button { NSWorkspace.shared.open(URL(fileURLWithPath: path)) } label: { Label("Stacks", systemImage: "list.bullet.indent") }
+                    .help("Call stacks captured automatically while this was happening")
+            }
             if Date().timeIntervalSince(i.end ?? Date()) < 86_400 {
                 Button { e.replayBlackBox(from: i.start, to: i.end ?? Date()) } label: { Label("Replay", systemImage: "film") }
                     .help("Replay what the Mac was doing (from the black box)").disabled(!e.blackBoxEnabled)
