@@ -172,3 +172,19 @@ final class ProcessQueryTests: XCTestCase {
         XCTAssertTrue(ProcessQuery("  ").isEmpty)
     }
 }
+
+final class TimelineTests: XCTestCase {
+    func testBucketsAndGaps() {
+        let t0 = Date(timeIntervalSince1970: 9_000_000)
+        var frames: [Snapshot] = []
+        for i in 0..<60 where i < 20 || i >= 40 {   // 20 min, 20 min gap, 20 min
+            var s = AnalyzerTests.base; s.time = t0.addingTimeInterval(Double(i) * 60); s.cpu.total = .value(Double(i)); frames.append(s)
+        }
+        let b = Timeline.build(frames, from: t0, to: t0.addingTimeInterval(3600), buckets: 6)
+        XCTAssertEqual(b.count, 6)
+        XCTAssertEqual(b[0].samples, 10); XCTAssertEqual(b[0].cpuMax, 9); XCTAssertEqual(b[0].cpuAvg!, 4.5, accuracy: 0.001)
+        XCTAssertTrue(b[2].isGap && b[3].isGap, "no samples = gap, not zero")
+        XCTAssertNil(b[2].cpuAvg)
+        XCTAssertEqual(b[5].cpuMax, 59)
+    }
+}

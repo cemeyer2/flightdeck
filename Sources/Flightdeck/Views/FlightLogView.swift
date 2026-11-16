@@ -52,6 +52,7 @@ struct FlightLogView: View {
         let days = Dictionary(grouping: shown) { Calendar.current.startOfDay(for: $0.start) }
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
+                TimelinePanel()
                 Panel(title: "Right now", trailing: e.mode == .replay ? "at the replayed moment" : nil) {
                     if e.findings.isEmpty {
                         Label("All systems normal.", systemImage: "checkmark.seal").foregroundStyle(p.text)
@@ -104,5 +105,115 @@ struct IncidentRow: View {
             }
         }
         .padding(.vertical, 2)
+    }
+}
+
+/// The black box at a glance: CPU, memory pressure and temperature across the last hours, with incidents.
+/// Click anywhere to replay that moment.
+struct TimelinePanel: View {
+    @EnvironmentObject var e: Engine
+    @Environment(\.palette) var p
+    @AppStorage("timelineHours") private var hours = 24
+    @State private var buckets: [TimelineBucket] = []
+    @State private var range: (Date, Date) = (Date(), Date())
+    @State private var hover: Int?
+    let n = 240
+
+    var body: some View {
+        Panel(title: "Timeline", trailing: hover.flatMap { i in i < buckets.count ? describe(buckets[i]) : nil } ?? "click to replay that moment") {
+            Picker("", selection: $hours) { Text("1 h").tag(1); Text("6 h").tag(6); Text("24 h").tag(24) }
+                .pickerStyle(.segmented).labelsHidden().frame(width: 180)
+            if !e.blackBoxEnabled {
+                Text("Turn on the black box (Settings) to build a timeline.").foregroundStyle(p.dim)
+            } else {
+                VStack(spacing: 3) {
+                    strip("CPU", top: 100) { $0.cpuMax }
+                    strip("MEM PRESSURE", top: 100) { $0.pressure }
+                    strip("HOTTEST °C", top: 110) { $0.hottest }
+                    incidentsStrip
+                }
+                HStack {
+                    Text(range.0.formatted(date: .omitted, time: .shortened)); Spacer()
+                    Text("hatched = no data (asleep, not running or paused)"); Spacer()
+                    Text("now")
+                }.font(.system(size: 9, design: .monospaced)).foregroundStyle(p.dim)
+            }
+        }
+        .task(id: hours) {
+            while !Task.isCancelled { await load(); try? await Task.sleep(for: .seconds(60)) }
+        }
+    }
+
+    func describe(_ b: TimelineBucket) -> String {
+        b.isGap ? "\(b.start.formatted(date: .omitted, time: .shortened)) · no data"
+            : "\(b.start.formatted(date: .omitted, time: .shortened)) · CPU peak \(b.cpuMax.map { String(format: "%.0f%%", $0) } ?? "—") · pressure \(b.pressure.map { String(format: "%.0f%%", $0) } ?? "—") · \(b.hottest.map { String(format: "%.0f °C", $0) } ?? "—")"
+    }
+
+    func load() async {
+        let box = e.blackBox, h = hours, n = n
+        let to = Date(), from = to.addingTimeInterval(-Double(h) * 3600)
+        let b = await Task.detached(priority: .utility) { () -> [TimelineBucket] in
+            let t = box.trace(h <= 1 ? .fine : .coarse, from: from, to: to)
+            return Timeline.build(t?.frames ?? [], from: from, to: to, buckets: n)
+        }.value
+        buckets = b; range = (from, to)
+    }
+
+    func x(_ d: Date, _ w: CGFloat) -> CGFloat {
+        CGFloat(d.timeIntervalSince(range.0) / max(range.1.timeIntervalSince(range.0), 1)) * w
+    }
+
+    func strip(_ label: String, top: Double, _ v: @escaping (TimelineBucket) -> Double?) -> some View {
+        HStack(spacing: 6) {
+            Text(label).font(.system(size: 8, weight: .bold, design: .monospaced)).foregroundStyle(p.dim).frame(width: 74, alignment: .leading)
+            GeometryReader { g in
+                Canvas { ctx, size in
+                    let bw = size.width / CGFloat(max(buckets.count, 1))
+                    for b in buckets {
+                        let rx = CGFloat(b.index) * bw
+                        if b.isGap {
+                            var hatch = Path()
+                            stride(from: rx, to: rx + bw, by: 3).forEach { hx in hatch.move(to: CGPoint(x: hx, y: size.height)); hatch.addLine(to: CGPoint(x: hx + 2, y: 0)) }
+                            ctx.stroke(hatch, with: .color(p.meterOff), lineWidth: 0.6)
+                        } else if let val = v(b) {
+                            let f = min(val / top, 1)
+                            let h = CGFloat(f) * size.height
+                            ctx.fill(Path(CGRect(x: rx, y: size.height - h, width: max(bw - 0.5, 0.5), height: h)), with: .color(p.level(f)))
+                        }
+                    }
+                    if let hover {
+                        ctx.fill(Path(CGRect(x: CGFloat(hover) * bw, y: 0, width: max(bw, 1), height: size.height)), with: .color(p.text.opacity(0.25)))
+                    }
+                }
+                .contentShape(Rectangle())
+                .onContinuousHover { phase in
+                    if case .active(let pt) = phase, !buckets.isEmpty { hover = min(Int(pt.x / g.size.width * CGFloat(buckets.count)), buckets.count - 1) } else { hover = nil }
+                }
+                .onTapGesture(coordinateSpace: .local) { pt in
+                    guard !buckets.isEmpty else { return }
+                    let i = min(Int(pt.x / g.size.width * CGFloat(buckets.count)), buckets.count - 1)
+                    guard !buckets[i].isGap else { return }
+                    e.replayBlackBox(from: buckets[i].start, to: buckets[i].start.addingTimeInterval(range.1.timeIntervalSince(range.0) / Double(buckets.count)))
+                }
+            }.frame(height: 22)
+        }
+    }
+
+    var incidentsStrip: some View {
+        HStack(spacing: 6) {
+            Text("INCIDENTS").font(.system(size: 8, weight: .bold, design: .monospaced)).foregroundStyle(p.dim).frame(width: 74, alignment: .leading)
+            GeometryReader { g in
+                let shown = e.incidents.filter { ($0.end ?? Date()) >= range.0 }
+                ZStack(alignment: .leading) {
+                    ForEach(shown) { i in
+                        let x0 = max(x(i.start, g.size.width), 0), x1 = min(x(i.end ?? Date(), g.size.width), g.size.width)
+                        RoundedRectangle(cornerRadius: 1.5).fill(p.color(i.severity))
+                            .frame(width: max(x1 - x0, 3), height: 8).offset(x: x0)
+                            .help("\(i.start.formatted(date: .omitted, time: .shortened)) · \(i.title) · \(shortDuration(i.duration))")
+                            .onTapGesture { e.replayBlackBox(from: i.start, to: i.end ?? Date()) }
+                    }
+                }.frame(maxHeight: .infinity)
+            }.frame(height: 12)
+        }
     }
 }
