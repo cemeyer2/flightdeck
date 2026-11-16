@@ -12,7 +12,7 @@ final class Engine: ObservableObject {
 
     @Published private(set) var current: Snapshot?
     @Published private(set) var frames: [Snapshot?] = Array(repeating: nil, count: Engine.historyLength)
-    @Published var paused = false { didSet { if !paused { pushGap() } } }
+    @Published var paused = false { didSet { if !paused { pushGap() } else { queue.async { [incidentLog] in incidentLog.closeAll(at: Date()) } } } }
     @AppStorage("interval") var interval: Double = 1.0 { didSet { restartTimer() } }
     @AppStorage("includeSelf") var includeSelf = true
     @AppStorage("blackBoxEnabled") var blackBoxEnabled = true
@@ -26,6 +26,16 @@ final class Engine: ObservableObject {
     @Published var playing = false
     @Published var lastError: String?
 
+    // Analysis: findings (live, or recomputed for the replayed moment) and the incident log
+    @Published private(set) var liveFindings: [Finding] = []
+    @Published private(set) var replayFindings: [Finding] = []
+    @Published private(set) var incidents: [Incident] = []
+    var findings: [Finding] { mode == .live ? liveFindings : replayFindings }
+    /// Set to a Destination raw value (optionally "Performance:<tab>") to navigate there.
+    @Published var navigationRequest: String?
+    /// Called on the main actor for each incident once it has lasted long enough to log.
+    var onNewIncident: ((Incident) -> Void)?
+
     private let sampler = Sampler()
     private let queue = DispatchQueue(label: "flightdeck.sampler", qos: .utility)
     private var timer: Timer?
@@ -35,13 +45,24 @@ final class Engine: ObservableObject {
     // Black box: always-on rolling recorder, written off the sampling queue.
     let blackBox = BlackBox(dir: BlackBox.defaultDirectory)
     private let blackBoxQueue = DispatchQueue(label: "flightdeck.blackbox", qos: .background)
+    // Confined to `queue`.
+    nonisolated private let analyzer = Analyzer()
+    nonisolated private let incidentLog = IncidentLog(url: IncidentLog.defaultURL)
+    nonisolated(unsafe) private var incidentRevision = -1
+    nonisolated(unsafe) private var lastIncidentSave = Date()
 
     init() {
         queue.async { [sampler] in _ = sampler.sample() }   // prime deltas
         restartTimer()
-        blackBoxQueue.async { [blackBox] in blackBox.prune() }
-        NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: nil) { [blackBox, blackBoxQueue] _ in
+        blackBoxQueue.async { [blackBox, queue, analyzer] in
+            blackBox.prune()
+            let history = blackBox.trace(.coarse, from: Date().addingTimeInterval(-86_400))?.frames ?? []
+            queue.async { analyzer.seed(history: history) }
+        }
+        incidents = incidentLog.incidents
+        NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: nil) { [blackBox, blackBoxQueue, queue, incidentLog] _ in
             blackBoxQueue.sync { blackBox.flush() }
+            queue.sync { incidentLog.closeAll(at: Date()); incidentLog.save() }
         }
     }
 
@@ -59,10 +80,20 @@ final class Engine: ObservableObject {
         guard !paused, !inFlight else { return }
         inFlight = true
         let includeSelf = self.includeSelf
-        queue.async { [sampler] in
+        queue.async { [sampler, analyzer, incidentLog] in
             sampler.processes.includeSelf = includeSelf
             let s = sampler.sample()
-            Task { @MainActor in self.ingest(s) }
+            let found = analyzer.ingest(s)
+            let fresh = incidentLog.update(found, at: s.time)
+            if s.time.timeIntervalSince(self.lastIncidentSave) > 60 { incidentLog.save(); self.lastIncidentSave = s.time }
+            let log: [Incident]? = incidentLog.revision != self.incidentRevision ? incidentLog.incidents : nil
+            self.incidentRevision = incidentLog.revision
+            Task { @MainActor in
+                self.liveFindings = found
+                if let log { self.incidents = log }
+                fresh.forEach { self.onNewIncident?($0) }
+                self.ingest(s)
+            }
         }
     }
 
@@ -117,6 +148,19 @@ final class Engine: ObservableObject {
         return t
     }
 
+    /// Replays the black box around a moment (e.g. an incident), with some context either side.
+    func replayBlackBox(from start: Date, to end: Date) {
+        let from = start.addingTimeInterval(-120), to = end.addingTimeInterval(120)
+        let tier: BlackBox.Tier = Date().timeIntervalSince(from) <= blackBox.config.fineRetention ? .fine : .coarse
+        guard let t = blackBoxQueue.sync(execute: { blackBox.trace(tier, from: from, to: to) }) else {
+            lastError = "The black box no longer has data for that time (it keeps 1 hour in full detail and 24 hours in 10 s steps)."
+            return
+        }
+        load(t, startAt: start)
+    }
+
+    func clearIncidents() { queue.async { [incidentLog] in incidentLog.clear() } ; incidents = [] }
+
     func clearBlackBox() { blackBoxQueue.async { [blackBox] in blackBox.clear() } }
 
     private func save(_ t: FlightdeckCore.Trace, prefix: String) {
@@ -147,11 +191,13 @@ final class Engine: ObservableObject {
         load(FlightdeckCore.Trace(host: Host.current().localizedName ?? "", model: "", interval: interval, frames: recorded))
     }
 
-    private func load(_ t: FlightdeckCore.Trace, startAtEnd: Bool = false) {
+    private func load(_ t: FlightdeckCore.Trace, startAtEnd: Bool = false, startAt: Date? = nil) {
         guard !t.frames.isEmpty else { lastError = "Trace is empty"; return }
         playing = false; playTimer?.invalidate()
         trace = t; mode = .replay
-        let start = startAtEnd ? t.frames.count - 1 : UserDefaults.standard.integer(forKey: "replayIndex")   // debug/automation hook
+        let start = startAtEnd ? t.frames.count - 1
+            : startAt.map { d in t.frames.firstIndex { $0.time >= d } ?? 0 }
+            ?? UserDefaults.standard.integer(forKey: "replayIndex")   // debug/automation hook
         replayIndex = min(max(start, 0), t.frames.count - 1); applyReplay()
     }
 
@@ -185,5 +231,9 @@ final class Engine: ObservableObject {
         window = Array(window.suffix(Self.historyLength))
         frames = Array(repeating: nil, count: Self.historyLength - window.count) + window
         current = t.frames[idx]
+        // Recompute findings as they would have looked at this moment.
+        let a = Analyzer()
+        for f in t.frames[max(0, idx - 900)...idx] { a.ingest(f) }
+        replayFindings = a.findings
     }
 }

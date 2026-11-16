@@ -13,10 +13,7 @@ struct AppTraffic: Identifiable {
 
 enum AppGrouping {
     /// Outermost `.app` bundle in a path, so helpers (…/Chrome.app/…/Helper.app/…) roll up to the app.
-    static func bundle(of path: String) -> String? {
-        guard let r = path.range(of: ".app/") else { return path.hasSuffix(".app") ? path : nil }
-        return String(path[..<r.lowerBound]) + ".app"
-    }
+    static func bundle(of path: String) -> String? { AppUsage.bundle(of: path) }
 
     static func traffic(_ procs: [ProcessSample], byApp: Bool) -> [AppTraffic]? {
         guard procs.contains(where: { $0.network != nil }) else { return nil }

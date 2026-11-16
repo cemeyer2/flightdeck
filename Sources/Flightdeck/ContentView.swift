@@ -2,13 +2,14 @@ import SwiftUI
 import FlightdeckCore
 
 enum Destination: String, CaseIterable, Identifiable, Hashable {
-    case summary = "Summary", performance = "Performance", processes = "Processes", systemInfo = "System Info",
+    case summary = "Summary", flightLog = "Flight Log", performance = "Performance", processes = "Processes", systemInfo = "System Info",
          startup = "Startup Apps", users = "Users", services = "Services", power = "Power & Freq",
          connections = "Connections", apps = "Installed Apps", diskSpace = "Disk Space", benchmarks = "Benchmarks"
     var id: String { rawValue }
     var icon: String {
         switch self {
         case .summary: "gauge.with.dots.needle.50percent"
+        case .flightLog: "list.bullet.clipboard"
         case .performance: "waveform.path.ecg"
         case .processes: "list.bullet.indent"
         case .systemInfo: "info.circle"
@@ -22,13 +23,14 @@ enum Destination: String, CaseIterable, Identifiable, Hashable {
         case .benchmarks: "speedometer"
         }
     }
-    var isLive: Bool { [.summary, .performance, .processes, .power].contains(self) }
+    var isLive: Bool { [.summary, .flightLog, .performance, .processes, .power].contains(self) }
 }
 
 struct ContentView: View {
     @Environment(\.palette) var p
     @SceneStorage("destination") private var selection: Destination = .summary
-    @AppStorage("theme") private var theme: ThemeID = .dark
+    @SceneStorage("perfTab") private var perfTab: PerfTab = .cpu
+    @EnvironmentObject var engine: Engine
 
     var body: some View {
         NavigationSplitView {
@@ -48,6 +50,13 @@ struct ContentView: View {
         }
         .toolbar { ToolbarItemGroup(placement: .primaryAction) { ToolbarControls() } }
         .modifier(ErrorAlert())
+        .onChange(of: engine.navigationRequest) {
+            guard let r = engine.navigationRequest else { return }
+            engine.navigationRequest = nil
+            let parts = r.split(separator: ":").map(String.init)
+            if let d = Destination(rawValue: parts[0]) { selection = d }
+            if parts.count > 1, let t = PerfTab(rawValue: parts[1]) { perfTab = t }
+        }
         .onAppear {
             // Debug/automation hook: `open Flightdeck.app --args -destination "Processes"`
             if let d = UserDefaults.standard.string(forKey: "destination").flatMap(Destination.init(rawValue:)) {
@@ -59,6 +68,7 @@ struct ContentView: View {
     @ViewBuilder var detail: some View {
         switch selection {
         case .summary: SummaryView()
+        case .flightLog: FlightLogView()
         case .performance: PerformanceView()
         case .processes: ProcessesView()
         case .systemInfo: SystemInfoView()

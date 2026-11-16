@@ -27,6 +27,14 @@ for the last hour and one sample every 10 s for 24 hours, capped at 50 MB, in
 `~/Library/Application Support/Flightdeck/BlackBox` as ordinary `.flightlog` segments. Recorder › Save from Black Box
 saves the last 5 minutes to 24 hours after the fact; Recorder › Replay Black Box (⇧⌘B: last 10 minutes) replays it.
 
+**Diagnosis and Flight Log:** an analyzer turns the sample stream into plain-English findings on the Summary banner
+(click one to jump to where to look). It smooths over spikes and groups helper processes into their app. It detects
+apps hogging CPU, memory pressure and growing swap, apps whose memory grows steadily (likely leaks), thermal throttling
+(and explains kernel_task), heavy disk or network I/O, frequent wake-ups, a startup disk that will fill up within days,
+and anything unusual for *this* Mac, compared with a baseline built from the black box's 24 hours. Well-known
+background work (Spotlight, Time Machine, iCloud, Photos analysis, updates) is explained. Anything lasting 20 s or
+more goes into the **Flight Log** (kept 7 days) with a one-click replay of that moment from the black box.
+
 Six themes: Light, Dark, Green, Amber, Blue, Mono.
 
 **Live Dock icon:** right-click the Dock icon (or use Monitor › Dock Icon, or Settings) to pick a mode:

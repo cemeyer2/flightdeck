@@ -107,36 +107,25 @@ struct DiagnosisBanner: View {
     @EnvironmentObject var e: Engine
     @Environment(\.palette) var p
 
-    var findings: [(String, String)] {
-        guard let s = e.current else { return [("hourglass", "Collecting first samples…")] }
-        var out: [(String, String)] = []
-        let top = s.processes.max { $0.cpu < $1.cpu }
-        if let c = s.cpu.total.value, c > 70, let top { out.append(("cpu", String(format: "CPU is %.0f%% busy — %@ is using %.0f%% of a core.", c, top.name, top.cpu))) }
-        if s.memory.pressureLevel >= 2 { out.append(("memorychip", "Memory pressure is \(s.memory.pressureLevel >= 4 ? "critical" : "elevated"); macOS is compressing and swapping.")) }
-        if let sw = s.memory.swapUsed.value, sw > 2e9 { out.append(("arrow.left.arrow.right", "Swap in use: \(Fmt.bytes(sw)).")) }
-        if s.power.thermalState >= 2 { out.append(("thermometer.high", "Thermal pressure is \(thermalName(s.power.thermalState)); the CPU may be throttled.")) }
-        if let r = s.disk.readBps.value, let w = s.disk.writeBps.value, r + w > 200e6 {
-            let d = s.processes.max { $0.diskReadBps + $0.diskWriteBps < $1.diskReadBps + $1.diskWriteBps }
-            out.append(("internaldrive", "Heavy disk I/O (\(Fmt.rate(r + w)))" + (d.map { " — mostly \($0.name)." } ?? ".")))
-        }
-        if let i = s.network.inBps.value, let o = s.network.outBps.value, i + o > 5e6,
-           let n = s.processes.filter({ $0.network != nil }).max(by: { ($0.network!.inBps + $0.network!.outBps) < ($1.network!.inBps + $1.network!.outBps) }) {
-            out.append(("network", "Heavy network traffic (\(Fmt.rate(i + o))) — mostly \(n.name)."))
-        }
-        if let w = top?.wakeups, w > 500, let top { out.append(("alarm", String(format: "%@ wakes the CPU %.0f times/s.", top.name, w))) }
-        if out.isEmpty { out.append(("checkmark.seal", "Nothing is holding this Mac back right now.")) }
-        return out
-    }
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            ForEach(findings, id: \.1) { f in
-                Label(f.1, systemImage: f.0).font(.system(size: 13, weight: .medium, design: .monospaced)).foregroundStyle(p.text)
+        let f = e.findings
+        let worst = f.map(\.severity).max()
+        VStack(alignment: .leading, spacing: 8) {
+            if e.current == nil {
+                Label("Collecting first samples…", systemImage: "hourglass").foregroundStyle(p.text)
+            } else if f.isEmpty {
+                Label("All systems normal. Nothing is holding this Mac back right now.", systemImage: "checkmark.seal")
+                    .font(.system(size: 13, weight: .medium, design: .monospaced)).foregroundStyle(p.text)
+            }
+            ForEach(f.prefix(6)) { FindingRow(f: $0) }
+            if f.count > 6 {
+                Button("\(f.count - 6) more in the Flight Log") { e.navigationRequest = Destination.flightLog.rawValue }
+                    .buttonStyle(.link).font(.caption)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
-        .background(RoundedRectangle(cornerRadius: 10).fill(p.accent.opacity(0.10)))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(p.accent.opacity(0.35)))
+        .background(RoundedRectangle(cornerRadius: 10).fill((worst.map(p.color) ?? p.accent).opacity(0.10)))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder((worst.map(p.color) ?? p.accent).opacity(0.35)))
     }
 }
