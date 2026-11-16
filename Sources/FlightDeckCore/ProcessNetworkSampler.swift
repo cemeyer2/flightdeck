@@ -101,4 +101,8 @@ public final class ProcessNetworkSampler {
     /// Totals are keyed by bare PID, so this runs every sample with the live PID set to stop a later process with a
     /// reused PID from inheriting old totals.
     public func retain(pids: Set<Int32>) { totals = totals.filter { pids.contains($0.key) } }
+
+    /// The PID now belongs to a different process (reused): drop the old one's totals and per-connection baselines so
+    /// the newcomer doesn't inherit them.
+    public func forget(pid: Int32) { totals[pid] = nil; prev = prev.filter { $0.key.pid != pid } }
 }

@@ -54,6 +54,7 @@ public enum Launchd {
         // `launchctl list` as a normal user only covers this user's gui domain; Launch Daemons live in the system domain,
         // which `launchctl print system` lists (label in the last column) without root.
         let loaded = Set(services().map(\.label)).union(systemDomainLabels())
+        let overrides = disabledOverrides("gui/\(getuid())").merging(disabledOverrides("system")) { a, _ in a }
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         let dirs: [(String, String)] = [
             ("\(home)/Library/LaunchAgents", "Launch Agent (User)"),
@@ -78,7 +79,8 @@ public enum Launchd {
                                        runAtLoad: d["RunAtLoad"] as? Bool ?? false, keepAlive: keep,
                                        // Only the plist's own Disabled key is read; `launchctl disable` overrides live in
                                        // launchd's database and aren't seen.
-                                       disabled: d["Disabled"] as? Bool ?? false,
+                                       // launchd's own override database wins over the plist's Disabled key
+                                       disabled: overrides[label] ?? (d["Disabled"] as? Bool ?? false),
                                        loaded: loaded.contains(label), vendor: vendor(label)))
             }
         }
@@ -117,10 +119,33 @@ public enum Launchd {
     /// Classic login items via System Events AppleScript (the only non-private way to list them). The first call triggers
     /// macOS's Automation permission prompt; if denied, osascript prints nothing and the list is empty. The output is a
     /// ", "-separated list of paths. Items registered as background items through SMAppService are not included.
+    /// `launchctl print-disabled <domain>`: services launchd itself has marked enabled/disabled (e.g. via
+    /// `launchctl disable` or System Settings), which overrides the plist's own Disabled key.
+    static func disabledOverrides(_ domain: String) -> [String: Bool] {
+        guard let out = Shell.run("/bin/launchctl", ["print-disabled", domain], timeout: 5) else { return [:] }
+        return parseDisabled(out)
+    }
+
+    static func parseDisabled(_ out: String) -> [String: Bool] {
+        var map: [String: Bool] = [:]
+        for line in out.split(separator: "\n") {
+            let parts = line.components(separatedBy: "\" => ")
+            guard parts.count == 2 else { continue }
+            let label = parts[0].trimmingCharacters(in: .whitespaces).trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+            map[label] = parts[1].trimmingCharacters(in: .whitespaces).hasPrefix("disabled")
+        }
+        return map
+    }
+
     static func loginItems() -> [StartupItem] {
-        let script = "tell application \"System Events\" to get the path of every login item"
+        // One path per line: AppleScript's default list output separates with ", ", which breaks paths containing ", ".
+        let script = """
+        tell application "System Events" to set ps to the path of every login item
+        set AppleScript's text item delimiters to linefeed
+        return ps as text
+        """
         guard let out = Shell.run("/usr/bin/osascript", ["-e", script], timeout: 5) else { return [] }
-        return out.trimmingCharacters(in: .whitespacesAndNewlines).components(separatedBy: ", ").filter { !$0.isEmpty }.map {
+        return out.trimmingCharacters(in: .whitespacesAndNewlines).components(separatedBy: "\n").filter { !$0.isEmpty }.map {
             StartupItem(label: (($0 as NSString).lastPathComponent as NSString).deletingPathExtension, path: $0, program: $0,
                         kind: "Login Item", runAtLoad: true, keepAlive: false, disabled: false, loaded: true, vendor: "")
         }

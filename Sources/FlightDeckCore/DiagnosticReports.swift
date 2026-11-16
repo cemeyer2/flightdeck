@@ -88,6 +88,7 @@ public enum DiagnosticReports {
             case "298": kind = .jetsam
             case "288", "228": kind = .hang
             case "202": kind = .cpuLimit
+            case "142": kind = .wakeups   // wake-up limit (.ips form; plain-text .diag reports are matched by "Event:" below)
             case "145": kind = .diskWrites
             default: kind = .other
             }

@@ -95,6 +95,9 @@ public final class GPUSampler: @unchecked Sendable {
     }
 
     /// Builds one GPUDetail. Each field is filled only if its source answered, so a missing source leaves nil (never 0).
+    /// The PID was reused by a new process: forget the old one's accumulated GPU time.
+    public func forget(pid: Int32) { lastClientTime[pid] = nil }
+
     public func sample() -> GPUDetail {
         var d = GPUDetail(clients: [], cpuClusters: [])
         // Accelerator performance statistics (all Macs)

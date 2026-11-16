@@ -126,7 +126,9 @@ public enum SleepLog {
                     if let colon = reason.range(of: ":TCPKeepAlive") { reason = String(reason[..<colon.lowerBound]) }
                     if reason.hasSuffix("/") { reason.removeLast() }
                 }
-                let battery: Bool? = msg.contains("Using BATT") ? true : msg.contains("Using AC") ? false : nil
+                // macOS writes both "Using BATT" and "Using Batt" (and "Using AC"): match case-insensitively.
+                let battery: Bool? = msg.range(of: "Using BATT", options: .caseInsensitive) != nil ? true
+                    : msg.range(of: "Using AC", options: .caseInsensitive) != nil ? false : nil
                 let charge = msg.range(of: #"Charge:(\d+)%"#, options: .regularExpression).flatMap { Int(msg[$0].dropFirst(7).dropLast()) }
                 // The trailing "N secs" is how long the state lasted (pmset appends it once the next transition happens).
                 let secs = msg.range(of: #"(\d+) secs"#, options: .regularExpression).flatMap { Int(msg[$0].split(separator: " ")[0]) }

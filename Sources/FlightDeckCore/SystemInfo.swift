@@ -100,9 +100,16 @@ public enum SystemInfo {
     /// SIP state parsed from `csrutil status` text. Looks for "enabled" first, so a custom configuration that lists both
     /// enabled and disabled protections reads as "Enabled".
     static func csrStatus() -> String {
-        let out = Shell.run("/usr/bin/csrutil", ["status"]) ?? ""
-        if out.contains("enabled") { return "Enabled" }
-        if out.contains("disabled") { return "Disabled" }
+        // Only the first line states the overall status; a custom configuration lists per-protection lines below it that
+        // contain both "enabled" and "disabled", so searching the whole output would misreport it.
+        parseCSR(Shell.run("/usr/bin/csrutil", ["status"]) ?? "")
+    }
+
+    static func parseCSR(_ out: String) -> String {
+        let first = out.split(separator: "\n").first.map(String.init) ?? ""
+        if first.contains("Custom") || first.contains("unknown") { return "Custom configuration" }
+        if first.contains("enabled") { return "Enabled" }
+        if first.contains("disabled") { return "Disabled" }
         return "Unknown"
     }
 }

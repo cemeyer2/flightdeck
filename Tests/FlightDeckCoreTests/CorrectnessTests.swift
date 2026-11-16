@@ -240,3 +240,48 @@ final class SmallBugTests: XCTestCase {
         XCTAssertFalse(m.isMeasured)
     }
 }
+
+/// Remaining review findings in the core library.
+final class CoreFindingsTests: XCTestCase {
+    /// macOS writes "Using Batt" as well as "Using BATT"; both mean the Mac was on battery.
+    func testSleepLogBatteryCaseInsensitive() {
+        let log = "2026-11-16 00:10:00 -0600 Sleep               \tEntering Sleep state due to 'Clamshell Sleep':TCPKeepAlive=active Using Batt (Charge:90%) 600 secs"
+        XCTAssertEqual(SleepLog.parse(log, since: .distantPast).events.first?.onBattery, true)
+    }
+
+    /// A custom SIP configuration lists per-protection lines with both words; only the status line counts.
+    func testCustomSIPConfiguration() {
+        XCTAssertEqual(SystemInfo.parseCSR("System Integrity Protection status: enabled.\n"), "Enabled")
+        XCTAssertEqual(SystemInfo.parseCSR("System Integrity Protection status: unknown (Custom Configuration).\n\nConfiguration:\n\tKext Signing: disabled\n\tFilesystem Protections: enabled\n"), "Custom configuration")
+    }
+
+    /// launchd's override database is parsed (it wins over a plist's own Disabled key).
+    func testLaunchdDisabledOverrides() {
+        let out = "disabled services = {\n\t\t\"com.docker.helper\" => enabled\n\t\t\"com.example.agent\" => disabled\n\t}\n"
+        XCTAssertEqual(Launchd.parseDisabled(out), ["com.docker.helper": false, "com.example.agent": true])
+    }
+
+    /// An incident open when the app crashed keeps the duration known at the last save, not zero.
+    func testIncidentOpenAtCrashKeepsLastSeen() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("crash-\(UUID().uuidString).json")
+        let log = IncidentLog(url: url)
+        let start = Date().addingTimeInterval(-300)
+        let f = Finding(id: "cpu:x", severity: .caution, icon: "x", title: "x", detail: nil, since: start, destination: nil)
+        log.update([f], at: Date())
+        log.save()   // "crash" here: no closeAll
+        let reloaded = IncidentLog(url: url).incidents.first
+        XCTAssertGreaterThan(reloaded?.duration ?? 0, 250)
+    }
+
+    func testTimelineWithNoBuckets() {
+        XCTAssertTrue(Timeline.build([], from: Date(), to: Date(), buckets: 0).isEmpty)
+    }
+
+    /// A trace remembers the macOS version that recorded it.
+    func testTraceRecordsOSVersion() throws {
+        let t = Trace(host: "h", model: "m", interval: 1, frames: [BlackBoxTests.base])
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("os-\(UUID().uuidString).flightlog")
+        try t.write(to: url)
+        XCTAssertEqual(try Trace.read(from: url).osVersion, ProcessInfo.processInfo.operatingSystemVersionString)
+    }
+}

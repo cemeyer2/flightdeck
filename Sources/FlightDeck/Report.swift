@@ -36,7 +36,7 @@ struct FlightReportView: View {
                 Text("FlightDeck").font(.system(size: 12, weight: .semibold, design: .monospaced)).foregroundStyle(.secondary)
             }
             // Note: the OS version shown is that of the Mac generating the report, not necessarily the one recorded.
-            Text("\(trace.host) · \(trace.model) · \(ProcessInfo.processInfo.operatingSystemVersionString)")
+            Text("\(trace.host) · \(trace.model) · \(trace.osVersion ?? "macOS version not recorded")")
                 .font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary)
             Text("\(stats.start.formatted(date: .abbreviated, time: .standard)) – \(stats.end.formatted(date: .omitted, time: .standard)) · \(shortDuration(stats.end.timeIntervalSince(stats.start))) · \(stats.frames) samples")
                 .font(.system(size: 11, design: .monospaced))

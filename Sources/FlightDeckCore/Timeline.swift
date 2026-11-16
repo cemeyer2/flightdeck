@@ -28,6 +28,7 @@ public enum Timeline {
     /// are ignored. Each metric only averages frames that actually measured it, so an unavailable reading lowers
     /// nothing; a bucket with no frames at all comes back as a gap rather than zeros. `n` must be positive.
     public static func build(_ frames: [Snapshot], from: Date, to: Date, buckets n: Int) -> [TimelineBucket] {
+        guard n > 0 else { return [] }
         // Floor of 1 s avoids a division by zero for an empty or inverted span.
         let span = max(to.timeIntervalSince(from), 1)
         var acc = [(cpu: [Double], pr: [Double], hot: [Double], w: [Double])](repeating: ([], [], [], []), count: n)

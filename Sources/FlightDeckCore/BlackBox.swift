@@ -133,17 +133,20 @@ public final class BlackBox: @unchecked Sendable {
         var frames: [Snapshot] = []
         var interval = tier == .fine ? 0.0 : config.coarseEvery
         var host = Host.current().localizedName ?? "Mac", model = ""
+        var os: String?
         // 1 s slack on the segment's bounds: file names hold millisecond-truncated times.
         for s in segments() where s.tier == tier && s.end.addingTimeInterval(1) >= from && s.start.addingTimeInterval(-1) <= to {
             guard let t = try? Trace.read(from: s.url) else { continue }
             frames += t.frames.filter { $0.time >= from && $0.time <= to }
-            interval = max(interval, t.interval); host = t.host; model = t.model
+            interval = max(interval, t.interval); host = t.host; model = t.model; os = t.osVersion ?? os
         }
         lock.lock(); let mem = pending[tier] ?? []; let iv = pendingInterval[tier] ?? 1; lock.unlock()
         frames += mem.filter { $0.time >= from && $0.time <= to }
         interval = max(interval, iv)
         frames.sort { $0.time < $1.time }
         guard !frames.isEmpty else { return nil }
-        return Trace(host: host, model: model, interval: interval, frames: frames)
+        var result = Trace(host: host, model: model, interval: interval, frames: frames)
+        if let os { result.osVersion = os }   // the version that recorded the segments (macOS may have updated since)
+        return result
     }
 }

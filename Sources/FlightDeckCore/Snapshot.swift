@@ -55,8 +55,17 @@ public final class Sampler: @unchecked Sendable {
     }
 
     /// Takes one frame. Called on the sampling queue once per tick; blocks for the duration of the slowest sampler.
+    /// Start time last seen for each PID, to notice when macOS reuses a PID for a new process.
+    private var pidStarts: [Int32: UInt64] = [:]
+
     public func sample() -> Snapshot {
         var procs = processes.sample()
+        // nettop and the GPU clients only report bare PIDs. If a PID now belongs to a different process (new start
+        // time), the old process's running totals must not carry over to it.
+        for p in procs where pidStarts[p.pid].map({ $0 != p.identity.startTime }) == true {
+            processNetwork.forget(pid: p.pid); gpuSampler.forget(pid: p.pid)
+        }
+        pidStarts = Dictionary(procs.map { ($0.pid, $0.identity.startTime) }, uniquingKeysWith: { a, _ in a })
         // Per-process network comes from nettop (macOS has no public per-process byte counters). When it ran, a
         // process missing from its output had no traffic, so it gets a real zero; when it didn't run, `network`
         // stays nil (unavailable). `retain` drops running totals for processes that have exited.
@@ -97,12 +106,15 @@ public struct Trace: Codable, Sendable {
     public var version = 2
     public var host: String
     public var model: String
+    /// macOS version of the Mac that recorded it (nil in older traces).
+    public var osVersion: String? = nil
     /// Nominal seconds between frames. Consumers use it to tell a normal step from a gap (e.g. > 3 intervals).
     public var interval: Double
     public var frames: [Snapshot]
 
     public init(host: String, model: String, interval: Double, frames: [Snapshot]) {
         self.host = host; self.model = model; self.interval = interval; self.frames = frames
+        osVersion = ProcessInfo.processInfo.operatingSystemVersionString   // traces are built on the recording Mac
     }
 
     /// Recorded frames keep only the top processes to bound file size. The kept set is a union of several "top"

@@ -18,6 +18,8 @@ public struct Incident: Codable, Sendable, Identifiable, Hashable {
     public var start: Date
     public var end: Date?          // nil while ongoing
     /// Call stacks captured automatically while it was happening (hangs and hogs), and their one-line summary.
+    /// Last time this incident was known to be ongoing (set when the log is saved); used as its end after a crash.
+    public var lastSeen: Date? = nil
     public var evidencePath: String? = nil
     public var evidenceSummary: String? = nil
     /// Ongoing incidents measure up to now.
@@ -59,7 +61,8 @@ public final class IncidentLog {
             incidents = (try? dec.decode([Incident].self, from: d)) ?? []
             // Anything left open (the app crashed or was killed before `closeAll`) ended at an unknown time. It is closed at
             // its start, i.e. with zero duration, rather than guessing how long it lasted.
-            for i in incidents.indices where incidents[i].end == nil { incidents[i].end = incidents[i].start }
+            // Open at quit or crash: it lasted at least until the last save, which records `lastSeen`.
+            for i in incidents.indices where incidents[i].end == nil { incidents[i].end = incidents[i].lastSeen ?? incidents[i].start }
         }
     }
 
@@ -135,11 +138,13 @@ public final class IncidentLog {
     /// Writes the whole log atomically if anything changed; a no-op for in-memory logs (`url == nil`). Write errors are
     /// ignored and the log is still marked clean, so a failed save is only retried after the next change.
     public func save() {
-        guard dirty, let url else { return }
+        guard let url, dirty || !open.isEmpty else { return }
+        let now = Date()
+        for (_, idx) in open { incidents[idx].lastSeen = now }   // so a crash still leaves a realistic duration
         let enc = JSONEncoder(); enc.dateEncodingStrategy = .secondsSince1970
         try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        if let d = try? enc.encode(incidents) { try? d.write(to: url, options: .atomic) }
-        dirty = false
+        // Only a successful write clears `dirty`, so a failed save is retried next time.
+        if let d = try? enc.encode(incidents), (try? d.write(to: url, options: .atomic)) != nil { dirty = false }
     }
 }
 
