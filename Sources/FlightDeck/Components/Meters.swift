@@ -9,7 +9,7 @@ import FlightDeckCore
 /// shades into warn/crit at the top end.
 struct VFDMeter: View {
     @Environment(\.palette) var p
-    var fraction: Double?          // nil = unavailable (all segments dark, hatched)
+    var fraction: Double?          // nil = unavailable (all segments dark, "UNAVAILABLE" overlay)
     var segments = 24
     var color: Color? = nil
     var height: CGFloat = 10

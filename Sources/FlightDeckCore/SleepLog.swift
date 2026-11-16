@@ -17,6 +17,12 @@ public struct SleepEvent: Sendable, Hashable, Identifiable {
     public var charge: Int?
     public var seconds: Int?           // how long this state lasted (sleep: asleep; dark wake: awake in the dark)
     public var explanation: String { SleepLog.explain(reason, kind: kind) }
+    /// A scheduled/background wake (maintenance, Power Nap, sleep services, timers) rather than something happening
+    /// (network traffic, Bluetooth, a notification, you). Views colour by this instead of matching wording.
+    public var isScheduled: Bool {
+        let s = reason.lowercased()
+        return s.contains("maintenance") || s.contains("sleepservice") || s.contains("rtc") || s.contains("nub.spmi")
+    }
 }
 
 /// One user-level sleep: from a "real" sleep until the next full wake, with the dark wakes in between.

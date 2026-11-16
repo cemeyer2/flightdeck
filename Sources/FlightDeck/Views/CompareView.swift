@@ -143,8 +143,11 @@ struct CompareView: View {
                             Text(bc[n].map { String(format: "%.1f%%", $0) } ?? "—")
                             // Missing from one side counts as 0 for the change column, so an app that only just fell
                             // out of a top-10 list can show a larger change than it really had.
-                            let d = (bc[n] ?? 0) - (ac[n] ?? 0)
-                            Text(String(format: "%+.1f", d)).foregroundStyle(abs(d) < 1 ? p.dim : d > 0 ? p.warn : p.accent)
+                            // Only a real change when the app is in both top-10 lists; otherwise "—" (not "+12" from a 0).
+                            if let x = ac[n], let y = bc[n] {
+                                let d = y - x
+                                Text(String(format: "%+.1f", d)).foregroundStyle(abs(d) < 1 ? p.dim : d > 0 ? p.warn : p.accent)
+                            } else { Text("—").foregroundStyle(p.dim) }
                         }
                     }
                 }.font(.system(size: 12, design: .monospaced))

@@ -11,8 +11,6 @@ import FlightDeckCore
 /// so it keeps updating even while the main window replays a recording.
 @MainActor
 final class InspectorModel: ObservableObject {
-    /// Intended graph length in samples. The graphs actually use ProcessHistory's own `capacity` (also 300).
-    static let length = 300
     let identity: ProcessIdentity
     /// Latest sample of the process; keeps the last value seen after the process exits so the window stays readable.
     @Published private(set) var sample: ProcessSample?
@@ -393,6 +391,8 @@ struct InspectorView: View {
 /// counter went backwards. Optional counters (peak footprint, instructions/cycles, logical writes) show "—" when the
 /// kernel didn't report them.
 struct StatisticsPanel: View {
+    /// What "not translated" means on this Mac: Apple silicon code, or plain Intel code on an Intel Mac.
+    static let nativeArch: String = (Sysctl.int("hw.optional.arm64") ?? 0) == 1 ? "Apple silicon" : "Intel (native)"
     @Environment(\.palette) var p
     var c: ProcessDetails.Counters
     var prev: ProcessDetails.Counters?
@@ -422,7 +422,7 @@ struct StatisticsPanel: View {
                           Text(c.instructions.flatMap { i in c.cycles.map { cy in String(format: "IPC %.2f", Double(i) / Double(max(cy, 1))) } } ?? "—")
                           Text("Logical writes").foregroundStyle(p.dim); Text(c.logicalWrites.map { Fmt.bytes($0) } ?? "—") }
                 GridRow { Text("Running threads").foregroundStyle(p.dim); Text("\(c.runningThreads) of \(s?.threads ?? 0)")
-                          Text("Kind").foregroundStyle(p.dim); Text(s?.translated == true ? "Intel (Rosetta 2)" : s?.translated == false ? "Apple silicon" : "—") }
+                          Text("Kind").foregroundStyle(p.dim); Text(s?.translated == true ? "Intel (Rosetta 2)" : s?.translated == false ? StatisticsPanel.nativeArch : "—") }
                 if let a = s?.powerAssertions, !a.isEmpty {
                     GridRow { Text("Keeping awake").foregroundStyle(p.dim); Text(a.map { "\($0.label)" + ($0.name.isEmpty ? "" : " (“\($0.name)”)") }.joined(separator: "; ")).gridCellColumns(3) }
                 }

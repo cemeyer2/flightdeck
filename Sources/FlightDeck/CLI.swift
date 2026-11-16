@@ -32,6 +32,16 @@ enum CLI {
             return Array(a[(i + 1)...(i + n)])
         }
         if a.contains("--help") { print(usage); exit(0) }
+        // A mistyped flag or a missing argument must not silently open the GUI instead. (Single-dash arguments are
+        // left alone: macOS and the automation hooks pass those, e.g. -destination, -NSDocumentRevisionsDebugMode.)
+        let known: [String: Int] = ["--snapshot": 0, "--json": 0, "--findings": 0, "--processes": 0, "--top": 1, "--stats": 1, "--csv": 2,
+                                    "--report": 2, "--render-views": 1, "--bench-ui": 0, "--render-iconset": 1, "--render-dock-previews": 1]
+        for (i, arg) in a.enumerated().dropFirst() where arg.hasPrefix("--") {
+            guard let n = known[arg] else { fail("unknown option \(arg)\n\n\(usage)") }
+            if n > 0 && (i + n >= a.count || a[(i + 1)...(i + n)].contains { $0.hasPrefix("--") }) && arg != "--bench-ui" {
+                fail("\(arg) needs \(n) argument\(n == 1 ? "" : "s")\n\n\(usage)")
+            }
+        }
         if let v = value("--render-views") { UIBench.renderViews(to: v[0]) }
         if a.contains("--bench-ui") { UIBench.run(renders: Int(value("--bench-ui")?.first ?? "") ?? 20) }
         if a.contains("--snapshot") || a.contains("--findings") {

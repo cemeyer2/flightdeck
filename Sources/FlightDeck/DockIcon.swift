@@ -50,7 +50,6 @@ final class DockIconController {
         d.cores = s.cpu.cores.map { ($0.total, $0.kind) }
         // Memory gauge = used / total; nil (unavailable, drawn as "—") rather than 0 if total is unknown.
         d.mem = s.memory.total > 0 ? Double(s.memory.used) / Double(s.memory.total) : nil
-        d.pressure = s.memory.pressure.value.map { $0 / 100 }
         d.temp = s.power.hottest.value
         d.recording = recording
         d.caution = caution
@@ -85,14 +84,12 @@ final class DockIconController {
 }
 
 /// Everything DockTileView draws, prepared by DockIconController (or with demo values by IconRenderer).
-/// Percentages are 0–100; `mem` and `pressure` are 0…1 fractions; `temp` is °C. nil = unavailable.
-/// `pressure` is filled in but not currently drawn by any mode.
+/// Percentages are 0–100; `mem` is a 0…1 fraction; `temp` is °C. nil = unavailable.
 struct DockData {
     var cpu: [Double?] = []
     var sys: [Double?] = []
     var cores: [(Double, CoreKind)] = []
     var mem: Double?
-    var pressure: Double?
     var temp: Double?
     var recording = false
     var caution = 0          // worst finding severity (2 caution, 3 warning)

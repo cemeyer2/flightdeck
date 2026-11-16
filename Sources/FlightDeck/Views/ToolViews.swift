@@ -142,23 +142,35 @@ final class DiskScan: ObservableObject {
     /// Bumped on every new scan. Results and the cancellation check compare against it, so navigating to another folder
     /// abandons the old scan and its late results are dropped instead of mixing into the new list.
     private var generation = 0
+    /// The current generation, readable from the scanning thread without blocking on the main thread.
+    private let liveGeneration = GenerationBox()
 
     func scan(_ newPath: String? = nil) {
         if let newPath { path = newPath }
         generation += 1; let gen = generation
+        liveGeneration.set(gen)
         entries = []; scanning = true
         let target = path
-        // Called from the scanning thread; hops to the main thread synchronously to read `generation`.
-        let isCurrent: @Sendable () -> Bool = { [weak self] in
-            DispatchQueue.main.sync { self?.generation == gen }
-        }
-        Task.detached(priority: .utility) {
+        let live = liveGeneration
+        Task.detached(priority: .utility) { [weak self] in
             DiskUsage.children(of: target, progress: { entry in
-                DispatchQueue.main.async { if self.generation == gen { self.entries.append(entry); self.entries.sort { $0.size > $1.size } } }
-            }, cancelled: { !isCurrent() })
-            await MainActor.run { if self.generation == gen { self.scanning = false } }
+                DispatchQueue.main.async {
+                    guard let self, self.generation == gen else { return }
+                    // Insert in size order instead of re-sorting the whole list for every streamed result.
+                    let i = self.entries.firstIndex { $0.size < entry.size } ?? self.entries.endIndex
+                    self.entries.insert(entry, at: i)
+                }
+            }, cancelled: { live.get() != gen })
+            await MainActor.run { if let self, self.generation == gen { self.scanning = false } }
         }
     }
+}
+
+/// A lock-protected integer shared with background work (here: "is this scan still the current one?").
+final class GenerationBox: @unchecked Sendable {
+    private let lock = NSLock(); private var value = 0
+    func set(_ v: Int) { lock.lock(); value = v; lock.unlock() }
+    func get() -> Int { lock.lock(); defer { lock.unlock() }; return value }
 }
 
 /// Disk Space: mounted volumes (click one to scan it) and a drill-down list of the largest items in the scanned folder,

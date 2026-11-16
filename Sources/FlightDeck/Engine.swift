@@ -88,9 +88,6 @@ final class Engine: ObservableObject {
     @Published private(set) var ruleLog: [RuleLogEntry] = Engine.loadRuleLog()
     /// Set to a Destination raw value (optionally "Performance:<tab>") to navigate there.
     @Published var navigationRequest: String?
-    /// Called on the main actor for each incident once it has lasted long enough to log.
-    /// Currently nothing assigns this hook.
-    var onNewIncident: ((Incident) -> Void)?
 
     /// Reads all the system counters. Its delta state means it must only be used on `queue`.
     private let sampler = Sampler()
@@ -371,7 +368,6 @@ final class Engine: ObservableObject {
                 Alerts.shared.evaluate(found + self.reportFindings, now: s.time)
                 firings.forEach { self.execute($0) }
                 if let log { self.incidents = log }
-                fresh.forEach { self.onNewIncident?($0) }
                 self.ingest(s)
             }
         }

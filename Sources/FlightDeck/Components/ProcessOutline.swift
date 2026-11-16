@@ -168,8 +168,10 @@ struct ProcessOutline: NSViewRepresentable {
         func appGroups(_ all: [ProcItem]) -> [ProcItem] {
             var buckets: [String: [ProcItem]] = [:]
             var order: [String] = []
+            var names: [String: String] = [:]
             for (it, gk) in zip(all, AppUsage.groupKeys(all.map(\.s))) {
                 let k = gk.key
+                names[k] = names[k] ?? gk.name   // from keying all processes, so restricted ones still get the app's name
                 if buckets[k] == nil { order.append(k) }
                 buckets[k, default: []].append(it)
             }
@@ -180,7 +182,7 @@ struct ProcessOutline: NSViewRepresentable {
                 g.identity = groupIdentity(k)
                 // Note: groupKeys on a single process skips the name recovery done for the whole list, so a restricted
                 // first member can give the group its process name instead of the app name.
-                g.name = "\(AppUsage.groupKeys([members[0].s]).first!.name) (\(members.count))"
+                g.name = "\(names[k] ?? g.name) (\(members.count))"
                 // A trailing slash after the bundle path lets the icon lookup (which searches for ".app/") find the app icon.
                 g.path = k.hasPrefix("proc:") ? g.path : k + "/"
                 g.ppid = 0
@@ -276,7 +278,12 @@ struct ProcessOutline: NSViewRepresentable {
                 let byPID = Dictionary(next.values.map { ($0.s.pid, $0) }, uniquingKeysWith: { a, _ in a })
                 var r: [ProcItem] = []
                 for it in next.values {
-                    if it.s.pid != it.s.ppid, it.s.ppid > 1, let parentItem = byPID[it.s.ppid] { parentItem.children.append(it) } else { r.append(it) }
+                    // The parent must have started before the child: a parent PID that has since been reused by a newer
+                    // process isn't this child's parent (the child was re-parented or orphaned).
+                    if it.s.pid != it.s.ppid, it.s.ppid > 1, let parentItem = byPID[it.s.ppid],
+                       parentItem.s.identity.startTime <= it.s.identity.startTime {
+                        parentItem.children.append(it)
+                    } else { r.append(it) }
                 }
                 func sortRec(_ a: [ProcItem]) -> [ProcItem] { let s = sorted(a); s.forEach { $0.children = sortRec($0.children) }; return s }
                 roots = sortRec(r)
@@ -293,6 +300,9 @@ struct ProcessOutline: NSViewRepresentable {
             let reparented = parents.contains { id, p in lastParents[id].map { $0 != p } ?? (lastParents.keys.contains(id) == false && oldIDs.contains(id)) }
                 || lastParents.contains { id, _ in parents[id] == nil && next[id] != nil }
             lastParents = parents; oldIDs = Set(items.keys)
+            // Forget state for processes and groups that no longer exist, so these don't grow forever.
+            expanded = expanded.filter { items[$0] != nil }
+            groupItems = groupItems.filter { items[$0.key] != nil }
             if lastSort != sortKey() || ov.numberOfRows == 0 || reparented {
                 ov.reloadData()
                 // reloadData collapses everything; restore the user's expansions (ignored by the expand callbacks while

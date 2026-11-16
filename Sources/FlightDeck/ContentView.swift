@@ -32,8 +32,6 @@ enum Destination: String, CaseIterable, Identifiable, Hashable {
         case .benchmarks: "speedometer"
         }
     }
-    /// Destinations whose content follows live (or replayed) samples. Not read anywhere at present.
-    var isLive: Bool { [.summary, .flightLog, .performance, .processes, .power].contains(self) }
 }
 
 /// Main window content. Selection and Performance tab are per-window scene storage, so they survive relaunches.
@@ -186,8 +184,10 @@ struct ReplayBar: View {
                 Button { engine.replayIndex = max(0, engine.replayIndex - 1) } label: { Image(systemName: "backward.frame.fill") }
                 Button { engine.replayIndex = min(t.frames.count - 1, engine.replayIndex + 1) } label: { Image(systemName: "forward.frame.fill") }
                 // The upper bound is at least 1 because a closed range needs distinct ends; Engine clamps the index.
-                Slider(value: Binding(get: { Double(engine.replayIndex) }, set: { engine.replayIndex = Int($0) }),
-                       in: 0...Double(max(t.frames.count - 1, 1)))
+                if t.frames.count > 1 {
+                    Slider(value: Binding(get: { Double(engine.replayIndex) }, set: { engine.replayIndex = Int($0) }),
+                           in: 0...Double(t.frames.count - 1))
+                } else { Spacer() }   // a one-frame recording has nothing to scrub
                 Text("\(engine.replayIndex + 1)/\(t.frames.count)").font(.system(size: 11, design: .monospaced)).monospacedDigit()
                 if let c = engine.current {
                     Text(c.time.formatted(date: .abbreviated, time: .standard)).font(.system(size: 11, design: .monospaced))

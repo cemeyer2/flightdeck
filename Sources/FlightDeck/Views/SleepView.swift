@@ -86,7 +86,7 @@ struct SleepView: View {
             for d in s.darkWakes {
                 let x = CGFloat(d.time.timeIntervalSince(s.start) / span) * size.width
                 let w = max(CGFloat(Double(d.seconds ?? 10) / span) * size.width, 2)
-                ctx.fill(Path(CGRect(x: x, y: 0, width: w, height: size.height)), with: .color(d.explanation.contains("maintenance") || d.explanation.contains("services") ? p.accent2 : p.warn))
+                ctx.fill(Path(CGRect(x: x, y: 0, width: w, height: size.height)), with: .color(d.isScheduled ? p.accent2 : p.warn))
             }
         }
         .help("Asleep (bar) and dark wakes (ticks): orange-red for network/Bluetooth/notifications, amber for scheduled maintenance")

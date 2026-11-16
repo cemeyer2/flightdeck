@@ -74,7 +74,7 @@ struct CPUPerf: View {
                 }
             case .logical:
                 // Number of logical cores in the current snapshot (0 before the first sample).
-                let n = s?.cores.count ?? e.current.map { _ in 0 } ?? 0
+                let n = s?.cores.count ?? 0
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 200), spacing: 10)], spacing: 10) {
                     ForEach(0..<n, id: \.self) { i in CoreTile(index: i) }
                 }

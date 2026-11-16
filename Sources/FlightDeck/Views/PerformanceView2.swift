@@ -498,7 +498,8 @@ struct EnergyBudgetPanel: View {
                     .font(.caption).foregroundStyle(p.dim)
             }
         }
-        .task(id: hours) { await load() }
+        // Reload every minute while the panel is visible, so the budget keeps up with the black box.
+        .task(id: hours) { while !Task.isCancelled { await load(); try? await Task.sleep(for: .seconds(60)) } }
     }
 
     func load() async {
