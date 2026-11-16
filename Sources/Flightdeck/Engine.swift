@@ -142,6 +142,7 @@ final class Engine: ObservableObject {
 
     /// Headless: push a snapshot (with its findings) as if it had just been sampled.
     func feed(_ s: Snapshot, findings: [Finding]) {
+        processHistory.record(s.processes)
         liveFindings = findings; liveSnapshot = s; current = s
         var light = s; light.processes = Array(s.processes.sorted { $0.cpu > $1.cpu }.prefix(12))
         frames.removeFirst(); frames.append(light)

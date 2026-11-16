@@ -51,7 +51,7 @@ struct FlightLogView: View {
     var body: some View {
         let shown = e.incidents.filter { $0.severity.rawValue >= minSeverity }.reversed()
         let days = Dictionary(grouping: shown) { Calendar.current.startOfDay(for: $0.start) }
-        ScrollView {
+        MaybeScroll {
             VStack(alignment: .leading, spacing: 12) {
                 TimelinePanel()
                 Panel(title: "Right now", trailing: e.mode == .replay ? "at the replayed moment" : nil) {

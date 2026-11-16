@@ -92,6 +92,7 @@ flightdeck --findings               # what's wrong right now
 flightdeck --stats rec.flightlog    # statistics and findings of a recording
 flightdeck --csv rec.flightlog out.csv [--processes]
 flightdeck --report rec.flightlog out.pdf
+flightdeck --render-views <dir>     # write 2x PNGs of the main views with live data (visual review, no window)
 flightdeck --bench-ui [N]           # render every main view off-screen N times with live data; ms per frame
 ```
 

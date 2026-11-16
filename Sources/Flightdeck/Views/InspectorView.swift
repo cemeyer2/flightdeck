@@ -86,7 +86,7 @@ struct InspectorView: View {
         let s = model.sample
         VStack(spacing: 0) {
             header(s)
-            ScrollView {
+            MaybeScroll {
                 VStack(spacing: 12) {
                     graphs
                     Picker("", selection: $tab) { ForEach(InspectorTab.allCases) { Text($0.rawValue).tag($0) } }

@@ -6,7 +6,7 @@ struct SummaryView: View {
     @Environment(\.palette) var p
 
     var body: some View {
-        ScrollView {
+        MaybeScroll {
             VStack(spacing: 12) {
                 DiagnosisBanner()
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), spacing: 12)], spacing: 12) {

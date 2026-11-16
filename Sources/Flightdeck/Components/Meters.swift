@@ -81,3 +81,18 @@ struct Panel<Content: View>: View {
         .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(p.panelBorder))
     }
 }
+
+private struct OffscreenKey: EnvironmentKey { static let defaultValue = false }
+extension EnvironmentValues {
+    /// True while rendering off-screen (benchmarks, PNG review): ScrollViews would render empty there.
+    var offscreen: Bool { get { self[OffscreenKey.self] } set { self[OffscreenKey.self] = newValue } }
+}
+
+/// A vertical ScrollView, except when rendering off-screen.
+struct MaybeScroll<Content: View>: View {
+    @Environment(\.offscreen) private var offscreen
+    @ViewBuilder var content: Content
+    var body: some View {
+        if offscreen { content } else { ScrollView { content } }
+    }
+}
