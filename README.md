@@ -22,6 +22,11 @@ Startup Apps · Users · Services (launchd) · Power & Freq · Connections · In
 **Flight Recorder:** Record (⇧⌘R) captures every telemetry frame and saves it as a `.flightlog` file
 (zlib-compressed JSON). Open it (⌘O, or double-click in Finder) to scrub or replay it through the same views. Older `.mltrace` recordings from before the rename still open.
 
+**Black box:** an always-on rolling recorder (on by default, Settings to turn off or clear). It keeps every sample
+for the last hour and one sample every 10 s for 24 hours, capped at 50 MB, in
+`~/Library/Application Support/Flightdeck/BlackBox` as ordinary `.flightlog` segments. Recorder › Save from Black Box
+saves the last 5 minutes to 24 hours after the fact; Recorder › Replay Black Box (⇧⌘B: last 10 minutes) replays it.
+
 Six themes: Light, Dark, Green, Amber, Blue, Mono.
 
 **Live Dock icon:** right-click the Dock icon (or use Monitor › Dock Icon, or Settings) to pick a mode:

@@ -15,6 +15,7 @@ final class Engine: ObservableObject {
     @Published var paused = false { didSet { if !paused { pushGap() } } }
     @AppStorage("interval") var interval: Double = 1.0 { didSet { restartTimer() } }
     @AppStorage("includeSelf") var includeSelf = true
+    @AppStorage("blackBoxEnabled") var blackBoxEnabled = true
 
     // Flight Recorder
     @Published private(set) var mode: Mode = .live
@@ -31,9 +32,17 @@ final class Engine: ObservableObject {
     private var playTimer: Timer?
     private var inFlight = false
 
+    // Black box: always-on rolling recorder, written off the sampling queue.
+    let blackBox = BlackBox(dir: BlackBox.defaultDirectory)
+    private let blackBoxQueue = DispatchQueue(label: "flightdeck.blackbox", qos: .background)
+
     init() {
         queue.async { [sampler] in _ = sampler.sample() }   // prime deltas
         restartTimer()
+        blackBoxQueue.async { [blackBox] in blackBox.prune() }
+        NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: nil) { [blackBox, blackBoxQueue] _ in
+            blackBoxQueue.sync { blackBox.flush() }
+        }
     }
 
     var cpuKind: (Int) -> CoreKind { { [sampler] in sampler.cpu.kind(of: $0) } }
@@ -60,6 +69,7 @@ final class Engine: ObservableObject {
     private func ingest(_ s: Snapshot) {
         inFlight = false
         if recording { recorded.append(FlightdeckCore.Trace.trimmed(s)) }
+        if blackBoxEnabled { let iv = interval; blackBoxQueue.async { [blackBox] in blackBox.append(s, interval: iv) } }
         DockIconController.shared.ingest(s, recording: recording)
         guard mode == .live else { return }
         current = s
@@ -83,12 +93,37 @@ final class Engine: ObservableObject {
 
     func saveRecording() {
         guard !recorded.isEmpty else { return }
-        let t = FlightdeckCore.Trace(host: Host.current().localizedName ?? "Mac", model: Sysctl.string("hw.model") ?? "",
-                                interval: interval, frames: recorded)
+        save(FlightdeckCore.Trace(host: Host.current().localizedName ?? "Mac", model: Sysctl.string("hw.model") ?? "",
+                                  interval: interval, frames: recorded), prefix: "Recording")
+    }
+
+    // MARK: Black box
+    /// Saves the last `minutes` of the black box (full resolution up to an hour, 10 s resolution beyond).
+    func saveBlackBox(minutes: Int) {
+        guard let t = blackBoxTrace(minutes: minutes) else { return }
+        save(t, prefix: "Black Box \(minutes >= 60 ? "\(minutes / 60)h" : "\(minutes)m")")
+    }
+
+    func replayBlackBox(minutes: Int) {
+        guard let t = blackBoxTrace(minutes: minutes) else { return }
+        load(t, startAtEnd: true)
+    }
+
+    private func blackBoxTrace(minutes: Int) -> FlightdeckCore.Trace? {
+        let from = Date().addingTimeInterval(-Double(minutes) * 60)
+        let tier: BlackBox.Tier = Double(minutes) * 60 <= blackBox.config.fineRetention ? .fine : .coarse
+        let t = blackBoxQueue.sync { blackBox.trace(tier, from: from) }
+        if t == nil { lastError = blackBoxEnabled ? "The black box has no data for the last \(minutes) minutes yet." : "The black box is turned off (Settings)." }
+        return t
+    }
+
+    func clearBlackBox() { blackBoxQueue.async { [blackBox] in blackBox.clear() } }
+
+    private func save(_ t: FlightdeckCore.Trace, prefix: String) {
         let panel = NSSavePanel()
         panel.allowedContentTypes = [UTType(filenameExtension: FlightdeckCore.Trace.fileExtension) ?? .data]
         let df = DateFormatter(); df.dateFormat = "yyyy-MM-dd HH.mm.ss"
-        panel.nameFieldStringValue = "Recording \(df.string(from: Date())).\(FlightdeckCore.Trace.fileExtension)"
+        panel.nameFieldStringValue = "\(prefix) \(df.string(from: Date())).\(FlightdeckCore.Trace.fileExtension)"
         if panel.runModal() == .OK, let url = panel.url {
             do { try t.write(to: url); NSDocumentController.shared.noteNewRecentDocumentURL(url) }
             catch { lastError = error.localizedDescription }
@@ -112,10 +147,11 @@ final class Engine: ObservableObject {
         load(FlightdeckCore.Trace(host: Host.current().localizedName ?? "", model: "", interval: interval, frames: recorded))
     }
 
-    private func load(_ t: FlightdeckCore.Trace) {
+    private func load(_ t: FlightdeckCore.Trace, startAtEnd: Bool = false) {
         guard !t.frames.isEmpty else { lastError = "Trace is empty"; return }
+        playing = false; playTimer?.invalidate()
         trace = t; mode = .replay
-        let start = UserDefaults.standard.integer(forKey: "replayIndex")   // debug/automation hook
+        let start = startAtEnd ? t.frames.count - 1 : UserDefaults.standard.integer(forKey: "replayIndex")   // debug/automation hook
         replayIndex = min(max(start, 0), t.frames.count - 1); applyReplay()
     }
 
