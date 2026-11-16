@@ -117,7 +117,10 @@ public enum Stress {
     }
 
     public static func energyStress(_ s: Snapshot) -> Double? {
-        s.power.systemWatts.value.map { min(max(($0 - energyIdleWatts) / (energyFullWatts - energyIdleWatts), 0), 1) }
+        // Power draw is only real misery on battery (it's what drains it). On AC it's scaled down to a quarter, so a busy
+        // plugged-in Mac's main complaint stays CPU/thermal rather than "energy".
+        let onBattery = s.power.powerSource == "Battery"
+        return s.power.systemWatts.value.map { min(max(($0 - energyIdleWatts) / (energyFullWatts - energyIdleWatts), 0), 1) * (onBattery ? 1 : 0.25) }
     }
 
     /// The key reading shown beside each hub.

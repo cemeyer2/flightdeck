@@ -33,6 +33,12 @@ for the last hour and one sample every 10 s for 24 hours, capped at 50 MB, in
 `~/Library/Application Support/Flightdeck/BlackBox` as ordinary `.flightlog` segments. Recorder › Save from Black Box
 saves the last 5 minutes to 24 hours after the fact; Recorder › Replay Black Box (⇧⌘B: last 10 minutes) replays it.
 
+**Stress Map:** a graphical answer to "what is making my Mac miserable?". Subsystems (CPU, GPU, Thermal, Energy,
+Network, Disk, Memory) are hubs around a ring, coloured by how strained each one is; apps are bubbles sized by how much
+misery they cause and pulled toward the hubs they strain, with routes whose width shows how much they add there.
+Hover for an app's breakdown, click to inspect it. Misery = the app's share of a resource × how strained that resource
+is (power draw counts fully only on battery); unmeasured readings blame nobody. Works in replay too.
+
 **Annunciator panel:** across the top of Summary, a cockpit-style grid of labelled lights (CPU, MEM, SWAP, THERM,
 DISK, STORAGE, NET, GPU, POWER, HANG, CRASH, AWAKE), each lit amber or red by the worst current finding in that
 subsystem. Hover to see why; click to jump to the cause.
