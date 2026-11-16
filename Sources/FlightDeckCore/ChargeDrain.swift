@@ -6,7 +6,10 @@ import Foundation
 
 /// One stretch on battery power.
 public struct ChargeSession: Codable, Sendable, Hashable {
-    public struct App: Codable, Sendable, Hashable { public var name: String; public var icon: String; public var wattHours: Double }
+    public struct App: Codable, Sendable, Hashable {
+        public var name: String; public var icon: String; public var wattHours: Double
+        public init(name: String, icon: String, wattHours: Double) { self.name = name; self.icon = icon; self.wattHours = wattHours }
+    }
     public var start: Date
     /// True when FlightDeck saw the unplug itself. False when it started (or relaunched) already on battery, so the
     /// session only covers the time since then.
@@ -66,4 +69,5 @@ public struct ChargeStatus: Sendable {
     public var current: ChargeSession?
     /// The most recent completed session.
     public var last: ChargeSession?
+    public init(current: ChargeSession?, last: ChargeSession?) { self.current = current; self.last = last }
 }

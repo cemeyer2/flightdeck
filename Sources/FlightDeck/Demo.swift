@@ -115,6 +115,7 @@ enum Demo {
         e.demoInject(incidents: incidents(now), reports: reports(now), rules: demoRules, ruleLog: demoRuleLog(now))
         e.demoTimeline = timeline(template: template, now: now)
         e.demoSleep = sleepReport(now: now)
+        e.dailyLog.replaceForDemo(days: trendDays(now: now), charge: chargeStatus(now: now))   // Trends (in memory only)
         var i = 120
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
             MainActor.assumeIsolated {
