@@ -7,11 +7,12 @@ struct FlightdeckApp: App {
     @StateObject private var engine = Engine()
     @AppStorage("theme") private var theme: ThemeID = .dark
     @AppStorage("dockMode") private var dockMode: DockMode = .cpuHistory
+    @AppStorage("menuBarEnabled") private var menuBarEnabled = true
 
     init() { IconRenderer.handleCommandLine() }
 
     var body: some Scene {
-        WindowGroup("Flightdeck") {
+        Window("Flightdeck", id: "main") {
             ContentView()
                 .environmentObject(engine)
                 .environment(\.palette, Palette.of(theme))
@@ -50,6 +51,12 @@ struct FlightdeckApp: App {
                 Picker("Dock Icon", selection: $dockMode) { ForEach(DockMode.allCases) { Text($0.rawValue).tag($0) } }
             }
         }
+        MenuBarExtra(isInserted: $menuBarEnabled) {
+            MenuBarPanel().environmentObject(engine).environment(\.palette, Palette.of(theme))
+        } label: {
+            MenuBarLabel().environmentObject(engine)
+        }
+        .menuBarExtraStyle(.window)
         Settings {
             SettingsView().environmentObject(engine).environment(\.palette, Palette.of(theme))
         }
@@ -70,19 +77,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ n: Notification) {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
+        Alerts.shared.start()
+    }
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
+        if !hasVisibleWindows { AppActions.showMain() }
+        return true
     }
     func application(_ app: NSApplication, open urls: [URL]) {
         urls.forEach { NotificationCenter.default.post(name: .openTraceFile, object: $0) }
     }
     func applicationDockMenu(_ sender: NSApplication) -> NSMenu? { DockIconController.shared.dockMenu() }
     func applicationWillTerminate(_ n: Notification) { NSApp.dockTile.contentView = nil; NSApp.dockTile.display() }
-    func applicationShouldTerminateAfterLastWindowClosed(_ s: NSApplication) -> Bool { true }
+    /// With the menu bar item on, closing the window keeps Flightdeck running (black box and alerts continue).
+    func applicationShouldTerminateAfterLastWindowClosed(_ s: NSApplication) -> Bool {
+        !(UserDefaults.standard.object(forKey: "menuBarEnabled") as? Bool ?? true)
+    }
 }
 
 struct SettingsView: View {
     @EnvironmentObject var engine: Engine
     @AppStorage("theme") private var theme: ThemeID = .dark
     @AppStorage("dockMode") private var dockMode: DockMode = .cpuHistory
+    @AppStorage("menuBarEnabled") private var menuBarEnabled = true
+    @AppStorage("menuBarStyle") private var menuBarStyle: MenuBarStyle = .gauges
+    @AppStorage("alertsEnabled") private var alertsEnabled = true
+    @AppStorage("alertMinSeverity") private var alertMinSeverity = 2
+    @AppStorage("alertAfterMinutes") private var alertAfterMinutes = 2.0
+    @State private var loginItem = LoginItem.isEnabled
+    @State private var loginError: String?
     @State private var blackBoxBytes: UInt64 = 0
     @State private var confirmClear = false
     var body: some View {
@@ -93,6 +115,25 @@ struct SettingsView: View {
                 Text("0.5 s").tag(0.5); Text("1 s").tag(1.0); Text("2 s").tag(2.0); Text("5 s").tag(5.0)
             }
             Toggle("Include Flightdeck in measurements (self-monitoring)", isOn: $engine.includeSelf)
+            Section("Menu bar and alerts") {
+                Toggle("Show in menu bar (keeps running when the window is closed)", isOn: $menuBarEnabled)
+                Picker("Menu bar shows", selection: $menuBarStyle) { ForEach(MenuBarStyle.allCases) { Text($0.rawValue).tag($0) } }
+                    .disabled(!menuBarEnabled)
+                Toggle("Open at login", isOn: Binding(get: { loginItem }, set: { on in
+                    do { try LoginItem.set(on); loginItem = LoginItem.isEnabled } catch { loginError = error.localizedDescription }
+                }))
+                if let loginError { Text(loginError).font(.caption).foregroundStyle(.red) }
+                Toggle("Notify me about sustained problems", isOn: $alertsEnabled)
+                    .onChange(of: alertsEnabled) { if alertsEnabled { Alerts.shared.requestPermission() } }
+                Picker("Notify for", selection: $alertMinSeverity) { Text("Cautions and warnings").tag(2); Text("Warnings only").tag(3) }
+                    .disabled(!alertsEnabled)
+                Picker("After it lasts", selection: $alertAfterMinutes) {
+                    Text("1 minute").tag(1.0); Text("2 minutes").tag(2.0); Text("5 minutes").tag(5.0); Text("10 minutes").tag(10.0)
+                }.disabled(!alertsEnabled)
+                Picker("An app is \"busy\" above", selection: $engine.appCPUThreshold) {
+                    Text("50% of a core").tag(50.0); Text("80% of a core").tag(80.0); Text("1.5 cores").tag(150.0); Text("3 cores").tag(300.0)
+                }
+            }
             Section("Black box") {
                 Toggle("Always-on black box recorder", isOn: $engine.blackBoxEnabled)
                 Text("Keeps every sample for the last hour and one sample every 10 s for 24 hours (at most 50 MB), so you can save or replay what happened after the fact.")

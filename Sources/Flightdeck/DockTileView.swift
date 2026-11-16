@@ -48,6 +48,15 @@ final class DockTileView: NSView {
         gloss?.draw(in: NSRect(x: screen.minX, y: screen.midY, width: screen.width, height: screen.height / 2), angle: -90)
         ctx.restoreGState()
 
+        if data.caution >= 2 && mode != .appIcon {
+            // master caution: amber (caution) or red (warning) light in the top bezel, right of centre
+            let col = data.caution >= 3 ? NSColor(red: 1, green: 0.25, blue: 0.2, alpha: 1) : NSColor(red: 1, green: 0.72, blue: 0.1, alpha: 1)
+            ctx.saveGState()
+            ctx.setShadow(offset: .zero, blur: 5 * u, color: col.cgColor)
+            let light = NSRect(x: tile.maxX - 24 * u, y: tile.maxY - 7 * u, width: 12 * u, height: 4.5 * u)
+            col.setFill(); NSBezierPath(roundedRect: light, xRadius: 1.5 * u, yRadius: 1.5 * u).fill()
+            ctx.restoreGState()
+        }
         if data.recording && mode != .appIcon {
             // recording: glowing red screen border + small tally light in the top bezel
             let red = NSColor(red: 1, green: 0.23, blue: 0.2, alpha: 1)

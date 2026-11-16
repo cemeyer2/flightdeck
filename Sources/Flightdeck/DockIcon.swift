@@ -25,7 +25,7 @@ final class DockIconController {
         NSApp.dockTile.contentView = view
     }
 
-    func ingest(_ s: Snapshot, recording: Bool) {
+    func ingest(_ s: Snapshot, recording: Bool, caution: Int = 0) {
         cpu.removeFirst(); cpu.append(s.cpu.total.value)
         sys.removeFirst(); sys.append(s.cpu.system.value)
         var d = DockData()
@@ -35,6 +35,7 @@ final class DockIconController {
         d.pressure = s.memory.pressure.value.map { $0 / 100 }
         d.temp = s.power.hottest.value
         d.recording = recording
+        d.caution = caution
         view.data = d
         refresh()
     }
@@ -70,4 +71,5 @@ struct DockData {
     var pressure: Double?
     var temp: Double?
     var recording = false
+    var caution = 0          // worst finding severity (2 caution, 3 warning)
 }

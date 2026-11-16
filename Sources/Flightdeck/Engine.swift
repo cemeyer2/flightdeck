@@ -11,11 +11,14 @@ final class Engine: ObservableObject {
     static let historyLength = 120
 
     @Published private(set) var current: Snapshot?
+    /// Always the latest live sample, even while replaying (menu bar, Dock, alerts).
+    @Published private(set) var liveSnapshot: Snapshot?
     @Published private(set) var frames: [Snapshot?] = Array(repeating: nil, count: Engine.historyLength)
     @Published var paused = false { didSet { if !paused { pushGap() } else { queue.async { [incidentLog] in incidentLog.closeAll(at: Date()) } } } }
     @AppStorage("interval") var interval: Double = 1.0 { didSet { restartTimer() } }
     @AppStorage("includeSelf") var includeSelf = true
     @AppStorage("blackBoxEnabled") var blackBoxEnabled = true
+    @AppStorage("appCPUThreshold") var appCPUThreshold = 80.0 { didSet { applyThresholds() } }
 
     // Flight Recorder
     @Published private(set) var mode: Mode = .live
@@ -60,10 +63,16 @@ final class Engine: ObservableObject {
             queue.async { analyzer.seed(history: history) }
         }
         incidents = incidentLog.incidents
+        applyThresholds()
         NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: nil) { [blackBox, blackBoxQueue, queue, incidentLog] _ in
             blackBoxQueue.sync { blackBox.flush() }
             queue.sync { incidentLog.closeAll(at: Date()); incidentLog.save() }
         }
+    }
+
+    private func applyThresholds() {
+        let cpu = appCPUThreshold
+        queue.async { [analyzer] in analyzer.thresholds.appCPU = cpu }
     }
 
     var cpuKind: (Int) -> CoreKind { { [sampler] in sampler.cpu.kind(of: $0) } }
@@ -90,6 +99,7 @@ final class Engine: ObservableObject {
             self.incidentRevision = incidentLog.revision
             Task { @MainActor in
                 self.liveFindings = found
+                Alerts.shared.evaluate(found, now: s.time)
                 if let log { self.incidents = log }
                 fresh.forEach { self.onNewIncident?($0) }
                 self.ingest(s)
@@ -99,9 +109,10 @@ final class Engine: ObservableObject {
 
     private func ingest(_ s: Snapshot) {
         inFlight = false
+        liveSnapshot = s
         if recording { recorded.append(FlightdeckCore.Trace.trimmed(s)) }
         if blackBoxEnabled { let iv = interval; blackBoxQueue.async { [blackBox] in blackBox.append(s, interval: iv) } }
-        DockIconController.shared.ingest(s, recording: recording)
+        DockIconController.shared.ingest(s, recording: recording, caution: liveFindings.map(\.severity.rawValue).max() ?? 0)
         guard mode == .live else { return }
         current = s
         var light = s; light.processes = Array(s.processes.sorted { $0.cpu > $1.cpu }.prefix(12))

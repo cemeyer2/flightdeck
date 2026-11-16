@@ -35,6 +35,12 @@ and anything unusual for *this* Mac, compared with a baseline built from the bla
 background work (Spotlight, Time Machine, iCloud, Photos analysis, updates) is explained. Anything lasting 20 s or
 more goes into the **Flight Log** (kept 7 days) with a one-click replay of that moment from the black box.
 
+**Master caution:** a menu bar instrument strip (caution light, CPU and memory bars; or CPU % or the light alone)
+opens a panel with the caution status, gauges, findings, top apps and quick actions. With it on, closing the window
+keeps Flightdeck running, so the black box and alerts continue (Settings › Open at login). Sustained cautions and
+warnings also post a notification (after 2 minutes by default, once per occurrence, at most every 30 minutes per
+problem; click to jump to the right view), and light an amber or red caution lamp on the Dock icon.
+
 Six themes: Light, Dark, Green, Amber, Blue, Mono.
 
 **Live Dock icon:** right-click the Dock icon (or use Monitor › Dock Icon, or Settings) to pick a mode:

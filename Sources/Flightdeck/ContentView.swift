@@ -58,6 +58,7 @@ struct ContentView: View {
             if parts.count > 1, let t = PerfTab(rawValue: parts[1]) { perfTab = t }
         }
         .onAppear {
+            if Alerts.shared.onOpen == nil { Alerts.shared.onOpen = { [engine] d in AppActions.showMain(navigate: d, engine: engine) } }
             // Debug/automation hook: `open Flightdeck.app --args -destination "Processes"`
             if let d = UserDefaults.standard.string(forKey: "destination").flatMap(Destination.init(rawValue:)) {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { selection = d }
