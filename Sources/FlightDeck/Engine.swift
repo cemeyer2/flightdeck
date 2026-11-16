@@ -120,6 +120,9 @@ final class Engine: ObservableObject {
     /// Recent history of every process (for the inspector).
     /// Thread-safe (internally locked): recorded on `queue`, read from views.
     let processHistory = ProcessHistory()
+    /// Launches and exits seen between samples (Launches view, respawn finding). Thread-safe like processHistory:
+    /// fed on `queue`, read from views. O(n) per sample.
+    let launchLog = LaunchLog()
     let blackBoxQueue = DispatchQueue(label: "flightdeck.blackbox", qos: .background)
     // Confined to `queue`. They are `nonisolated` so the sampling closures can use them without hopping to the main actor;
     // `nonisolated(unsafe)` marks vars whose safety comes from that confinement rather than from the compiler.
@@ -383,7 +386,9 @@ final class Engine: ObservableObject {
             sampler.background = !visible
             let s = sampler.sample()
             self.processHistory.record(s.processes)
-            let found = analyzer.ingest(s)
+            self.launchLog.ingest(s.processes, at: s.time)
+            // Respawn loops join the analyzer's findings, so they reach the banner, alerts and the Flight Log the same way.
+            let found = analyzer.ingest(s) + self.launchLog.findings(now: s.time)
             ruleEngine.frontmostPID = front
             let firings = ruleEngine.evaluate(s)
             let fullDays = analyzer.daysUntilFull()
@@ -419,6 +424,7 @@ final class Engine: ObservableObject {
     /// Headless: push a snapshot (with its findings) as if it had just been sampled.
     func feed(_ s: Snapshot, findings: [Finding]) {
         processHistory.record(s.processes)
+        launchLog.ingest(s.processes, at: s.time)
         liveFindings = findings; liveSnapshot = s; current = s
         var light = s; light.processes = Array(s.processes.sorted { $0.cpu > $1.cpu }.prefix(12))
         frames.removeFirst(); frames.append(light)

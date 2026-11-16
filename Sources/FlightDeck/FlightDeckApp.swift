@@ -80,6 +80,7 @@ struct FlightDeckApp: App {
                 Picker("Dock Icon", selection: $dockMode) { ForEach(DockMode.allCases) { Text($0.rawValue).tag($0) } }
             }
         }
+        .commands { PowerToolsCommands() }   // View › Command Palette (⌘K), Help › Capture Diagnostics
         // One inspector window per process identity (PID + start time), so reopening for the same process reuses its
         // window and a recycled PID gets a new one.
         WindowGroup("Inspector", id: "inspector", for: ProcessIdentity.self) { $id in

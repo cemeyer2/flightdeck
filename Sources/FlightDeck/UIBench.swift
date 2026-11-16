@@ -55,7 +55,19 @@ enum UIBench {
             }
             RunLoop.main.run(until: Date().addingTimeInterval(1.5))
             out("inspector", height: 1700, InspectorView(model: model))
+            // Memory breakdown of FlightDeck itself (its own process, so footprint can read it).
+            let mem = MemoryBreakdownReader.read(pid: getpid(), ownedByUser: true)
+            out("inspector-memory", height: 900, MemoryBreakdownPanel(model: model, result: mem))
         }
+        // Power tools: Launches (real launches seen during the ~10 s of sampling above), the palette with a query, and
+        // the diagnostic capture sheet before and after a (simulated) run.
+        out("launches", height: 1100, LaunchesView())
+        out("palette", height: 700, CommandPaletteView(engine: e, initialQuery: "fl"))
+        out("palette-empty", height: 900, CommandPaletteView(engine: e))
+        out("capture", height: 700, DiagnosticCaptureView())
+        var done = DiagnosticCapture.steps(.init(blackBox: nil, summary: "", targets: [], reportsSince: Date()))
+        for i in done.indices { done[i].state = i == 2 ? .skipped : .done; done[i].detail = i == 2 ? "none in the last 24 hours" : nil }
+        out("capture-done", height: 700, DiagnosticCaptureView(phase: .finished(URL(fileURLWithPath: "/tmp/FlightDeck Diagnostics.zip")), steps: done))
         exit(0)
     }
 

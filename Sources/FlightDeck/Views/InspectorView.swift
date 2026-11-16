@@ -84,7 +84,7 @@ final class InspectorModel: ObservableObject {
 
 /// Lower tabs of the inspector; only the selected one is built.
 enum InspectorTab: String, CaseIterable, Identifiable {
-    case overview = "Overview", files = "Open Files", network = "Network", threads = "Threads", environment = "Environment", stacks = "Stacks"
+    case overview = "Overview", files = "Open Files", network = "Network", threads = "Threads", environment = "Environment", stacks = "Stacks", memory = "Memory"
     var id: String { rawValue }
 }
 
@@ -127,6 +127,7 @@ struct InspectorView: View {
                     case .threads: threadsTab
                     case .environment: environmentTab
                     case .stacks: stacksTab
+                    case .memory: MemoryBreakdownPanel(model: model)
                     }
                 }.padding(14)
             }
@@ -134,6 +135,13 @@ struct InspectorView: View {
         .background(p.background)
         .navigationTitle("\(s?.name ?? "Process") (\(model.identity.pid))")
         .frame(minWidth: 760, minHeight: 600)
+        // The command palette's "Sample Stacks" asks this window (new or already open) to sample; the request is
+        // consumed so it runs once. @Published emits its current value on subscription, which covers a new window.
+        .onReceive(PowerTools.shared.$stackRequest) { r in
+            guard r == model.identity else { return }
+            PowerTools.shared.stackRequest = nil; tab = .stacks
+            if !model.sampling { model.sampleStacks(seconds: 3) }
+        }
         .alert("\(confirm?.1 ?? "") “\(s?.name ?? "")”?", isPresented: Binding(get: { confirm != nil }, set: { if !$0 { confirm = nil } })) {
             Button(confirm?.1 ?? "OK", role: .destructive) { if let c = confirm { send(c.0) }; confirm = nil }
             Button("Cancel", role: .cancel) { confirm = nil }
