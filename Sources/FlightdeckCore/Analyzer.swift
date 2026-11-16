@@ -91,6 +91,8 @@ public final class Analyzer {
     private var since: [String: Date] = [:]
     private var appGPU: [String: EMA] = [:]
     private var gpuThermal = EMA()
+    private var swapOutRate = EMA()
+    private var lastSwapOuts: (Date, UInt64)?
     private var lastRecoveries: Int?
     private var recoveryEvents: [Date] = []
 
@@ -126,6 +128,10 @@ public final class Analyzer {
         for a in apps { appGPU[a.id, default: EMA()].update(a.gpu ?? 0, dt: step, tau: 20) }
         appGPU = appGPU.filter { byKey[$0.key] != nil }
         if let tl = s.gpuDetail?.thermalLimited { gpuThermal.update(tl, dt: step, tau: 30) }
+        if let so = s.memory.swapOuts, let ps = s.memory.pageSize {
+            if let (lt, lv) = lastSwapOuts, t > lt, so >= lv { swapOutRate.update(Double(so - lv) * Double(ps) / t.timeIntervalSince(lt), dt: step, tau: 20) }
+            lastSwapOuts = (t, so)
+        }
         if let c = s.cpu.total.value { cpuEMA.update(c, dt: step, tau: 20); cpuSlow.update(c, dt: step, tau: 60) }
         if let r = s.disk.readBps.value, let w = s.disk.writeBps.value { diskEMA.update(r + w, dt: step, tau: 15) }
         if let i = s.network.inBps.value, let o = s.network.outBps.value { netEMA.update(i + o, dt: step, tau: 15) }
@@ -219,6 +225,11 @@ public final class Analyzer {
                 "Memory pressure is \(s.memory.pressureLevel >= 4 ? "critical" : "elevated")",
                 (topMem.map { "Biggest user: \(describe($0)) with \(Fmt.bytes($0.memory)). " } ?? "") + "macOS is compressing memory and swapping to disk.",
                 "Performance:Memory")
+        }
+        if let r = swapOutRate.value, r > 20e6 {
+            add("swapping", .caution, "arrow.down.doc", "The Mac is swapping heavily (\(Fmt.rate(r)) to disk)",
+                (topMem.map { "Biggest memory user: \(describe($0)) with \(Fmt.bytes($0.memory)). " } ?? "") + "Everything slows down while memory is paged to disk; closing large apps or tabs helps most.",
+                "Performance:Memory", pids: topMem?.pids)
         }
         if let sw = s.memory.swapUsed.value {
             if let old = swap.first(where: { t.timeIntervalSince($0.0) >= 540 }), sw - old.1 > 1e9 {
@@ -341,7 +352,7 @@ public final class Analyzer {
     }
 
     private func resetShortTerm() {
-        appCPU = [:]; appGPU = [:]; gpuThermal = EMA(); cpuEMA = EMA(); cpuSlow = EMA(); diskEMA = EMA(); netEMA = EMA(); wattsEMA = EMA(); since = [:]
+        appCPU = [:]; appGPU = [:]; gpuThermal = EMA(); swapOutRate = EMA(); lastSwapOuts = nil; cpuEMA = EMA(); cpuSlow = EMA(); diskEMA = EMA(); netEMA = EMA(); wattsEMA = EMA(); since = [:]
     }
 }
 

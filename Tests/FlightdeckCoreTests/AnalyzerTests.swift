@@ -189,3 +189,20 @@ final class TimelineTests: XCTestCase {
         XCTAssertEqual(b[5].cpuMax, 59)
     }
 }
+
+final class SwappingTests: XCTestCase {
+    func testHeavySwapIsFlaggedLightIsNot() {
+        let t = AnalyzerTests(); let t0 = Date(timeIntervalSince1970: 10_000_000)
+        func run(_ pagesPerSec: UInt64) -> Bool {
+            let a = Analyzer()
+            for i in 0..<60 {
+                var s = t.snap(t0.addingTimeInterval(Double(i)), procs: [])
+                s.memory.pageSize = 16384; s.memory.swapOuts = UInt64(i) * pagesPerSec
+                a.ingest(s)
+            }
+            return a.findings.contains { $0.id == "swapping" }
+        }
+        XCTAssertTrue(run(3000), "~49 MB/s")
+        XCTAssertFalse(run(100), "~1.6 MB/s is not heavy")
+    }
+}

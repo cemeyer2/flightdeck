@@ -162,6 +162,34 @@ struct MemoryPerf: View {
                 ], maxValue: m.map { Double($0.total) }, format: Fmt.bytes).frame(height: 160)
                 Legend(items: [("Used", p.accent, m.map { Fmt.bytes($0.used) } ?? "—"), ("Compressed", p.accent2, m.map { Fmt.bytes($0.compressed) } ?? "—"), ("Wired", p.eCore, m.map { Fmt.bytes($0.wired) } ?? "—")])
             }
+            Panel(title: "Paging and swap", trailing: "per second") {
+                let swapOut = e.rateSeries { s in s.memory.swapOuts.flatMap { v in s.memory.pageSize.map { Double(v * $0) } } }
+                let swapIn = e.rateSeries { s in s.memory.swapIns.flatMap { v in s.memory.pageSize.map { Double(v * $0) } } }
+                let comp = e.rateSeries { s in s.memory.pageSize.map { Double(s.memory.compressions * $0) } }
+                HStack(spacing: 28) {
+                    Readout(label: "Swap out", value: (swapOut.last ?? nil).map(Fmt.rate), color: (swapOut.last ?? nil).map { $0 > 20e6 ? p.crit : p.accent } ?? p.accent)
+                    Readout(label: "Swap in", value: (swapIn.last ?? nil).map(Fmt.rate), color: p.accent2)
+                    Readout(label: "Compressing", value: (comp.last ?? nil).map(Fmt.rate))
+                    Spacer()
+                }
+                HistoryGraph(traces: [GraphTrace(name: "out", values: swapOut, color: p.accent), GraphTrace(name: "in", values: swapIn, color: p.accent2, fill: false),
+                                      GraphTrace(name: "comp", values: comp, color: p.eCore, fill: false)], minHeadroom: 1_048_576, format: Fmt.rate).frame(height: 110)
+                Text("Swap traffic is the clearest sign memory is short: macOS is writing memory to disk and reading it back. Compression is cheaper and normal.")
+                    .font(.caption).foregroundStyle(p.dim)
+            }
+            Panel(title: "Memory by app", trailing: "helpers grouped into their app") {
+                let total = Double(max(m?.total ?? 1, 1))
+                ForEach(AppUsage.aggregate(e.current?.processes ?? []).sorted { $0.memory > $1.memory }.prefix(12)) { a in
+                    HStack(spacing: 8) {
+                        AppIcon(path: a.iconPath.hasSuffix(".app") ? a.iconPath + "/" : a.iconPath).frame(width: 16, height: 16)
+                        Text(a.name).lineLimit(1).frame(width: 220, alignment: .leading)
+                        VFDMeter(fraction: Double(a.memory) / total, segments: 40, height: 6)
+                        Text(Fmt.bytes(a.memory)).frame(width: 80, alignment: .trailing)
+                        Text(String(format: "%.1f%%", Double(a.memory) / total * 100)).foregroundStyle(p.dim).frame(width: 50, alignment: .trailing)
+                        Text("\(a.processes)").foregroundStyle(p.dim).frame(width: 34, alignment: .trailing)
+                    }.font(.system(size: 12, design: .monospaced))
+                }
+            }
             Panel(title: "Paging (since boot)") {
                 HStack(spacing: 28) {
                     Readout(label: "Page ins", value: m.map { "\($0.pageIns)" }, size: 16)

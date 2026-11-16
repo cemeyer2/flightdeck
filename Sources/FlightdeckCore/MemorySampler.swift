@@ -17,6 +17,10 @@ public struct MemorySample: Codable, Sendable {
     public var pageOuts: UInt64
     public var compressions: UInt64
     public var decompressions: UInt64
+    /// Pages swapped to / from disk since boot, and the page size (optional: absent in older traces).
+    public var swapIns: UInt64? = nil
+    public var swapOuts: UInt64? = nil
+    public var pageSize: UInt64? = nil
 }
 
 public final class MemorySampler {
@@ -55,6 +59,7 @@ public final class MemorySampler {
             pressure: level.map { .value(Double(100 - $0)) } ?? .unavailable("memorystatus_level"),
             pressureLevel: plevel,
             pageIns: UInt64(stats.pageins), pageOuts: UInt64(stats.pageouts),
-            compressions: UInt64(stats.compressions), decompressions: UInt64(stats.decompressions))
+            compressions: UInt64(stats.compressions), decompressions: UInt64(stats.decompressions),
+            swapIns: UInt64(stats.swapins), swapOuts: UInt64(stats.swapouts), pageSize: page)
     }
 }

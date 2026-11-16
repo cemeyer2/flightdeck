@@ -158,6 +158,17 @@ final class Engine: ObservableObject {
     // MARK: series helpers
     func series(_ f: (Snapshot) -> Double?) -> [Double?] { frames.map { $0.flatMap(f) } }
 
+    /// Per-second rate of a cumulative counter between consecutive frames (nil across gaps or resets).
+    func rateSeries(_ f: (Snapshot) -> Double?) -> [Double?] {
+        var out: [Double?] = [nil]
+        for i in 1..<max(frames.count, 1) {
+            guard let a = frames[i - 1], let b = frames[i], let x = f(a), let y = f(b), y >= x else { out.append(nil); continue }
+            let dt = b.time.timeIntervalSince(a.time)
+            out.append(dt > 0 ? (y - x) / dt : nil)
+        }
+        return out
+    }
+
     // MARK: Flight Recorder
     func startRecording() { recorded = []; recording = true }
     func stopRecording() { recording = false; saveRecording() }
