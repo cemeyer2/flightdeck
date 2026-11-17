@@ -13,7 +13,7 @@ final class AnalyzerTests: XCTestCase {
     /// A process sample with the given identity and load, and every other per-process metric zeroed/absent so it can't
     /// trigger unrelated findings.
     func proc(_ name: String, path: String, pid: Int32, cpu: Double = 1, mem: UInt64 = 100_000_000) -> ProcessSample {
-        var p = Self.base.processes[0]
+        var p = Self.base.processes[0]; p.restricted = false   // copied from a real process, which may be a restricted system one
         p.identity = ProcessIdentity(pid: pid, startTime: 1); p.name = name; p.path = path
         p.uid = getuid(); p.energyTotal = nil; p.cpu = cpu; p.memory = mem; p.wakeups = 0; p.diskReadBps = 0; p.diskWriteBps = 0; p.network = nil
         return p
@@ -133,7 +133,7 @@ final class EnergyBudgetTests: XCTestCase {
         let t0 = Date(timeIntervalSince1970: 6_000_000)
         var base = AnalyzerTests.base
         base.power.systemWatts = .value(10); base.power.powerSource = "AC Power"
-        var p = base.processes[0]; p.identity = ProcessIdentity(pid: 5, startTime: 1)
+        var p = base.processes[0]; p.restricted = false; p.identity = ProcessIdentity(pid: 5, startTime: 1)   // copied from a real (maybe restricted) process
         p.path = "/Applications/Hot.app/Contents/MacOS/Hot"; p.energyWatts = 3.6
         var frames: [Snapshot] = []
         for i in 0..<3601 where !(1000..<2000).contains(i) {   // 1 Hz for an hour, with a 1000 s gap

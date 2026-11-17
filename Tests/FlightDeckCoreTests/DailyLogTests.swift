@@ -13,7 +13,7 @@ final class DailyLogTests: XCTestCase {
 
     /// An app process. `start` is the process start time; the default (1970) means "already running at launch".
     func proc(_ name: String, pid: Int32, cpuTime: Double, mem: UInt64, energy: Double? = nil, start: Date = Date(timeIntervalSince1970: 1)) -> ProcessSample {
-        var p = BlackBoxTests.base.processes[0]
+        var p = BlackBoxTests.base.processes[0]; p.restricted = false   // copied from a real process, which may be a restricted system one
         p.identity = ProcessIdentity(pid: pid, startTime: UInt64(start.timeIntervalSince1970 * 1e6))
         p.name = name; p.path = "/Applications/\(name).app/Contents/MacOS/\(name)"
         p.cpuTime = cpuTime; p.cpu = 0; p.memory = mem; p.energyTotal = energy; p.energyWatts = nil

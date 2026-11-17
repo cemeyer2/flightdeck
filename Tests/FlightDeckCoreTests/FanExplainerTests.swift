@@ -5,7 +5,7 @@ import XCTest
 
 final class FanExplainerTests: XCTestCase {
     func proc(_ name: String, _ path: String, pid: Int32, cpu: Double, watts: Double?) -> ProcessSample {
-        var p = BlackBoxTests.base.processes[0]
+        var p = BlackBoxTests.base.processes[0]; p.restricted = false   // copied from a real process, which may be a restricted system one
         p.identity = ProcessIdentity(pid: pid, startTime: 1); p.name = name; p.path = path; p.cpu = cpu; p.energyWatts = watts
         p.restricted = false
         return p

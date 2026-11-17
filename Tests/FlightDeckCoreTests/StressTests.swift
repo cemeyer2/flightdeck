@@ -7,7 +7,7 @@ import XCTest
 final class StressTests: XCTestCase {
     /// A process with only the given load; every other metric is zero or absent.
     func proc(_ name: String, path: String, pid: Int32, cpu: Double = 0.5, mem: UInt64 = 50_000_000) -> ProcessSample {
-        var p = BlackBoxTests.base.processes[0]
+        var p = BlackBoxTests.base.processes[0]; p.restricted = false   // copied from a real process, which may be a restricted system one
         p.identity = ProcessIdentity(pid: pid, startTime: 1); p.name = name; p.path = path
         p.cpu = cpu; p.memory = mem; p.wakeups = 0; p.diskReadBps = 0; p.diskWriteBps = 0
         p.network = nil; p.gpu = nil; p.energyWatts = nil; p.notResponding = nil
