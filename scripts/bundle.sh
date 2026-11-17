@@ -3,6 +3,9 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ARCHS="${ARCHS:---arch arm64 --arch x86_64}"
+# Version shown in Finder and About; the release workflow sets these from the git tag (v1.2.3 → 1.2.3).
+VERSION="${VERSION:-1.0}"
+BUILD_NUMBER="${BUILD_NUMBER:-1}"
 # The Command Line Tools lack the SwiftUIMacros plugin that the macOS 27 SDK needs for @State,
 # so without full Xcode, build against the macOS 26 SDK instead (set SDKROOT to override).
 CLT_SDK="/Library/Developer/CommandLineTools/SDKs/MacOSX26.sdk"
@@ -28,8 +31,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleExecutable</key><string>FlightDeck</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>1.0</string>
-  <key>CFBundleVersion</key><string>1</string>
+  <key>CFBundleShortVersionString</key><string>${VERSION}</string>
+  <key>CFBundleVersion</key><string>${BUILD_NUMBER}</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>LSApplicationCategoryType</key><string>public.app-category.utilities</string>
   <key>NSHighResolutionCapable</key><true/>

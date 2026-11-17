@@ -30,6 +30,11 @@ add `NOTARY_PROFILE=<notarytool keychain profile>` to notarize and staple, so it
 warnings. Without them the app is ad-hoc signed, which is fine for your own Mac. Open at login works best from
 /Applications.
 
+**Releases:** pushing a version tag (`git tag v1.2.3 && git push origin v1.2.3`) runs `.github/workflows/release.yml`,
+which tests, builds the DMG and a zip (version taken from the tag), and publishes them with SHA-256 sums as a GitHub
+Release. It signs and notarizes when the Developer ID secrets listed at the top of that workflow are set; otherwise the
+build is ad-hoc signed and the release notes explain how to open it past Gatekeeper.
+
 ## Views
 
 Summary · Performance (CPU per core with P/E colouring, overall/logical/cluster modes; Memory; Disk; Network with per-app traffic;
