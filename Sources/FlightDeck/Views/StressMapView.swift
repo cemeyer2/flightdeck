@@ -17,7 +17,30 @@ struct StressMapView: View {
     /// App id under the pointer (bubble or ranked row); drives highlighting and the detail panel.
     @State private var hovered: String?
 
+    /// Fixed parts of the layout, in points: outer padding, the side column and its gap, and the Panel's own chrome
+    /// (12 pt padding all round, plus its title row and 8 pt spacing).
+    private static let pad: CGFloat = 16, column: CGFloat = 340, gap: CGFloat = 12, panelH: CGFloat = 24, panelV: CGFloat = 46
+    /// Smallest map; below this the page scrolls instead of shrinking the map further.
+    private static let minSide: CGFloat = 396
+
+    /// The map's side for a window of `size`: as large as fits both the width left beside the side column and the
+    /// window's height, so it grows and shrinks with the window instead of sitting at a fixed size.
+    static func mapSide(for size: CGSize) -> CGFloat {
+        let w = size.width - 2 * pad - gap - column - panelH
+        let h = size.height - 2 * pad - panelV
+        return max(minSide, min(w, h))
+    }
+
     var body: some View {
+        // The available size is read outside the scroll view: inside it the height is unbounded, which is why the map
+        // used to be sized from the width alone (and capped) and left empty space in a bigger window.
+        GeometryReader { geo in
+            let side = Self.mapSide(for: geo.size)
+            content(side: side)
+        }
+    }
+
+    @ViewBuilder func content(side: CGFloat) -> some View {
         MaybeScroll {
             VStack(alignment: .leading, spacing: 12) {
                 if let s = e.current {
@@ -26,9 +49,8 @@ struct StressMapView: View {
                     HStack(alignment: .top, spacing: 12) {
                         Panel(title: "Stress Map", trailing: r.apps.isEmpty ? "all quiet"
                               : "\(r.apps.count) app\(r.apps.count == 1 ? "" : "s") straining this Mac") {
-                            StressMap(report: r, hovered: $hovered).aspectRatio(1, contentMode: .fit)
+                            StressMap(report: r, hovered: $hovered).frame(width: side, height: side)
                         }
-                        .frame(minWidth: 420, maxWidth: 760)
                         VStack(spacing: 12) {
                             MiseryDetail(m: focus ?? r.apps.first, hovering: focus != nil)
                             TopCausers(apps: r.apps, hovered: $hovered)
