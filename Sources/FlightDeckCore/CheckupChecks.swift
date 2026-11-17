@@ -139,7 +139,7 @@ public enum CheckupRules {
         // Below 10% or 15 GB macOS starts struggling: swap, updates and caches all need room.
         let low = frac < 0.10 || v.available < 15_000_000_000
         return CheckResult(id: "diskspace", group: hardware, title: t, status: low ? .attention : .pass,
-                           value: "\(Fmt.bytes(Double(v.available))) free (\(Int(frac * 100))%)",
+                           value: "\(Fmt.storage(Double(v.available))) free (\(Int(frac * 100))%)",
                            detail: low ? "The startup disk is nearly full. macOS needs free space for swap, updates and caches, and slows down without it."
                                        : "Enough room on the startup disk for swap, updates and caches.", fixes: fix)
     }

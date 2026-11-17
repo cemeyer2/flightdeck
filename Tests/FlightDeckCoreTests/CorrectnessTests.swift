@@ -305,3 +305,22 @@ final class SleepFindingTests: XCTestCase {
         XCTAssertTrue(SleepLog.findings(r, now: now.addingTimeInterval(13 * 3600)).isEmpty, "only for 12 hours after waking")
     }
 }
+
+/// Volume free space and decimal storage units.
+final class VolumeSpaceTests: XCTestCase {
+    /// External and network volumes report 0 "available for important usage"; that must not read as a full disk.
+    func testFreeSpaceFallsBackWhenImportantUsageIsZero() {
+        XCTAssertEqual(DiskSampler.freeSpace(important: 0, available: 135_560_000_000), 135_560_000_000)
+        XCTAssertEqual(DiskSampler.freeSpace(important: nil, available: 42), 42)
+        // The startup volume: important usage (including purgeable space) wins when it is reported.
+        XCTAssertEqual(DiskSampler.freeSpace(important: 171_720_000_000, available: 103_510_000_000), 171_720_000_000)
+        XCTAssertEqual(DiskSampler.freeSpace(important: nil, available: nil), 0)
+    }
+
+    /// Disk sizes use decimal units like Finder: a "1 TB" drive is 1.00 TB, not 931.3 GB.
+    func testStorageUsesDecimalUnits() {
+        XCTAssertEqual(Fmt.storage(UInt64(1_000_384_000_000)), "1.00 TB")
+        XCTAssertEqual(Fmt.storage(UInt64(994_662_584_320)), "994.66 GB")
+        XCTAssertEqual(Fmt.storage(UInt64(500_000)), "500.0 KB")
+    }
+}

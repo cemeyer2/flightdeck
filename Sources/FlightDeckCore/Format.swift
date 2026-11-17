@@ -13,6 +13,15 @@ public enum Fmt {
         return i == 0 ? String(format: "%.0f %@", v, units[i]) : String(format: "%.1f %@", v, units[i])
     }
     public static func bytes(_ b: UInt64) -> String { bytes(Double(b)) }
+    /// Disk and file sizes in decimal units (1 GB = 10⁹ bytes), as Finder and Disk Utility show them. Memory stays in
+    /// `bytes` (binary units, as Activity Monitor shows it), so the same drive reads the same here as in Finder.
+    public static func storage(_ b: Double) -> String {
+        let units = ["B", "KB", "MB", "GB", "TB", "PB"]
+        var v = b, i = 0
+        while abs(v) >= 1000 && i < units.count - 1 { v /= 1000; i += 1 }
+        return i == 0 ? String(format: "%.0f %@", v, units[i]) : String(format: i >= 3 ? "%.2f %@" : "%.1f %@", v, units[i])
+    }
+    public static func storage(_ b: UInt64) -> String { storage(Double(b)) }
     /// A byte rate (bytes/s), e.g. "12.3 MB/s".
     public static func rate(_ bps: Double) -> String { bytes(bps) + "/s" }
     /// A byte rate (bytes/s) shown in decimal bits per second ("Mbps"), as network speeds are usually quoted.

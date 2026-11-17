@@ -60,7 +60,7 @@ struct VolumeRow: View {
                 Text(v.name).foregroundStyle(p.text)
                 Text(v.fileSystem).foregroundStyle(p.dim)
                 Spacer()
-                Text("\(Fmt.bytes(v.used)) used of \(Fmt.bytes(v.capacity)) · \(Fmt.bytes(v.available)) free").foregroundStyle(p.dim)
+                Text("\(Fmt.storage(v.used)) used of \(Fmt.storage(v.capacity)) · \(Fmt.storage(v.available)) free").foregroundStyle(p.dim)
             }.font(.system(size: 12, design: .monospaced))
             VFDMeter(fraction: Double(v.used) / Double(max(v.capacity, 1)), segments: 50, height: 8)
         }

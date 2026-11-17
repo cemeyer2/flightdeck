@@ -91,7 +91,7 @@ public enum SystemInfo {
         add("Memory", "Page Size", Sysctl.int("hw.pagesize").map { "\($0) bytes" })
         for (i, g) in gpuInfo().enumerated() { add("Graphics", "GPU \(i + 1)", g) }
         for v in DiskSampler.volumes() {
-            add("Storage", v.name, "\(Fmt.bytes(v.capacity)) \(v.fileSystem) — \(Fmt.bytes(v.available)) free")
+            add("Storage", v.name, "\(Fmt.storage(v.capacity)) \(v.fileSystem) — \(Fmt.storage(v.available)) free")
         }
         add("Security", "System Integrity Protection", csrStatus())
         return items

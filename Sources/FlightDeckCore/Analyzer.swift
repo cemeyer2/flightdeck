@@ -400,12 +400,12 @@ public final class Analyzer {
         if let v = Self.startupVolume(s) {
             let free = Double(v.available)
             if free < 10e9 || free < Double(v.capacity) * 0.05 {
-                add("disk-low", .caution, "externaldrive.badge.exclamationmark", "Startup disk is almost full (\(Fmt.bytes(v.available)) free)",
+                add("disk-low", .caution, "externaldrive.badge.exclamationmark", "Startup disk is almost full (\(Fmt.storage(v.available)) free)",
                     "macOS needs free space for swap and updates. Disk Space shows what's using it.", "Disk Space")
             } else if let days = daysUntilFull(), days < 14 {
                 add("disk-full", days < 3 ? .caution : .info, "calendar.badge.exclamationmark",
                     "At the current rate the startup disk will be full in about \(max(Int(days.rounded()), 1)) day\(days < 1.5 ? "" : "s")",
-                    "\(Fmt.bytes(v.available)) free, shrinking steadily.", "Disk Space")
+                    "\(Fmt.storage(v.available)) free, shrinking steadily.", "Disk Space")
             }
         }
         for d in s.drives ?? [] where !d.healthy {

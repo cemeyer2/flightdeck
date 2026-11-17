@@ -77,6 +77,15 @@ public final class DiskSampler {
 
     /// Mounted volumes, skipping hidden and non-browsable ones (system snapshots, VM, Preboot, ...) and those reporting
     /// zero capacity. Also called directly by SystemInfo and the Tools view when no live snapshot is available.
+    /// Free space as Finder reports it. "Available for important usage" also counts space macOS can purge (caches,
+    /// local snapshots), but it is only computed for the startup volume: external and network volumes report 0
+    /// there, which made a disk with 135 GB free read "0 B free". So it is used only when positive, else the plain
+    /// free-space figure.
+    static func freeSpace(important: Int64?, available: Int64?) -> UInt64 {
+        if let i = important, i > 0 { return UInt64(i) }
+        return UInt64(max(available ?? 0, 0))
+    }
+
     public static func volumes() -> [VolumeInfo] {
         let keys: [URLResourceKey] = [.volumeNameKey, .volumeTotalCapacityKey, .volumeAvailableCapacityForImportantUsageKey,
                                       .volumeAvailableCapacityKey, .volumeLocalizedFormatDescriptionKey, .volumeIsInternalKey, .volumeIsBrowsableKey]
@@ -84,7 +93,7 @@ public final class DiskSampler {
         return urls.compactMap { url in
             guard let v = try? url.resourceValues(forKeys: Set(keys)), v.volumeIsBrowsable ?? true,
                   let cap = v.volumeTotalCapacity, cap > 0 else { return nil }
-            let avail = v.volumeAvailableCapacityForImportantUsage.map { UInt64($0) } ?? UInt64(v.volumeAvailableCapacity ?? 0)
+            let avail = freeSpace(important: v.volumeAvailableCapacityForImportantUsage, available: v.volumeAvailableCapacity.map(Int64.init))
             return VolumeInfo(name: v.volumeName ?? url.lastPathComponent, path: url.path, capacity: UInt64(cap),
                               available: avail, fileSystem: v.volumeLocalizedFormatDescription ?? "",
                               isInternal: v.volumeIsInternal ?? false)

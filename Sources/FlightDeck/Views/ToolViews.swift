@@ -101,7 +101,7 @@ struct InstalledAppsView: View {
                 TableColumn("Vendor", value: \.vendor).width(100)
                 TableColumn("Kind", value: \.architectures).width(80)
                 TableColumn("Source") { a in Text(a.isSystem ? "System" : (a.isAppStore ? "App Store" : "Other")) }.width(80)
-                TableColumn("Size") { a in Text(sizes[a.path].map(Fmt.bytes) ?? "—").monospacedDigit() }.width(80)
+                TableColumn("Size") { a in Text(sizes[a.path].map(Fmt.storage) ?? "—").monospacedDigit() }.width(80)
                 TableColumn("Modified") { a in Text(a.modified?.formatted(date: .abbreviated, time: .omitted) ?? "—") }.width(100)
                 TableColumn("Bundle ID", value: \.bundleID)
             }
@@ -197,7 +197,7 @@ struct DiskSpaceView: View {
                     VolumeRow(v: v).contentShape(Rectangle()).onTapGesture { scan.scan(v.path) }
                 }
             }
-            Panel(title: "Largest items", trailing: scan.scanning ? "scanning…" : "\(Fmt.bytes(scan.entries.reduce(0) { $0 + $1.size })) in \(scan.entries.count) items") {
+            Panel(title: "Largest items", trailing: scan.scanning ? "scanning…" : "\(Fmt.storage(scan.entries.reduce(0) { $0 + $1.size })) in \(scan.entries.count) items") {
                 HStack {
                     Button { scan.scan((scan.path as NSString).deletingLastPathComponent) } label: { Image(systemName: "arrow.up") }.disabled(scan.path == "/")
                     Text(scan.path).font(.system(size: 12, design: .monospaced)).lineLimit(1).truncationMode(.head)
@@ -218,7 +218,7 @@ struct DiskSpaceView: View {
                                 GeometryReader { g in
                                     RoundedRectangle(cornerRadius: 2).fill(p.accent.opacity(0.55)).frame(width: g.size.width * Double(d.size) / Double(max(top, 1)))
                                 }.frame(height: 10)
-                                Text(Fmt.bytes(d.size)).frame(width: 90, alignment: .trailing)
+                                Text(Fmt.storage(d.size)).frame(width: 90, alignment: .trailing)
                             }
                             .font(.system(size: 12, design: .monospaced))
                             .contentShape(Rectangle())
