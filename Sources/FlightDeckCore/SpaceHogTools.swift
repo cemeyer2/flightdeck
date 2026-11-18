@@ -78,7 +78,7 @@ public enum DevTools {
     }
 
     /// Homebrew's environment: no auto-update, no analytics, no hints, so a dry run only reads.
-    static let brewEnv = ["HOMEBREW_NO_AUTO_UPDATE": "1", "HOMEBREW_NO_ANALYTICS": "1", "HOMEBREW_NO_ENV_HINTS": "1",
+    public static let brewEnv = ["HOMEBREW_NO_AUTO_UPDATE": "1", "HOMEBREW_NO_ANALYTICS": "1", "HOMEBREW_NO_ENV_HINTS": "1",
                           "HOMEBREW_NO_INSTALL_CLEANUP": "1"]
 
     /// `brew --cache`: where this Homebrew keeps its downloads (HOMEBREW_CACHE can move it).

@@ -192,8 +192,13 @@ struct DiskSpaceView: View {
     @EnvironmentObject var e: Engine
     @Environment(\.palette) var p
     @StateObject var scan = DiskScan()
+    @AppStorage("diskSpaceMode") var mode: DiskSpaceMode = .usage
     var body: some View {
         VStack(spacing: 12) {
+            // "What's using my disk" (DiskUsageOverview.swift) or the folder scanner below.
+            Picker("", selection: $mode) { ForEach(DiskSpaceMode.allCases) { Text($0.rawValue).tag($0) } }
+                .pickerStyle(.segmented).labelsHidden().frame(maxWidth: 420)
+            if mode == .usage { DiskUsageOverview() } else {
             Panel(title: "Volumes") {
                 // Falls back to a direct volume query before the first sample arrives.
                 // Scanning is always an explicit button press: a scan reads every file under the folder, which is heavy
@@ -249,6 +254,7 @@ struct DiskSpaceView: View {
                 }
                 Text("Double-click a folder to drill in. Folders without Full Disk Access permission are counted as 0.").font(.system(size: 10)).foregroundStyle(p.dim)
                 }
+            }
             }
         }
         .padding(16)

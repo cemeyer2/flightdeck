@@ -3,6 +3,8 @@ import Foundation
 // The known space hogs, in display order. Every path is in the user's home folder, except the macOS installers in
 // /Applications and the simulator runtimes Xcode keeps in /Library/Developer (which are only sized, never touched).
 // Folders belonging to a more specific category are excluded from the general one, so nothing is counted twice.
+// `privacyProtected` marks places macOS usually guards with a prompt: Downloads, Pictures, Mail, Messages, the Trash,
+// device backups, and other apps' sandbox containers in ~/Library/Containers (macOS 14's "data from other apps").
 
 public extension SpaceHogCategory {
     static let catalog: [SpaceHogCategory] = [
@@ -68,7 +70,8 @@ public extension SpaceHogCategory {
               paths: ["~/Library/Containers/com.docker.docker/Data/vms", "~/.orbstack", "~/.colima", "~/.lima"],
               whatItIs: "The virtual disk that holds all your container images, containers and volumes. It grows as you pull images and rarely shrinks by itself.",
               ifRemoved: "Deleting the disk image would erase every image, container and volume. Prune inside the tool instead.",
-              safety: .yourData, cleanup: .manual(advice: "Run `docker system prune` (add `--volumes` only if you're sure), or use Docker Desktop › Troubleshoot › Clean / Purge data, or OrbStack › Settings › Storage.")),
+              safety: .yourData, cleanup: .manual(advice: "Run `docker system prune` (add `--volumes` only if you're sure), or use Docker Desktop › Troubleshoot › Clean / Purge data, or OrbStack › Settings › Storage."),
+              privacyProtected: true),
         .init(id: "homebrew", title: "Homebrew cache", symbol: "mug",
               paths: ["~/Library/Caches/Homebrew"],
               whatItIs: "Downloaded bottles and source archives Homebrew keeps after installing or upgrading packages.",
@@ -107,7 +110,8 @@ public extension SpaceHogCategory {
                       "~/Virtual Machines.localized/*.vmwarevm"],
               whatItIs: "Parallels, UTM and VMware Fusion virtual machines. Each bundle holds an entire computer's disk.",
               ifRemoved: "The virtual machine and everything in it is gone.",
-              safety: .yourData, cleanup: .manual(advice: "Delete VMs you no longer need from Parallels Control Center, UTM or VMware Fusion, which also clean up snapshots.")),
+              safety: .yourData, cleanup: .manual(advice: "Delete VMs you no longer need from Parallels Control Center, UTM or VMware Fusion, which also clean up snapshots."),
+              privacyProtected: true),
     ]
 
     static func named(_ id: String) -> SpaceHogCategory? { catalog.first { $0.id == id } }

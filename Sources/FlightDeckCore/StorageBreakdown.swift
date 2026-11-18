@@ -41,6 +41,7 @@ public struct LocalSnapshot: Sendable, Hashable, Identifiable {
     public var kind: Kind
     /// Parsed from the Time Machine snapshot name (local time); nil for the other kinds.
     public var date: Date?
+    public init(name: String, kind: Kind, date: Date?) { self.name = name; self.kind = kind; self.date = date }
 }
 
 public enum StorageParse {
@@ -150,7 +151,7 @@ public struct StorageBreakdown: Sendable {
             .init(kind: .system, title: "macOS", bytes: sum { has($0, "System") },
                   explanation: "The sealed, read-only system volume. Only a macOS update changes it."),
             .init(kind: .preboot, title: "Preboot", bytes: sum { has($0, "Preboot") },
-                  explanation: "Files needed to start up: boot loaders, the FileVault unlock screen and, on Apple silicon, the bulk of the cryptex that ships Safari and system libraries. Managed by macOS."),
+                  explanation: "Files needed to start up: boot loaders, the FileVault unlock screen and, on recent macOS, the cryptexes that hold Safari and the shared system libraries. Managed by macOS."),
             .init(kind: .recovery, title: "Recovery", bytes: sum { has($0, "Recovery") },
                   explanation: "macOS Recovery, used to repair or reinstall macOS. Managed by macOS."),
             .init(kind: .vm, title: "Swap (VM)", bytes: sum { has($0, "VM") },
