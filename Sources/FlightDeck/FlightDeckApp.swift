@@ -230,6 +230,7 @@ struct SettingsView: View {
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             MetricsExportSection()
+            MCPSection()
             Text(engine.netProbeEnabled
                  ? "FlightDeck sends no data anywhere. The only network traffic it creates is the latency pings above. All measurements stay on this Mac."
                  : "FlightDeck sends no data anywhere and makes no network requests. All measurements stay on this Mac.")
