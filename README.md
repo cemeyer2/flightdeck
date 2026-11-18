@@ -40,7 +40,7 @@ build is ad-hoc signed and the release notes explain how to open it past Gatekee
 Summary · Performance (CPU per core with P/E colouring, overall/logical/cluster modes; Memory; Disk; Network with per-app traffic;
 Energy; Thermals; GPU) · Processes (live tree, sort/filter, Quit/Force Quit/Suspend/Resume) · System Info ·
 Startup Apps · Users · Services (launchd) · Power & Freq · Connections · Installed Apps · Disk Space · Benchmarks · Launches ·
-Console · Trends · Checkup · Peripherals
+Console · Trends · Checkup · Peripherals · UPnP
 
 **Flight Recorder:** Record (⇧⌘R) captures every telemetry frame and saves it as a `.flightlog` file
 (zlib-compressed JSON). Open it (⌘O, or double-click in Finder) to scrub or replay it through the same views. Older `.mltrace` recordings from before the rename still open.
@@ -153,6 +153,16 @@ The server speaks both MCP eras: `initialize`-based revisions 2024-11-05 to 2025
 revision (per-request `_meta`, `server/discover`). It does no work between requests. In demo mode the HTTP server
 doesn't start (an assistant must not be handed invented data as facts about this Mac); `--mcp` then answers standalone
 from real samples.
+
+**UPnP:** the devices that answer UPnP discovery on the local network (an SSDP M-SEARCH, plus passive NOTIFY
+announcements while the page is open; nothing runs in the background), drawn as a map with the router at the centre and
+media renderers, media servers, printers and other devices around it. Click a device for its description: name,
+manufacturer, model, device type, its web page, services and embedded devices (serial numbers are hidden unless you ask).
+If the router is a UPnP Internet Gateway Device, **Router port mappings** lists every port it has forwarded at an app's
+request (protocol, external port, the LAN device and port it goes to, the app's description, lease), with its external
+IP and mappings to this Mac flagged, so it's clear which apps opened holes through the router. FlightDeck only reads
+them; it never adds or removes a mapping. Descriptions are fetched only from the device that answered, with short
+timeouts and size caps. macOS may ask for Local Network access the first time.
 
 **Connection quality** (Performance › Network): Wi-Fi signal, noise, SNR, link rate, channel, band, width, PHY and
 security from CoreWLAN, plus router and DNS servers, all local. An opt-in probe (off by default) pings the router and
