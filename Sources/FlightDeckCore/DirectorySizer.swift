@@ -34,8 +34,10 @@ public enum DirectorySizer {
 
     /// Sizes `path` (a file, or a folder and everything in it). Symbolic links are sized as links, never followed, so a
     /// link can't pull in a tree that lives elsewhere. Returns nil if `cancelled` became true; it's polled every 500
-    /// files, so cancelling a large tree takes effect within a few milliseconds.
-    public static func size(of path: String, cancelled: () -> Bool = { false }) -> SizeResult? {
+    /// files, so cancelling a large tree takes effect within a few milliseconds. `progress`, if given, is called at the
+    /// same cadence with the files seen and bytes counted so far in this tree, so a long scan can show it's moving.
+    public static func size(of path: String, cancelled: () -> Bool = { false },
+                            progress: (_ files: Int, _ bytes: UInt64) -> Void = { _, _ in }) -> SizeResult? {
         let url = URL(fileURLWithPath: path)
         let fm = FileManager.default
         // lstat rather than fileExists: it doesn't follow links, and its errno separates "not there" (ENOENT) from
@@ -61,9 +63,13 @@ public enum DirectorySizer {
         var total: UInt64 = 0, n = 0
         for case let u as URL in e {
             n += 1
-            if n % 500 == 0, cancelled() { return nil }
+            if n % 500 == 0 {
+                if cancelled() { return nil }
+                progress(n, total)
+            }
             total += UInt64((try? u.resourceValues(forKeys: [.totalFileAllocatedSizeKey]).totalFileAllocatedSize) ?? 0)
         }
+        progress(n, total)
         return .size(bytes: total, unreadable: errors.n)
     }
 

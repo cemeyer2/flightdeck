@@ -254,6 +254,12 @@ Anything the console doesn't report is shown as unknown. For other features, `Un
 
 ### Storage
 
+**Disk Space › Folder Scanner** measures the largest items in a folder you pick (or a whole volume), only when you
+press Scan. While it runs, a progress strip shows the item being measured, how many of the folder's items are done,
+files examined, size so far and elapsed time; rows still waiting show as "measuring…" or "waiting", and Cancel stops
+it within milliseconds, even inside a huge folder. The scan keeps running if you switch to another page, and its
+results are still there when you come back. Double-click a folder to drill in.
+
 **Disk Space › What's Using My Disk** (next to the folder scanner): the startup disk's APFS container as one stacked
 bar, from `diskutil apfs list -plist` and `diskutil info -plist /` (no root): your data, purgeable space ("available
 for important usage" minus available), the sealed macOS volume, Preboot, Recovery, swap (VM), Update, APFS overhead and

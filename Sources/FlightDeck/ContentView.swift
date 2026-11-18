@@ -102,9 +102,10 @@ struct ContentView: View {
     var body: some View {
         NavigationSplitView {
             // The binding ignores nil so clicking empty sidebar space can't deselect everything. Sections collapse; which
-            // ones are collapsed is remembered. The footer sits *below* the list in a VStack: as a `safeAreaInset` it was
-            // drawn over the list's last rows (Developer, Benchmarks), so clicks there hit the footer and did nothing.
-            VStack(spacing: 0) {
+            // ones are collapsed is remembered. The footer is a bottom inset; on macOS that doesn't shorten the list's
+            // scrollable area, so a matching bottom content margin keeps the last rows (Developer, Benchmarks) from
+            // sitting under it, where clicks hit the footer and did nothing. (Wrapping the List in a VStack instead broke
+            // the sidebar's title-bar inset: rows slid up under the window controls.)
             List(selection: Binding(get: { selection }, set: { if let v = $0 { selection = v } })) {
                 ForEach(SidebarSection.allCases) { section in
                     let members = section.members
@@ -116,9 +117,9 @@ struct ContentView: View {
                 }
             }
             .listStyle(.sidebar)
-            SidebarFooter()
-            }
+            .contentMargins(.bottom, 48, for: .scrollContent)
             .navigationSplitViewColumnWidth(min: 180, ideal: 200)
+            .safeAreaInset(edge: .bottom, spacing: 0) { SidebarFooter().background(.bar) }
         } detail: {
             VStack(spacing: 0) {
                 ReplayBar()

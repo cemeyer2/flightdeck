@@ -76,6 +76,66 @@ public struct DirEntry: Identifiable, Hashable, Sendable {
 }
 
 public enum DiskUsage {
+    /// Where a folder scan has got to, for the progress strip. Totals cover the finished items plus the one in progress.
+    public struct ScanProgress: Sendable, Equatable {
+        /// Top-level items found in the folder, and how many are fully measured.
+        public var total: Int
+        public var done: Int
+        /// The item being measured now (nil between items or once finished).
+        public var current: String?
+        /// Files and folders examined so far, and their allocated size.
+        public var files: Int
+        public var bytes: UInt64
+        public init(total: Int, done: Int, current: String?, files: Int, bytes: UInt64) {
+            self.total = total; self.done = done; self.current = current; self.files = files; self.bytes = bytes
+        }
+        public var fraction: Double { total > 0 ? Double(done) / Double(total) : 0 }
+    }
+
+    /// The folder's top-level items to measure, in listing order: symlinks, missing items and the skipped system paths
+    /// (see `skipped`) are left out, so the progress total matches what will be reported.
+    public static func scanItems(of path: String) -> [(name: String, path: String, isDirectory: Bool)] {
+        let fm = FileManager.default
+        guard let items = try? fm.contentsOfDirectory(atPath: path) else { return [] }
+        return items.compactMap { name in
+            let p = (path as NSString).appendingPathComponent(name)
+            var isDir: ObjCBool = false
+            guard fm.fileExists(atPath: p, isDirectory: &isDir) else { return nil }
+            if (try? URL(fileURLWithPath: p).resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true { return nil }
+            if isDir.boolValue && skipped.contains(p) { return nil }
+            return (name, p, isDir.boolValue)
+        }
+    }
+
+    /// /System/Volumes holds the Data volume that is already reachable through firmlinks (it would be counted twice),
+    /// /Volumes holds other disks, /dev is devices, and /private/var/vm holds swap files whose size changes constantly.
+    static let skipped: Set<String> = ["/System/Volumes", "/Volumes", "/dev", "/private/var/vm"]
+
+    /// Measures each of `items` (from `scanItems`), reporting results as they finish (`entry`) and progress as it goes
+    /// (`progress`: the item list up front, then every few hundred files and after each item). Unlike `children` it
+    /// can be cancelled inside a large folder, within a few milliseconds. Blocking: call off the main thread.
+    public static func scan(items: [(name: String, path: String, isDirectory: Bool)], progress: @Sendable (ScanProgress) -> Void,
+                            entry: @Sendable (DirEntry) -> Void, cancelled: @Sendable () -> Bool) {
+        var p = ScanProgress(total: items.count, done: 0, current: nil, files: 0, bytes: 0)
+        progress(p)
+        for item in items {
+            if cancelled() { return }
+            p.current = item.name; progress(p)
+            let filesBefore = p.files, bytesBefore = p.bytes
+            var itemFiles = 0                  // the sizer's final count for this item (its last progress call)
+            let result = DirectorySizer.size(of: item.path, cancelled: cancelled) { f, b in
+                itemFiles = f
+                var q = p; q.files = filesBefore + f; q.bytes = bytesBefore + b; progress(q)
+            }
+            guard let result else { return }   // cancelled
+            let size = result.bytes ?? 0       // unreadable items count as 0, as the footer explains
+            // A plain file reports no progress (nothing to enumerate), so it counts as one.
+            p.done += 1; p.bytes = bytesBefore + size; p.files = filesBefore + max(itemFiles, 1); p.current = nil
+            entry(DirEntry(name: item.name, path: item.path, size: size, isDirectory: item.isDirectory))
+            progress(p)
+        }
+    }
+
     /// Immediate children of `path` with recursive sizes. Calls `progress` as each child completes.
     /// Runs synchronously on the caller's (background) thread; `cancelled` is polled between children so navigating away
     /// stops the walk early.

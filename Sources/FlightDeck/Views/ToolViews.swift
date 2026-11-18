@@ -132,44 +132,91 @@ struct InstalledAppsView: View {
     }
 }
 
-/// Disk Space scanner: sizes the immediate children of `path` recursively on a detached task, streaming each finished
-/// child into `entries` (kept sorted, largest first).
+/// Disk Space scanner: sizes the immediate children of `path` on a detached task, streaming each finished child into
+/// `entries` (kept sorted, largest first) and reporting live progress, so a long scan visibly moves: which item is
+/// being measured, how many of how many are done, files examined, size so far and time elapsed.
 @MainActor
 final class DiskScan: ObservableObject {
+    /// One scanner for the app session: a scan keeps running (and its results stay) while the user looks at other pages.
+    static let shared = DiskScan()
     @Published var path: String = FileManager.default.homeDirectoryForCurrentUser.path
     @Published var entries: [DirEntry] = []
     @Published var scanning = false
     /// False until the user starts the first scan; the page then shows an explanation and Scan buttons instead.
     @Published var started = false
+    /// Live progress of the running scan (nil before the folder has been listed), refreshed about four times a second.
+    @Published var progress: DiskUsage.ScanProgress?
+    /// Items listed but not measured yet, in scan order, shown as "measuring…" / "waiting" rows below the results.
+    @Published var pending: [String] = []
+    @Published var startedAt: Date?
+    /// Set when the user cancelled, so the list says it's partial.
+    @Published var cancelled = false
     /// Bumped on every new scan. Results and the cancellation check compare against it, so navigating to another folder
     /// abandons the old scan and its late results are dropped instead of mixing into the new list.
     private var generation = 0
     /// The current generation, readable from the scanning thread without blocking on the main thread.
     private let liveGeneration = GenerationBox()
+    /// Latest progress from the scanning thread. The scan reports every 500 files (thousands of times a second on a
+    /// fast disk), so it is parked here and published by `ticker` instead of hopping to the main thread each time.
+    private let latest = ProgressBox()
+    private var ticker: Timer?
 
     func scan(_ newPath: String? = nil) {
         if let newPath { path = newPath }
-        started = true
+        started = true; cancelled = false
         generation += 1; let gen = generation
         liveGeneration.set(gen)
-        entries = []; scanning = true
+        entries = []; pending = []; progress = nil; scanning = true; startedAt = Date()
+        latest.set(nil)
+        ticker?.invalidate()
+        ticker = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { if let self, let p = self.latest.get() { self.progress = p } }
+        }
         let target = path
-        let live = liveGeneration
+        let live = liveGeneration, box = latest
         // A constant weak box rather than `[weak self]`: a weak capture is a `var`, which Swift won't share safely with
         // the background closure. It is only dereferenced on the main thread.
         let owner = WeakBox(self)
         Task.detached(priority: .utility) {
-            DiskUsage.children(of: target, progress: { entry in
+            let items = DiskUsage.scanItems(of: target)
+            let names = items.map(\.name)
+            await MainActor.run { if let self = owner.value, self.generation == gen { self.pending = names } }
+            DiskUsage.scan(items: items, progress: { box.set($0) }, entry: { entry in
                 DispatchQueue.main.async {
                     guard let self = owner.value, self.generation == gen else { return }
                     // Insert in size order instead of re-sorting the whole list for every streamed result.
                     let i = self.entries.firstIndex { $0.size < entry.size } ?? self.entries.endIndex
                     self.entries.insert(entry, at: i)
+                    self.pending.removeAll { $0 == entry.name }
                 }
             }, cancelled: { live.get() != gen })
-            await MainActor.run { if let self = owner.value, self.generation == gen { self.scanning = false } }
+            await MainActor.run {
+                guard let self = owner.value, self.generation == gen else { return }
+                self.finish()
+            }
         }
     }
+
+    /// Stops the running scan within milliseconds (the sizer checks every 500 files); what was measured stays listed.
+    func cancel() {
+        guard scanning else { return }
+        generation += 1; liveGeneration.set(generation)
+        cancelled = true
+        finish()
+    }
+
+    private func finish() {
+        ticker?.invalidate(); ticker = nil
+        if let p = latest.get() { progress = p }
+        scanning = false
+    }
+}
+
+/// The latest scan progress, written by the scanning thread and read by the main thread's ticker.
+final class ProgressBox: @unchecked Sendable {
+    private let lock = NSLock(); private var value: DiskUsage.ScanProgress?
+    func set(_ v: DiskUsage.ScanProgress?) { lock.lock(); value = v; lock.unlock() }
+    func get() -> DiskUsage.ScanProgress? { lock.lock(); defer { lock.unlock() }; return value }
 }
 
 /// Holds a weak reference that background work can carry; read `value` only on the thread that owns the object.
@@ -191,7 +238,7 @@ final class GenerationBox: @unchecked Sendable {
 struct DiskSpaceView: View {
     @EnvironmentObject var e: Engine
     @Environment(\.palette) var p
-    @StateObject var scan = DiskScan()
+    @ObservedObject var scan = DiskScan.shared
     @AppStorage("diskSpaceMode") var mode: DiskSpaceMode = .usage
     var body: some View {
         VStack(spacing: 12) {
@@ -211,7 +258,7 @@ struct DiskSpaceView: View {
                     }
                 }
             }
-            Panel(title: "Largest items", trailing: scan.scanning ? "scanning…" : scan.started ? "\(Fmt.storage(scan.entries.reduce(0) { $0 + $1.size })) in \(scan.entries.count) items" : nil) {
+            Panel(title: "Largest items", trailing: scan.scanning ? "scanning…" : scan.started ? "\(Fmt.storage(scan.entries.reduce(0) { $0 + $1.size })) in \(scan.entries.count) items\(scan.cancelled ? " (cancelled, partial)" : "")" : nil) {
                 if !scan.started {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Nothing scanned yet.").font(.system(size: 13, weight: .semibold))
@@ -228,8 +275,9 @@ struct DiskSpaceView: View {
                     Text(scan.path).font(.system(size: 12, design: .monospaced)).lineLimit(1).truncationMode(.head)
                     Spacer()
                     Button("Choose Folder…") { chooseFolder() }
-                    Button("Rescan") { scan.scan() }
+                    Button("Rescan") { scan.scan() }.disabled(scan.scanning)
                 }
+                if scan.scanning { ScanProgressStrip(scan: scan) }
                 let top = scan.entries.first?.size ?? 1
                 ScrollView {
                     LazyVStack(spacing: 3) {
@@ -250,6 +298,17 @@ struct DiskSpaceView: View {
                                 if d.isDirectory { Button("Open Here") { scan.scan(d.path) } }
                             }
                         }
+                        // Items listed but not measured yet: the one being measured now, then the queue.
+                        ForEach(Array(scan.pending.enumerated()), id: \.element) { i, name in
+                            HStack {
+                                if name == scan.progress?.current { ProgressView().controlSize(.mini).frame(width: 18) }
+                                else { Image(systemName: "clock").foregroundStyle(p.dim).frame(width: 18) }
+                                Text(name).lineLimit(1).frame(width: 260, alignment: .leading).foregroundStyle(p.dim)
+                                Spacer()
+                                Text(name == scan.progress?.current ? "measuring…" : "waiting").foregroundStyle(p.dim).frame(width: 90, alignment: .trailing)
+                            }
+                            .font(.system(size: 12, design: .monospaced))
+                        }
                     }
                 }
                 Text("Double-click a folder to drill in. Folders without Full Disk Access permission are counted as 0.").font(.system(size: 10)).foregroundStyle(p.dim)
@@ -258,6 +317,11 @@ struct DiskSpaceView: View {
             }
         }
         .padding(16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)   // pinned to the top, never vertically centred
+        // Automation hook (like -inspectPID): `-scanFolder /path` starts a folder scan when the page first opens.
+        .onAppear {
+            if !scan.started, let f = UserDefaults.standard.string(forKey: "scanFolder"), !f.isEmpty { mode = .folders; scan.scan(f) }
+        }
         // No scan on appear: opening the page (or clicking it by accident) must not start a full scan.
     }
 
@@ -312,4 +376,35 @@ struct BenchmarksView: View {
         historyData = (try? JSONEncoder().encode(h)) ?? Data()
     }
     func previousBest(_ n: String) -> Double? { ((try? JSONDecoder().decode([String: Double].self, from: historyData)) ?? [:])[n] }
+}
+
+/// While a folder scan runs: what it's measuring now, a bar for items done out of items listed, and running totals
+/// (files examined, size so far, elapsed time), so it's obvious the scan is working even inside one huge folder.
+struct ScanProgressStrip: View {
+    @ObservedObject var scan: DiskScan
+    @Environment(\.palette) var p
+    var body: some View {
+        let pr = scan.progress
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text(pr == nil ? "Listing \((scan.path as NSString).lastPathComponent)…"
+                     : pr?.current.map { "Measuring \($0)…" } ?? "Finishing…")
+                    .font(.system(size: 12, weight: .semibold)).lineLimit(1).truncationMode(.middle)
+                Spacer()
+                Button("Cancel") { scan.cancel() }.controlSize(.small)
+            }
+            ProgressView(value: pr?.fraction ?? 0).progressViewStyle(.linear).tint(p.accent)
+            // Elapsed time comes from a 1 s timeline so it keeps ticking even while one big folder is being read.
+            TimelineView(.periodic(from: .now, by: 1)) { tl in
+                let elapsed = Int(tl.date.timeIntervalSince(scan.startedAt ?? tl.date))
+                Text([pr.map { "\($0.done) of \($0.total) items" }, pr.map { "\($0.files.formatted()) files" },
+                      pr.map { "\(Fmt.storage($0.bytes)) so far" }, String(format: "%d:%02d", elapsed / 60, elapsed % 60)]
+                        .compactMap { $0 }.joined(separator: " · "))
+                    .font(.system(size: 11, design: .monospaced)).foregroundStyle(p.dim).monospacedDigit()
+            }
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(p.accent.opacity(0.08)))
+    }
 }

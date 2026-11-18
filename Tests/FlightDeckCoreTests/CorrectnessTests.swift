@@ -340,3 +340,39 @@ final class TemperatureUnitTests: XCTestCase {
         XCTAssertEqual(Fmt.temp(52), "52 °C")
     }
 }
+
+/// Folder scan progress: totals only grow, and they match the tree.
+final class FolderScanProgressTests: XCTestCase {
+    func testProgressCountsFilesAndNeverGoesBackwards() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("fd-scan-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        for d in ["a", "b", "b/c"] { try FileManager.default.createDirectory(at: root.appendingPathComponent(d), withIntermediateDirectories: true) }
+        for i in 0..<1200 { try Data(count: 10).write(to: root.appendingPathComponent("a/f\(i)")) }   // > 500: mid-item progress
+        for i in 0..<3 { try Data(count: 10).write(to: root.appendingPathComponent("b/c/g\(i)")) }
+        try Data(count: 10).write(to: root.appendingPathComponent("top.txt"))
+        let items = DiskUsage.scanItems(of: root.path)
+        XCTAssertEqual(items.count, 3)
+        final class Log: @unchecked Sendable { var p: [DiskUsage.ScanProgress] = []; var e: [DirEntry] = [] }
+        let log = Log()
+        DiskUsage.scan(items: items, progress: { log.p.append($0) }, entry: { log.e.append($0) }, cancelled: { false })
+        XCTAssertEqual(log.e.count, 3)
+        XCTAssertEqual(log.p.first?.total, 3)
+        XCTAssertEqual(log.p.last?.done, 3)
+        XCTAssertTrue(zip(log.p, log.p.dropFirst()).allSatisfy { $0.files <= $1.files && $0.bytes <= $1.bytes && $0.done <= $1.done },
+                      "progress never goes backwards")
+        // a: 1200 files; b: c + 3 files = 4 entries; top.txt: 1.
+        XCTAssertEqual(log.p.last?.files, 1200 + 4 + 1)
+    }
+
+    func testCancelStopsInsideALargeFolder() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("fd-scan-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root.appendingPathComponent("big"), withIntermediateDirectories: true)
+        for i in 0..<2000 { try Data(count: 1).write(to: root.appendingPathComponent("big/f\(i)")) }
+        final class Flag: @unchecked Sendable { var calls = 0; var entries = 0 }
+        let f = Flag()
+        DiskUsage.scan(items: DiskUsage.scanItems(of: root.path), progress: { _ in }, entry: { _ in f.entries += 1 },
+                       cancelled: { f.calls += 1; return f.calls > 2 })
+        XCTAssertEqual(f.entries, 0, "cancelled mid-folder: the half-measured folder is not reported")
+    }
+}
