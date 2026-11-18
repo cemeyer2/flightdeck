@@ -231,9 +231,11 @@ struct SettingsView: View {
             }
             MetricsExportSection()
             MCPSection()
-            Text(engine.netProbeEnabled
-                 ? "FlightDeck sends no data anywhere. The only network traffic it creates is the latency pings above. All measurements stay on this Mac."
-                 : "FlightDeck sends no data anywhere and makes no network requests. All measurements stay on this Mac.")
+            UniFiSettingsSection()
+            // Kept honest as features are added: list every way FlightDeck itself touches the network.
+            Text("FlightDeck sends no data off this Mac. It only uses the network when you ask: latency pings (if on above), "
+                 + "device discovery while the Network or UPnP page is open, scans and traceroutes you start there, and your "
+                 + "UniFi console once you've set it up. The metrics and MCP servers listen on this Mac only.")
                 .font(.caption).foregroundStyle(.secondary)
         }
         .padding(20).frame(width: 480)

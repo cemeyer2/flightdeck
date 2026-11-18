@@ -40,7 +40,7 @@ build is ad-hoc signed and the release notes explain how to open it past Gatekee
 Summary · Performance (CPU per core with P/E colouring, overall/logical/cluster modes; Memory; Disk; Network with per-app traffic;
 Energy; Thermals; GPU) · Processes (live tree, sort/filter, Quit/Force Quit/Suspend/Resume) · System Info ·
 Startup Apps · Users · Services (launchd) · Power & Freq · Connections · Installed Apps · Disk Space · Benchmarks · Launches ·
-Console · Trends · Checkup · Peripherals · UPnP · Network
+Console · Trends · Checkup · Peripherals · UPnP · Network · UniFi
 
 **Flight Recorder:** Record (⇧⌘R) captures every telemetry frame and saves it as a `.flightlog` file
 (zlib-compressed JSON). Open it (⌘O, or double-click in Finder) to scrub or replay it through the same views. Older `.mltrace` recordings from before the rename still open.
@@ -293,6 +293,23 @@ for **Local Network** permission the first time; without it, macOS 27 returns an
 the view says so. The Wi-Fi name and BSSID need Location Services permission. In demo mode the view shows an invented
 network.
 
+**UniFi** (Settings › UniFi, off until configured): reads a UniFi network from a UniFi OS console (Dream Machine,
+Dream Router, Cloud Gateway, Cloud Key) or a self-hosted UniFi Network application, and shows the real topology (gateway →
+switches, with the port each device is on → access points → clients grouped under their AP or switch port, with link
+speeds), device health (CPU, memory, temperatures, firmware, uptime, ports with PoE, AP radios with channel, utilization
+and clients), clients (signal, channel, Wi-Fi standard, SSID, link speed, traffic and rates, sortable, plus the busiest
+right now), and WAN health (WAN IP, ISP, throughput with a graph for the visible session, latency, uptime, the last
+speed test). Setup: create an API key in UniFi Network › Settings › Control Plane › Integrations (or use a local
+read-only account), enter the console's address, site (usually `default`) and key in Settings › UniFi, press Test
+connection, compare the certificate's SHA-256 fingerprint with the console's and trust it. The API key uses the official
+Integration API, plus the classic `stat/*` endpoints with the same key where the console accepts it (they carry switch
+ports, signal, traffic and WAN health); username/password uses the classic API. Read-only; credentials live only in the
+Keychain; the trusted certificate is pinned (a changed one is refused). It polls every 15 s only while the UniFi view is
+open. With nothing configured, opening the view checks whether the default gateway is Ubiquiti hardware (ARP) or answers
+like UniFi OS (one unauthenticated HTTPS GET) and suggests it; no credentials are sent anywhere you haven't configured.
+Anything the console doesn't report is shown as unknown. For other features, `UniFiSnapshot.attachment(ofMAC:)` and
+`UniFiTopology` (FlightDeckCore) say which AP or switch port a MAC address is on.
+
 ## Measurement principles
 
 - **No invented zeros.** Every value is `Measured<T>`, either `.value` or `.unavailable(reason)`. Unmeasured
@@ -303,6 +320,8 @@ network.
 - **Self-monitoring.** FlightDeck appears in its own process list by default (Settings → toggle).
 - **Identity-safe actions.** Signals are sent only if the PID still has the same start time (`ProcessIdentity`).
 - **Private by design.** FlightDeck sends no data anywhere. By default it makes no network requests at all; the only exception is the opt-in latency probe (Settings › Network quality), which pings your router and one host you choose. The opt-in Prometheus and MCP servers only accept connections from this Mac.
+
+- **Private by design.** FlightDeck sends no data anywhere. By default it makes no network requests at all; the exceptions are the opt-in latency probe (Settings › Network quality), which pings your router and one host you choose, and the UniFi view, which talks only to the console you configure (and, while nothing is configured, checks whether your router looks like one).
 
 ## Known limits
 

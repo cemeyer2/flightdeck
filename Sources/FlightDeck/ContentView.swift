@@ -12,7 +12,7 @@ enum Destination: String, CaseIterable, Identifiable, Hashable {
          startup = "Startup Apps", users = "Users", services = "Services", power = "Power & Freq", sleep = "Sleep & Wake",
          connections = "Connections", apps = "Installed Apps", diskSpace = "Disk Space", benchmarks = "Benchmarks",
          launches = "Launches", console = "Console", trends = "Trends", checkup = "Checkup", peripherals = "Peripherals",
-         upnp = "UPnP", network = "Network"
+         upnp = "UPnP", network = "Network", unifi = "UniFi"
     var id: String { rawValue }
     var icon: String {
         switch self {
@@ -39,6 +39,7 @@ enum Destination: String, CaseIterable, Identifiable, Hashable {
         case .peripherals: "cable.connector.horizontal"
         case .upnp: "dot.radiowaves.left.and.right"
         case .network: "wifi.router"
+        case .unifi: "antenna.radiowaves.left.and.right"
         }
     }
 }
@@ -126,6 +127,7 @@ struct ContentView: View {
         case .peripherals: PeripheralsView()
         case .upnp: UPnPView()
         case .network: NetworkMapView()
+        case .unifi: UniFiView()
         }
     }
 
