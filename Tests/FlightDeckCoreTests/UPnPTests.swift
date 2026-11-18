@@ -225,7 +225,7 @@ final class UPnPTests: XCTestCase {
         let g = scan.byHost
         XCTAssertEqual(g.count, 2)
         XCTAssertEqual(g[0].ip, "192.168.1.9"); XCTAssertEqual(g[0].category, .mediaRenderer); XCTAssertEqual(g[0].displayName, "Bedroom TV")
-        XCTAssertEqual(g[1].displayName, "Box/1")   // no description: falls back to SERVER
+        XCTAssertEqual(g[1].displayName, "192.168.1.5")   // no description: falls back to the IP
     }
 
     // MARK: Live

@@ -31,8 +31,9 @@ public struct UPnPRootDevice: Identifiable, Hashable, Sendable {
     }
 
     public var category: UPnPCategory { description.map(UPnPCategory.of) ?? .other }
-    /// Friendly name, else the model, else the SERVER header, else the IP: the best label available.
-    public var displayName: String { description?.friendlyName ?? description?.modelName ?? server ?? ip }
+    /// Friendly name, else the model, else the IP. (Not the SERVER header: it describes the device's software stack,
+    /// e.g. "Linux/4.9 UPnP/1.0 Portable SDK", which reads badly as a name; the details pane shows it.)
+    public var displayName: String { description?.friendlyName ?? description?.modelName ?? ip }
 }
 
 /// The router's port mappings and external address, from its WANIPConnection/WANPPPConnection service.

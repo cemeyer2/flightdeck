@@ -92,6 +92,10 @@ public struct UPnPService: Hashable, Sendable, Identifiable {
     public var eventSubURL: String?
     /// "WANIPConnection:2" from the URN, for display.
     public var shortName: String { UPnP.shortType(serviceType) }
+
+    public init(serviceType: String, serviceId: String? = nil, controlURL: String? = nil, scpdURL: String? = nil, eventSubURL: String? = nil) {
+        self.serviceType = serviceType; self.serviceId = serviceId; self.controlURL = controlURL; self.scpdURL = scpdURL; self.eventSubURL = eventSubURL
+    }
 }
 
 /// One device from a description document. Root devices may contain embedded devices (a router's WANDevice holds a
@@ -299,6 +303,12 @@ public struct UPnPPortMapping: Hashable, Sendable, Identifiable {
     public var description: String?
     /// Seconds left; 0 means permanent (until removed or the router restarts).
     public var leaseSeconds: Int?
+
+    public init(remoteHost: String? = nil, externalPort: Int, proto: String, internalPort: Int?, internalClient: String?,
+                enabled: Bool?, description: String?, leaseSeconds: Int?) {
+        self.remoteHost = remoteHost; self.externalPort = externalPort; self.proto = proto; self.internalPort = internalPort
+        self.internalClient = internalClient; self.enabled = enabled; self.description = description; self.leaseSeconds = leaseSeconds
+    }
 }
 
 /// What one SOAP call returned.

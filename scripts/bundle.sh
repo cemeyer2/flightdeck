@@ -40,6 +40,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>LSApplicationCategoryType</key><string>public.app-category.utilities</string>
   <key>NSHighResolutionCapable</key><true/>
+  <key>NSLocalNetworkUsageDescription</key><string>FlightDeck looks for UPnP devices on your network, and reads your router's port mappings, when you open the UPnP page.</string>
   <key>NSAppleEventsUsageDescription</key><string>FlightDeck reads your Login Items from System Events to list startup apps.</string>
   <key>CFBundleDocumentTypes</key><array><dict>
     <key>CFBundleTypeName</key><string>FlightDeck Trace</string>

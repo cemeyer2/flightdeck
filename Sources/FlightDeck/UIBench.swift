@@ -78,6 +78,10 @@ enum UIBench {
             return l
         }
         out("peripherals", height: 1500, PeripheralsView(loader: ready(Loader { Peripherals.collect() })))
+        // UPnP: the invented demo network, then a real ~3 s SSDP scan of this network (run here, since onAppear doesn't).
+        out("upnp-demo", height: 1250, UPnPView(model: UPnPModel(preview: Demo.upnpScan())))
+        let upnp = Loader { UPnPScan.run() }
+        if let s = ready(upnp).value { out("upnp", height: 1500, UPnPView(model: UPnPModel(preview: s))) }
         out("listening_ports", height: 420, ListeningPortsPanel(loader: ready(Loader { ListeningPorts.scan() })).frame(maxHeight: .infinity, alignment: .top))
         // The inspector is rendered for FlightDeck's own process, which is always present.
         if let me = e.current?.processes.first(where: { $0.pid == getpid() }) {
