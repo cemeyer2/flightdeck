@@ -88,6 +88,13 @@ public struct NetDevice: Identifiable, Hashable, Sendable {
     public var kindReason = "nothing identifying was seen"
     /// Where the device was seen: "ARP", "NDP", "Bonjour", "route", "this Mac".
     public var sources: [String] = []
+    /// UPnP friendly name and manufacturer, when the device answers UPnP discovery (see NetworkEnrichment).
+    public var upnpName: String?
+    public var manufacturer: String?
+    /// The name given to this client in a configured UniFi console, and where the console says it's attached
+    /// ("Wi-Fi via Office AP (Home) · 866 Mbps", "Rack Switch port 5 · 1 Gbps"): the physical topology this Mac can't see.
+    public var unifiName: String?
+    public var attachment: String?
     public var firstSeen = Date.distantPast
     public var lastSeen = Date.distantPast
 
@@ -96,7 +103,10 @@ public struct NetDevice: Identifiable, Hashable, Sendable {
     /// Best name to show: a Bonjour instance or host name the device chose, then reverse DNS, then vendor, then IP.
     public var displayName: String {
         if isThisMac { return "This Mac" }
+        // A name someone chose for the device beats one derived from it: the UniFi alias, then what it announces.
+        if let n = unifiName { return n }
         if let n = preferredBonjourName { return n }
+        if let n = upnpName { return n }
         if let h = bonjourHost { return h }
         if let h = hostname { return h }
         if isGateway { return "Router" }

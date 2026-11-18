@@ -89,7 +89,13 @@ struct DeviceDetailPanel: View {
                 row("IPv6", d.ipv6.isEmpty ? "none seen" : d.ipv6.joined(separator: "\n"), dim: d.ipv6.isEmpty)
                 row("MAC", d.mac.map { $0 + (MAC.isLocallyAdministered($0) ? " (private)" : "") } ?? "unknown: not in this Mac's ARP/NDP cache", dim: d.mac == nil)
                 row("Vendor", d.vendor.label, dim: d.vendor.name == nil)
+                if let m = d.manufacturer { row("Manufacturer", m + " (UPnP)") }
                 row("Model", d.model ?? "not advertised", dim: d.model == nil)
+                // Physical attachment comes only from a UniFi console; without one it can't be known from this Mac.
+                row("Connected", d.attachment ?? (d.isThisMac ? "this Mac" : "unknown: needs a network controller (Settings › UniFi)"),
+                    dim: d.attachment == nil)
+                if let n = d.unifiName { row("UniFi name", n) }
+                if let n = d.upnpName { row("UPnP name", n) }
                 row("Hostname", d.hostname ?? "no reverse-DNS name", dim: d.hostname == nil)
                 row("Bonjour", d.bonjourHost.map { $0 + ".local" } ?? "advertises nothing", dim: d.bonjourHost == nil)
                 if !d.services.isEmpty { row("Services", d.services.map(serviceLabel).joined(separator: ", ")) }

@@ -208,3 +208,48 @@ final class NetworkMapTests: XCTestCase {
         for n in NetworkDiscovery.neighbors() { XCTAssertNotNil(MAC.normalize(n.mac)); XCTAssertFalse(n.ip.isEmpty) }
     }
 }
+
+/// Merging UPnP and UniFi facts into the network survey.
+final class NetworkEnrichmentTests: XCTestCase {
+    func survey(_ devices: [NetDevice]) -> NetworkSurvey {
+        NetworkSurvey(time: Date(), interfaces: [], devices: devices, topology: NetTopology.build(interfaces: [], devices: devices, route: nil, wifi: nil),
+                      route: nil, dns: [], accessPoint: nil, notes: [])
+    }
+    func dev(_ ip: String, mac: String?) -> NetDevice {
+        var d = NetDevice(id: mac.map { "mac:\($0)" } ?? "ip:\(ip)"); d.ipv4 = [ip]; d.mac = mac; d.vendor = OUI.lookup(mac); return d
+    }
+
+    /// UPnP is matched by IP and fills in name, manufacturer and model without overwriting what was already known.
+    func testUPnPAddsNameAndModelByIP() {
+        var tv = dev("192.168.1.20", mac: "a8:23:fe:01:02:03"); tv.model = nil
+        let host = UPnPHostInfo(ip: "192.168.1.20", friendlyName: "Living Room TV", manufacturer: "LG Electronics", model: "OLED55C1",
+                                deviceType: "urn:schemas-upnp-org:device:MediaRenderer:1", category: .mediaRenderer, services: [], presentationURL: nil, uuid: nil)
+        let out = NetworkEnrichment.apply(survey([tv]), upnp: [host]).devices[0]
+        XCTAssertEqual(out.upnpName, "Living Room TV")
+        XCTAssertEqual(out.manufacturer, "LG Electronics")
+        XCTAssertEqual(out.model, "OLED55C1")
+        XCTAssertEqual(out.displayName, "Living Room TV")
+        XCTAssertTrue(out.sources.contains("UPnP"))
+        XCTAssertNotEqual(out.kind, .unknown)
+    }
+
+    /// UniFi is matched by MAC: names, real attachment, and clients this Mac couldn't see are added.
+    func testUniFiAddsAttachmentAndUnseenClients() {
+        var snap = UniFiSnapshot(time: Date(), source: .classic)
+        var ap = UniFiDevice(mac: "f4:92:bf:00:00:01", kind: .accessPoint); ap.name = "Office AP"; ap.model = "U6-Pro"; ap.ip = "192.168.1.5"
+        snap.devices = [ap]
+        var phone = UniFiClient(mac: "02:11:22:33:44:55"); phone.name = "Charlie's iPhone"; phone.ip = "192.168.1.44"
+        phone.wired = false; phone.apMAC = "f4:92:bf:00:00:01"; phone.ssid = "Home"; phone.linkSpeedMbps = 866
+        var hidden = UniFiClient(mac: "a8:23:fe:09:09:09"); hidden.name = "Kitchen Speaker"; hidden.ip = "192.168.1.60"
+        hidden.wired = false; hidden.apMAC = "f4:92:bf:00:00:01"
+        snap.clients = [phone, hidden]
+        let seen = dev("192.168.1.44", mac: "02:11:22:33:44:55")
+        let out = NetworkEnrichment.apply(survey([seen]), unifi: snap)
+        let p = out.devices.first { $0.mac == "02:11:22:33:44:55" }!
+        XCTAssertEqual(p.displayName, "Charlie's iPhone")
+        XCTAssertEqual(p.attachment, "Wi-Fi via Office AP (Home) · 866 Mbps")
+        XCTAssertNotNil(out.devices.first { $0.unifiName == "Kitchen Speaker" }, "a client only the console saw is added")
+        XCTAssertEqual(out.devices.first { $0.mac == "f4:92:bf:00:00:01" }?.kind, .networkGear)
+        XCTAssertTrue(out.notes.contains { $0.contains("UniFi") })
+    }
+}

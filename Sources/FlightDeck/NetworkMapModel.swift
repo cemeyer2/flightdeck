@@ -24,6 +24,8 @@ final class NetworkMapModel: ObservableObject {
     private var names: [String: String] = [:]
     private var seen: [String: (first: Date, last: Date)] = [:]
     private var lastFull: Date?
+    /// Hosts from the last UPnP search (full refreshes only).
+    private var upnpHosts: [UPnPHostInfo] = []
     private var timer: Timer?
 
     init() { fixed = Demo.isEnabled; if fixed { load(Demo.networkSurvey()) } }
@@ -51,15 +53,21 @@ final class NetworkMapModel: ObservableObject {
         // A quick re-read sets an empty label: work is in progress (so nothing overlaps) but nothing is announced.
         busy = full ? "Browsing Bonjour and reading the ARP table…" : ""
         let known = names, seenNow = seen, hopsNow = hops, cached = services
+        let upnpCached = upnpHosts
         Task.detached {
+            // A full refresh also runs a UPnP search (~3 s) alongside the Bonjour browse, for names and models.
+            async let upnp: [UPnPHostInfo] = full ? UPnPScan.run().hosts : upnpCached
             let svc = full ? BonjourBrowser.browse() : cached
             let (s, n) = NetworkDiscovery.survey(services: svc, knownNames: known, seen: seenNow, hops: hopsNow)
-            await MainActor.run { self.finish(s, names: n, services: svc, full: full) }
+            let hosts = await upnp
+            await MainActor.run { self.upnpHosts = hosts; self.finish(s, names: n, services: svc, full: full) }
         }
     }
 
-    private func finish(_ s: NetworkSurvey, names n: [String: String], services svc: [BonjourService], full: Bool) {
+    private func finish(_ raw: NetworkSurvey, names n: [String: String], services svc: [BonjourService], full: Bool) {
         names = n; services = svc
+        // UPnP names/models by IP, and a configured UniFi console's names and real attachments (AP / switch port) by MAC.
+        let s = NetworkEnrichment.apply(raw, upnp: upnpHosts, unifi: UniFiModel.shared.snapshot)
         for d in s.devices { seen[d.id] = (seen[d.id]?.first ?? d.firstSeen, d.lastSeen) }
         // Re-apply first-seen from the session history (the survey only knew what was passed in when it started).
         var s2 = s
