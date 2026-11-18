@@ -54,7 +54,10 @@ saves the last 5 minutes to 24 hours after the fact; Recorder › Replay Black B
 Network, Disk, Memory) are hubs around a ring, coloured by how strained each one is; apps are bubbles sized by how much
 misery they cause and pulled toward the hubs they strain, with routes whose width shows how much they add there.
 Hover for an app's breakdown, click to inspect it. Misery = the app's share of a resource × how strained that resource
-is (power draw counts fully only on battery); unmeasured readings blame nobody. Works in replay too.
+is (power draw counts fully only on battery); unmeasured readings blame nobody. Works in replay too. Changes animate:
+bubbles glide to each new sample's position, routes and hub gauges ease to their new strength, and traffic flows along
+the routes toward the hubs. It's drawn with Core Animation, so the motion runs in macOS's render server and costs about
+the same CPU as a static map. Settings › "Animate the Stress Map" (or macOS's Reduce Motion) turns it off.
 
 **Annunciator panel:** across the top of Summary, a cockpit-style grid of labelled lights (CPU, MEM, SWAP, THERM,
 DISK, STORAGE, NET, GPU, POWER, HANG, CRASH, AWAKE), each lit amber or red by the worst current finding in that

@@ -151,6 +151,7 @@ struct SettingsView: View {
     @AppStorage("theme") private var theme: ThemeID = .dark
     @AppStorage("dockMode") private var dockMode: DockMode = .cpuHistory
     @AppStorage("menuBarEnabled") private var menuBarEnabled = true
+    @AppStorage("animationsEnabled") private var animationsEnabled = true
     @AppStorage("menuBarStyle") private var menuBarStyle: MenuBarStyle = .gauges
     @AppStorage("alertsEnabled") private var alertsEnabled = true
     @AppStorage("alertMinSeverity") private var alertMinSeverity = 2
@@ -170,6 +171,8 @@ struct SettingsView: View {
                 Text("0.5 s").tag(0.5); Text("1 s").tag(1.0); Text("2 s").tag(2.0); Text("5 s").tag(5.0)
             }
             Toggle("Include FlightDeck in measurements (self-monitoring)", isOn: $engine.includeSelf)
+            // Read by animated views (the Stress Map); macOS's Reduce Motion also turns them off.
+            Toggle("Animate the Stress Map", isOn: $animationsEnabled)
             Picker("When no window is open, sample every", selection: $engine.backgroundInterval) {
                 Text("1 s (same as visible)").tag(1.0); Text("2 s").tag(2.0); Text("5 s").tag(5.0)
             }

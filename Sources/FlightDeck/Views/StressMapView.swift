@@ -49,7 +49,7 @@ struct StressMapView: View {
                     HStack(alignment: .top, spacing: 12) {
                         Panel(title: "Stress Map", trailing: r.apps.isEmpty ? "all quiet"
                               : "\(r.apps.count) app\(r.apps.count == 1 ? "" : "s") straining this Mac") {
-                            StressMap(report: r, hovered: $hovered).frame(width: side, height: side)
+                            StressMap(report: r, sampleTime: s.time, hovered: $hovered).frame(width: side, height: side)
                         }
                         VStack(spacing: 12) {
                             MiseryDetail(m: focus ?? r.apps.first, hovering: focus != nil)
@@ -113,6 +113,15 @@ struct MapGeometry {
     /// and Energy, Memory next to CPU, so an app straining both lands between them instead of across the map.
     static let order: [Subsystem] = [.cpu, .gpu, .thermal, .energy, .network, .disk, .memory]
 
+    /// A route's end (on the hub's rim) and the control point of its quadratic curve. Every route bends the same way
+    /// (perpendicular, 18% of its length), so they read as flight arcs.
+    func route(from p: CGPoint, to s: Subsystem) -> (end: CGPoint, control: CGPoint) {
+        let h = hub(s)
+        let dx = h.x - p.x, dy = h.y - p.y, len = max(hypot(dx, dy), 1)
+        let end = CGPoint(x: h.x - dx / len * hubR, y: h.y - dy / len * hubR)
+        return (end, CGPoint(x: (p.x + end.x) / 2 - dy * 0.18, y: (p.y + end.y) / 2 + dx * 0.18))
+    }
+
     func hub(_ s: Subsystem) -> CGPoint {
         let i = Double(Self.order.firstIndex(of: s) ?? 0)
         let a = -Double.pi / 2 + 2 * Double.pi * i / Double(Self.order.count)
@@ -130,9 +139,21 @@ struct PlacedBubble: Identifiable {
 }
 
 /// The ring of hubs, the routes and the app bubbles.
+///
+/// Live, everything that moves is drawn by `StressMapLayers` with Core Animation: each new sample sets new targets and
+/// the system's render server animates bubbles, routes and hub gauges to them (plus gentle ambient motion), so smooth
+/// motion costs FlightDeck almost no CPU. SwiftUI keeps the parts that don't move: the backdrop, the hub labels, and
+/// invisible hover/click targets over the bubbles. Off-screen renders (screenshots, CI), which can't draw AppKit layers,
+/// use the static SwiftUI drawing in `staticScene`.
 struct StressMap: View {
     @Environment(\.palette) var p
+    @Environment(\.offscreen) private var offscreen
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// Settings › "Animate the Stress Map". Off, or Reduce Motion on, moves straight to each new sample.
+    @AppStorage("animationsEnabled") private var animationsEnabled = true
     var report: StressReport
+    /// Identifies the sample `report` came from.
+    var sampleTime: Date
     @Binding var hovered: String?
     /// Only the biggest bubbles get a name label; more would collide on a busy map.
     static let labelled = 6
@@ -142,10 +163,14 @@ struct StressMap: View {
             let g = MapGeometry(size: geo.size)
             let bubbles = layout(g)
             ZStack {
-                Canvas { ctx, _ in
-                    drawBackdrop(&ctx, g)
-                    drawRoutes(&ctx, g, bubbles)
-                    drawHubs(&ctx, g)
+                Canvas { ctx, _ in drawBackdrop(&ctx, g) }
+                if offscreen {
+                    staticScene(g, bubbles)
+                } else {
+                    StressMapLayers(report: report, bubbles: bubbles, geometry: g, palette: p, hovered: hovered,
+                                    animate: animationsEnabled && !reduceMotion, labelled: Self.labelled)
+                        .allowsHitTesting(false)
+                    hitTargets(bubbles)
                 }
                 if report.apps.isEmpty {
                     VStack(spacing: 6) {
@@ -155,15 +180,55 @@ struct StressMap: View {
                     }
                     .position(g.center)
                 }
-                ForEach(Array(bubbles.enumerated()), id: \.element.id) { i, b in
-                    MiseryBubble(m: b.m, radius: b.radius, showName: i < Self.labelled,
-                                 highlighted: hovered == b.id, dimmed: hovered != nil && hovered != b.id)
-                        .onHover { inside in if inside { hovered = b.id } else if hovered == b.id { hovered = nil } }
-                        .onTapGesture { if let id = b.m.busiest, id.pid > 0 { AppActions.openInspector?(id) } }
-                        .position(b.center)
-                }
+                hubLabels(g)
             }
         }
+    }
+
+    /// Invisible circles over each bubble's target position for hover, click and the tooltip; the layers underneath
+    /// draw the bubble itself (and may still be gliding there).
+    func hitTargets(_ bubbles: [PlacedBubble]) -> some View {
+        ForEach(bubbles) { b in
+            Color.clear
+                .frame(width: b.radius * 2, height: b.radius * 2)
+                .contentShape(Circle())
+                .onHover { inside in if inside { hovered = b.id } else if hovered == b.id { hovered = nil } }
+                .onTapGesture { if let id = b.m.busiest, id.pid > 0 { AppActions.openInspector?(id) } }
+                .help(b.m.busiest == nil ? b.m.app.name : "\(b.m.app.name): click to inspect its busiest process")
+                .position(b.center)
+        }
+    }
+
+    /// The whole moving part of the map drawn statically with SwiftUI, for off-screen renders.
+    @ViewBuilder func staticScene(_ g: MapGeometry, _ bubbles: [PlacedBubble]) -> some View {
+        Canvas { ctx, _ in
+            drawRoutes(&ctx, g, bubbles)
+            drawHubs(&ctx, g)
+        }
+        ForEach(Array(bubbles.enumerated()), id: \.element.id) { i, b in
+            MiseryBubble(m: b.m, radius: b.radius, showName: i < Self.labelled,
+                         highlighted: hovered == b.id, dimmed: hovered != nil && hovered != b.id)
+                .position(b.center)
+        }
+    }
+
+    /// Each hub's icon and name (inside it) and its reading (below), as plain views so SwiftUI caches them between
+    /// frames. Colours follow the current sample's stress; they change once per sample, not per frame.
+    func hubLabels(_ g: MapGeometry) -> some View {
+        let r = g.hubR
+        return ZStack {
+            ForEach(MapGeometry.order, id: \.self) { sub in
+                let h = report.hub(sub), pt = g.hub(sub), st = h?.stress
+                let ink = st == nil ? p.dim : ((st ?? 0) > 0.25 ? p.strain(st ?? 0) : p.text)
+                Image(systemName: stressIcon(sub)).font(.system(size: r * 0.42)).foregroundStyle(ink)
+                    .position(x: pt.x, y: pt.y - r * 0.22)
+                Text(sub.rawValue.uppercased()).font(.system(size: max(9, r * 0.27), weight: .bold, design: .monospaced)).foregroundStyle(ink)
+                    .fixedSize().position(x: pt.x, y: pt.y + r * 0.34)
+                Text(h?.reading ?? "—").font(.system(size: 11, weight: .medium, design: .monospaced)).foregroundStyle(st == nil ? p.dim : p.text)
+                    .fixedSize().position(x: pt.x, y: pt.y + r + 18)
+            }
+        }
+        .allowsHitTesting(false)
     }
 
     /// Places each app: bubble area ∝ misery; position is the misery-weighted average of the hubs it strains, drawn
@@ -224,37 +289,32 @@ struct StressMap: View {
             let from = p.strain(b.m.hung ? 1 : b.m.worst)
             let fade = hovered != nil && hovered != b.id
             for (sub, c) in b.m.contributions where c >= 0.01 {
-                let h = g.hub(sub)
-                let dx = h.x - b.center.x, dy = h.y - b.center.y, len = max(hypot(dx, dy), 1)
-                let end = CGPoint(x: h.x - dx / len * g.hubR, y: h.y - dy / len * g.hubR)
-                // Bend every route the same way (perpendicular, 18% of its length) so they read as flight arcs.
-                let mid = CGPoint(x: (b.center.x + end.x) / 2 - dy * 0.18, y: (b.center.y + end.y) / 2 + dx * 0.18)
-                var path = Path(); path.move(to: b.center); path.addQuadCurve(to: end, control: mid)
-                let k = min(1, c * 2.5)
-                let alpha = fade ? 0.07 : 0.4 + 0.55 * k
+                let r = g.route(from: b.center, to: sub)
+                var path = Path(); path.move(to: b.center); path.addQuadCurve(to: r.end, control: r.control)
+                let alpha = fade ? 0.07 : MapStyle.routeAlpha(c)
                 let to = p.strain(report.hub(sub)?.stress ?? 0)
-                ctx.stroke(path, with: .linearGradient(Gradient(colors: [from.opacity(alpha), to.opacity(alpha)]), startPoint: b.center, endPoint: end),
-                           style: StrokeStyle(lineWidth: 1 + 8 * sqrt(c), lineCap: .round))
+                ctx.stroke(path, with: .linearGradient(Gradient(colors: [from.opacity(alpha), to.opacity(alpha)]), startPoint: b.center, endPoint: r.end),
+                           style: StrokeStyle(lineWidth: MapStyle.routeWidth(c), lineCap: .round))
             }
         }
     }
 
-    /// Hubs: a glow and fill that grow with stress, a stress arc around the rim, icon and name inside, reading below.
+    /// Hubs: a glow and fill that grow with stress and a stress arc around the rim (labels are separate views).
     /// Unmeasured hubs are a dashed outline with "—", so they never look like calm ones.
     func drawHubs(_ ctx: inout GraphicsContext, _ g: MapGeometry) {
         let r = g.hubR
         for sub in MapGeometry.order {
-            let h = report.hub(sub), pt = g.hub(sub), st = h?.stress
+            let pt = g.hub(sub), st = report.hub(sub)?.stress
             let col = st.map(p.strain) ?? p.dim
             func circle(_ rr: CGFloat) -> Path { Path(ellipseIn: CGRect(x: pt.x - rr, y: pt.y - rr, width: 2 * rr, height: 2 * rr)) }
             if let st {
-                let halo = r * (1.5 + 0.9 * st)
-                ctx.fill(circle(halo), with: .radialGradient(Gradient(colors: [col.opacity(0.18 + 0.5 * st), col.opacity(0)]),
+                let halo = r * MapStyle.haloScale(st)
+                ctx.fill(circle(halo), with: .radialGradient(Gradient(colors: [col.opacity(MapStyle.haloAlpha(st)), col.opacity(0)]),
                                                              center: pt, startRadius: r * 0.7, endRadius: halo))
             }
             ctx.fill(circle(r), with: .color(p.panel))
             if let st {
-                ctx.fill(circle(r), with: .color(col.opacity(0.16 + 0.4 * st)))
+                ctx.fill(circle(r), with: .color(col.opacity(MapStyle.hubTint(st))))
                 ctx.stroke(circle(r), with: .color(col.opacity(0.85)), lineWidth: 1.2)
                 // Stress arc: a meter around the hub, full circle = fully stressed.
                 ctx.stroke(circle(r + 4), with: .color(p.meterOff), lineWidth: 3)
@@ -266,14 +326,17 @@ struct StressMap: View {
             } else {
                 ctx.stroke(circle(r), with: .color(p.dim.opacity(0.6)), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
             }
-            let ink = st == nil ? p.dim : ((st ?? 0) > 0.25 ? col : p.text)
-            ctx.draw(Text(Image(systemName: stressIcon(sub))).font(.system(size: r * 0.42)).foregroundColor(ink), at: CGPoint(x: pt.x, y: pt.y - r * 0.22))
-            ctx.draw(Text(sub.rawValue.uppercased()).font(.system(size: max(9, r * 0.27), weight: .bold, design: .monospaced)).foregroundColor(ink),
-                     at: CGPoint(x: pt.x, y: pt.y + r * 0.34))
-            ctx.draw(Text(h?.reading ?? "—").font(.system(size: 11, weight: .medium, design: .monospaced)).foregroundColor(st == nil ? p.dim : p.text),
-                     at: CGPoint(x: pt.x, y: pt.y + r + 18))
         }
     }
+}
+
+/// Visual constants shared by the static drawing and the Core Animation layers, so both look identical.
+enum MapStyle {
+    static func routeWidth(_ c: Double) -> CGFloat { 1 + 8 * sqrt(c) }
+    static func routeAlpha(_ c: Double) -> Double { 0.4 + 0.55 * min(1, c * 2.5) }
+    static func haloScale(_ st: Double) -> CGFloat { 1.5 + 0.9 * st }
+    static func haloAlpha(_ st: Double) -> Double { 0.18 + 0.5 * st }
+    static func hubTint(_ st: Double) -> Double { 0.16 + 0.4 * st }
 }
 
 /// One app bubble: coloured by its worst contribution, app icon inside, optional name below. Hung apps are solid red
@@ -473,3 +536,5 @@ struct StressLegend: View {
         }
     }
 }
+
+
