@@ -13,3 +13,6 @@ Requested features not built yet, newest last. Move an item to the README once i
 5. **Network map.** A flight deck for the local network: discover the devices on it and show each one's type,
    manufacturer, hostname, IP and MAC address (and anything else that can be learned), visually rather than as a list,
    ideally with the topology too (which devices connect through which routes).
+6. **UPnP map / browser.** Discover UPnP/SSDP devices (M-SEARCH on the local network), read their device descriptions
+   (friendly name, manufacturer, model, device type, services) and show them browsable, including any port mappings
+   the router's UPnP IGD has opened, so it's clear which apps punched holes through the router.
