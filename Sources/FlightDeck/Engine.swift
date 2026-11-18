@@ -147,12 +147,18 @@ final class Engine: ObservableObject {
     nonisolated let dailyLog: DailyLog
     /// The current charge session's curve and the peak system draw (Performance › Energy › Charging). In memory only.
     nonisolated let chargeCurve = ChargeCurve()
+    /// Per-sensor history, throttling, fan health and temperature alerts (Performance › Thermals). Internally locked:
+    /// ingested on `queue`, read by views. Demo data is catalogued with the generic Apple-silicon table, so demo
+    /// sensor names never depend on this Mac's chip.
+    nonisolated let thermal: ThermalWatch
 
-    init(headless: Bool = false) {
+    init(headless: Bool = false, chip: ChipFamily? = nil) {
         self.headless = headless
+        thermal = ThermalWatch(chip: chip ?? (Demo.isEnabled ? .appleSilicon : .current))
         dailyLog = DailyLog(dir: headless ? nil : DailyLog.defaultDirectory)
         if headless { rules = []; return }   // never show the user's saved rules, rule log or incidents in a headless engine
         ruleLog = Engine.loadRuleLog()
+        applyTemperatureAlerts()   // after the headless return: a headless engine never uses the user's alert settings
         // The first sample only establishes baselines for delta-based counters (CPU ticks, bytes); its result is discarded.
         queue.async { [sampler] in _ = sampler.sample() }   // prime deltas
         restartTimer()
@@ -354,6 +360,11 @@ final class Engine: ObservableObject {
     }
 
     /// Pushes the user's thresholds to the Analyzer on the sampling queue.
+    /// Pushes Settings › Alerts › Temperature alerts to the ThermalWatch (called at launch and when they change).
+    func applyTemperatureAlerts() {
+        thermal.setRules(TemperatureAlertRule.load(UserDefaults.standard.data(forKey: TemperatureAlertRule.defaultsKey)))
+    }
+
     private func applyThresholds() {
         let cpu = appCPUThreshold
         queue.async { [analyzer] in analyzer.thresholds.appCPU = cpu }
@@ -400,7 +411,7 @@ final class Engine: ObservableObject {
             self.launchLog.ingest(s.processes, at: s.time)
             // Respawn loops and baseline findings ("3× its usual memory") join the Analyzer's, so they reach the banner,
             // alerts and the Flight Log the same way.
-            let found = analyzer.ingest(s) + dailyLog.ingest(s) + self.launchLog.findings(now: s.time)
+            let found = analyzer.ingest(s) + dailyLog.ingest(s) + self.launchLog.findings(now: s.time) + self.thermal.ingest(s)
             self.chargeCurve.ingest(s)
             ruleEngine.frontmostPID = front
             let firings = ruleEngine.evaluate(s)
@@ -439,7 +450,7 @@ final class Engine: ObservableObject {
         processHistory.record(s.processes)
         launchLog.ingest(s.processes, at: s.time)
         chargeCurve.ingest(s)
-        liveFindings = findings; liveSnapshot = s; current = s
+        liveFindings = findings + thermal.ingest(s); liveSnapshot = s; current = s
         var light = s; light.processes = Array(s.processes.sorted { $0.cpu > $1.cpu }.prefix(12))
         frames.removeFirst(); frames.append(light)
     }

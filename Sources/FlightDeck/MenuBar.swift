@@ -36,19 +36,23 @@ struct MenuBarLabel: View {
     @EnvironmentObject var e: Engine
     @Environment(\.openWindow) private var openWindow
     @AppStorage("menuBarStyle") private var style: MenuBarStyle = .gauges
+    /// Optional temperature / fan readout after the gauges (ThermalSettings.swift).
+    @AppStorage(MenuBarTemperature.key) private var tempChoice = ""
+    @AppStorage(MenuBarTemperature.fanKey) private var showFan = false
 
     var body: some View {
         let s = e.liveSnapshot
         let worst = e.unmutedLiveFindings.map(\.severity).max() ?? .info
         let caution = worst >= .caution
+        let thermal = MenuBarTemperature.text(s, choice: tempChoice, fan: showFan, chip: e.thermal.chip)
         Group {
             switch style {
             case .cpuText:
-                Text(s?.cpu.total.value.map { String(format: "%@%.0f%%", caution ? "⚠︎ " : "", $0) } ?? "—").monospacedDigit()
+                Text((s?.cpu.total.value.map { String(format: "%@%.0f%%", caution ? "⚠︎ " : "", $0) } ?? "—") + (thermal.map { " " + $0 } ?? "")).monospacedDigit()
             case .gauges, .light:
                 Image(nsImage: Self.render(cpu: s?.cpu.total.value.map { $0 / 100 },
                                            mem: s.map { Double($0.memory.used) / Double(max($0.memory.total, 1)) },
-                                           severity: caution ? worst : nil, lightOnly: style == .light))
+                                           severity: caution ? worst : nil, lightOnly: style == .light, suffix: thermal))
             }
         }
             // The label exists for the app's whole lifetime (when the menu bar item is enabled), which makes it a
@@ -62,9 +66,14 @@ struct MenuBarLabel: View {
     /// Draws the 16 pt-high strip with AppKit: a caution light (orange = caution, red = warning, hollow outline when
     /// nothing is at caution or above) and, unless `lightOnly`, CPU and memory bars as 0…1 fractions. A nil value draws
     /// only the empty track (unavailable, not zero). Not a template image, so the light keeps its colour.
-    static func render(cpu: Double?, mem: Double?, severity: Finding.Severity?, lightOnly: Bool) -> NSImage {
+    /// `suffix` (e.g. "CPU 72°") is drawn after the strip in the menu bar's font, so the label stays one image and
+    /// every style keeps working.
+    static func render(cpu: Double?, mem: Double?, severity: Finding.Severity?, lightOnly: Bool, suffix: String? = nil) -> NSImage {
         let h: CGFloat = 16, barW: CGFloat = 5, gap: CGFloat = 2
-        let w: CGFloat = lightOnly ? 12 : 12 + gap + barW * 2 + gap
+        let strip: CGFloat = lightOnly ? 12 : 12 + gap + barW * 2 + gap
+        let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium), .foregroundColor: NSColor.labelColor]
+        let text = suffix.map { NSAttributedString(string: $0, attributes: attrs) }
+        let w: CGFloat = strip + (text.map { 4 + ceil($0.size().width) } ?? 0)
         let img = NSImage(size: NSSize(width: w, height: h), flipped: false) { _ in
             let fg = NSColor.labelColor
             // caution light: hollow when all is well
@@ -75,6 +84,7 @@ struct MenuBarLabel: View {
             } else {
                 fg.withAlphaComponent(0.85).setStroke(); path.lineWidth = 1.2; path.stroke()
             }
+            if let text { text.draw(at: NSPoint(x: strip + 4, y: (h - text.size().height) / 2)) }
             guard !lightOnly else { return true }
             for (i, v) in [cpu, mem].enumerated() {
                 let x = 12 + gap + CGFloat(i) * (barW + gap)

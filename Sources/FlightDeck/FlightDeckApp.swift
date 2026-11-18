@@ -205,6 +205,7 @@ struct SettingsView: View {
                     Toggle("Show in menu bar (keeps running when the window is closed)", isOn: $menuBarEnabled)
                     Picker("Menu bar shows", selection: $menuBarStyle) { ForEach(MenuBarStyle.allCases) { Text($0.rawValue).tag($0) } }
                         .disabled(!menuBarEnabled)
+                    MenuBarTemperatureSettings().disabled(!menuBarEnabled)
                     Toggle("Open at login", isOn: Binding(get: { loginItem }, set: { on in
                         do { try LoginItem.set(on); loginItem = LoginItem.isEnabled } catch { loginError = error.localizedDescription }
                     }))
@@ -234,6 +235,7 @@ struct SettingsView: View {
                         Text("50% of a core").tag(50.0); Text("80% of a core").tag(80.0); Text("1.5 cores").tag(150.0); Text("3 cores").tag(300.0)
                     }
                 }
+                TemperatureAlertsSection()
             }
             .tabItem { Label("Alerts", systemImage: "bell.badge") }
             tab {

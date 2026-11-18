@@ -159,8 +159,42 @@ fan speed (against its minimum and maximum), the hottest sensor, whether macOS i
 which apps produce the heat, e.g. "Fan at 4,200 rpm (idle ~1,200) because the CPU is at 92 °C; Photos is responsible for
 ~60% of the power draw." On fanless Macs it explains throttling instead.
 
-**Thermals** adds fan speeds from the SMC (RPM, min, max, target, history) and a sensor heatmap of every
-temperature sensor, hottest first.
+**Thermals** (Performance › Thermals) is a full temperature monitor:
+
+- **Sensor catalog.** Both sources are read on the same 4 s cadence: the HID temperature sensors ("PMU tdie1",
+  "pACC MTR Temp Sensor0", "gas gauge battery", "NAND CH0 temp") and the SMC temperature keys that have a known meaning
+  on this chip (Tp0*, Tg*, TB*T, TH0*, Ts*P, TW0P…; ~25 keys, ~6 ms). They become friendly names in groups: CPU
+  performance and efficiency cores, GPU, SoC / die, memory, SSD, battery, Wi-Fi / Bluetooth, charger / power,
+  palm rest / enclosure, ambient / airflow. SMC keys mean different things on M1, M2, M3, M4 and Intel, so they go
+  through per-chip tables (`SensorKeyTables.swift`); anything not in a table keeps its raw name under **Other** rather
+  than being guessed at. Where both sources report the same sensor (the battery's hottest reading, the SSD's NAND) and
+  agree within 2 °C, one entry is kept, noting the other's name. Calibration references ("tcal") are listed but never
+  counted as the hottest.
+- **Highest by group:** a strip with each group's hottest reading now and its maximum this session.
+- **Sensor list:** group headers (folding; Other starts folded), then every sensor with now, minimum, average and
+  maximum since launch and a 5-minute sparkline. Columns sort; "Group" off gives one flat list. Click a sensor for its
+  30-minute history graph. The statistics come from a small ring buffer (450 points per sensor, about 200 KB in
+  total) updated once per sensor read; in replay they're rebuilt from the replayed frames.
+- **Is the Mac slowing down for heat?** `pmset -g therm`'s CPU speed limit and scheduler limit (read every 30 s, only
+  while this tab is on screen), the thermal pressure state and the GPU's heat cap give a yes/no with the reasons, and
+  how long the Mac was throttled this session. A CPU speed limit below 100% for over a minute becomes a finding (it is
+  only seen while the tab is open, since pmset isn't run otherwise).
+- **Fan health:** each fan's RPM against its target, minimum and maximum, and percent of maximum. Findings flag a fan
+  reading 0 RPM for 20 s while the Mac is hot (70 °C+) and the target is above 0, a fan more than 25% (and 300 rpm)
+  short of its target for a minute, and a fan running 40% slower than the other although both were asked for similar
+  speeds. Fanless Macs say so.
+- **Temperature alerts** (Settings › Alerts › Temperature alerts): per group, "CPU above 95 °C for 2 minutes". All
+  start off. Thresholds show in your unit and are stored in °C. A rule that holds becomes a caution finding, so it
+  notifies with the usual mutes, delay and cooldown and goes into the Flight Log.
+- **Menu bar** (Settings › General › Menu bar): add a group's hottest reading or one sensor ("CPU 72°") and,
+  optionally, the fastest fan's RPM after any menu bar style.
+
+How sure the names are, per chip: the common Apple-silicon keys (battery, Wi-Fi, SSD, airflow, palm rest) were checked
+on an M1 Max against the HID battery and NAND sensors. The M1 Pro/Max/Ultra per-core keys come from the widely used
+open-source key map and were checked on an M1 Max with a performance-core load. The M2, M3 and M4 per-core keys come
+from the same map but haven't been checked on those chips. A base M1 gets no per-core SMC names (its HID sensors
+already name the P and E clusters). Intel uses the classic keys every Intel Mac monitor reads. Chips the tables don't
+know (newer than M4) get the common keys only.
 
 **GPU** (Performance › GPU): utilisation (device, renderer, tiler), active residency, live average clock and a
 per-P-state histogram, GPU power, GPU memory in use against Metal's recommended working set, driver
@@ -394,6 +428,7 @@ errors. It may contain personal paths and names, so review it before sharing.
 | `history` | black-box average/p95/peak, top apps and problems over the last N minutes (up to 24 h) |
 | `checkup` | the Checkup list, items needing attention first |
 | `trends` | daily rollups (or one app's days) and before/after comparisons of updates |
+| `temperatures` | every sensor by group with now/min/avg/max since launch, the hottest per group, fans with target/min/max and problems, and throttling (pmset limits, thermal state, GPU heat cap, time throttled) |
 
 **Guided prompts** (MCP prompts; Claude Code shows them as `/mcp__flightdeck__<name>`) run a whole investigation with
 those tools and report in plain English: `diagnose_slow_mac`, `investigate_app` (needs `app`), `battery_drain`,
@@ -489,7 +524,11 @@ Six themes: Light, Dark, Green, Amber, Blue, Mono.
   again (System Settings › Privacy & Security › Local Network). Without it the ARP table and Bonjour come back empty.
 - No Mac can see which switch port or access point another device uses; the network map gets that only from a UniFi
   console.
-- Thermal sensors refresh every 4 s, because reading all HID sensors costs about 70 ms.
+- Thermal sensors refresh every 4 s, because reading all HID sensors costs about 70 ms. SMC keys outside the per-chip
+  tables aren't read (an M1 Max has ~250; each read is an SMC round trip), so they don't appear under Other.
+- The CPU speed limit comes from `pmset -g therm`, which runs only while Performance › Thermals is open, so throttling
+  by the power manager is only seen (and only counted toward "time throttled") then; thermal pressure and the GPU
+  heat cap are tracked all the time.
 
 ## Layout
 
@@ -507,4 +546,5 @@ Automation hooks: `open build/FlightDeck.app --args -destination "Processes" -th
 (`Sources/FlightDeck/Demo.swift`) for screenshots. It never saves rules, never posts alerts and can't act on real
 processes, run cleanups, start or stop services, or contact the network. The pages in the screenshots above (plus Console,
 Checkup and Peripherals, which show a placeholder) are synthetic. System Info, Connections, Installed Apps, Startup
-Apps, Services, Users, the GPU tab and the process inspector still read this Mac, so don't screenshot those in demo mode.
+Apps, Services, Users, the GPU tab and the process inspector still read this Mac, so don't screenshot those in demo mode. On Thermals every sensor (names and values), fan and pmset limit is invented, catalogued with the generic
+Apple-silicon table so nothing depends on this Mac's chip.

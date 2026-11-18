@@ -1,7 +1,7 @@
 import SwiftUI
 import FlightDeckCore
-// Performance tabs Disk, Network, Energy, Thermals and GPU (CPU and Memory are in PerformanceView.swift), plus the
-// panels they embed: ConnectionQualityPanel, EnergyBudgetPanel (black box), DriveHealthPanel, ProcessMiniList and
+// Performance tabs Disk, Network, Energy and GPU (CPU and Memory are in PerformanceView.swift, Thermals in
+// ThermalsView.swift), plus the panels they embed: ConnectionQualityPanel, EnergyBudgetPanel (black box), DriveHealthPanel, ProcessMiniList and
 // GPUAppRow. Like the other tabs they read `e.current` and `e.series`, so they also work during replay.
 
 /// Disk tab: system-wide read/write rates (bytes/s), optional per-device graphs, NVMe health, volume capacity with the
@@ -189,69 +189,7 @@ struct EnergyPerf: View {
     }
 }
 
-/// Thermals tab: macOS thermal pressure state, the hottest sensor, fan speeds from the SMC, and a heatmap of every
-/// temperature sensor (read via IOHIDEventSystemClient, which is slow, so refreshed only every `PowerSampler.sensorInterval` s).
-struct ThermalPerf: View {
-    @EnvironmentObject var e: Engine
-    @Environment(\.palette) var p
-    var body: some View {
-        let pw = e.current?.power
-        VStack(spacing: 12) {
-            // Only present when there is something to explain (fans above idle, or heat holding performance back).
-            if let s = e.current, let why = FanExplainer.explain(s) { FanExplainerCard(explanation: why) }
-            Panel(title: "Thermal pressure") {
-                HStack(spacing: 28) {
-                    Readout(label: "State", value: pw.map { thermalName($0.thermalState) }, color: (pw?.thermalState ?? 0) >= 2 ? p.crit : p.accent)
-                    Readout(label: "Hotspot", value: pw?.hottest.value.map { Fmt.tempNumber($0, digits: 1) }, unit: TemperatureUnit.current.symbol)
-                    Readout(label: "Sensors", value: pw.map { "\($0.temperatures.count)" })
-                    Spacer()
-                }
-                // Four-segment meter for thermal state 0–3 (nominal, fair, serious, critical); nominal lights one segment.
-                VFDMeter(fraction: pw.map { Double($0.thermalState + 1) / 4 }, segments: 4, height: 12)
-                HistoryGraph(traces: [GraphTrace(name: "hot", values: e.series { $0.power.hottest.value }, color: p.accent)],
-                             maxValue: 110, format: { Fmt.temp($0) }).frame(height: 180)
-            }
-            // Fanless Macs (e.g. MacBook Air) report no fans, so the panel is omitted rather than showing 0 RPM.
-            if let fans = pw?.fans, !fans.isEmpty {
-                Panel(title: "Fans", trailing: "from the SMC") {
-                    HStack(spacing: 28) {
-                        ForEach(fans) { f in
-                            VStack(alignment: .leading, spacing: 4) {
-                                Readout(label: "Fan \(f.index + 1)", value: String(format: "%.0f", f.rpm), unit: "RPM")
-                                VFDMeter(fraction: f.fraction, segments: 20, height: 6).frame(width: 160)
-                                Text([f.minRPM.map { String(format: "min %.0f", $0) }, f.maxRPM.map { String(format: "max %.0f", $0) },
-                                      f.targetRPM.map { String(format: "target %.0f", $0) }].compactMap { $0 }.joined(separator: " · "))
-                                    .font(.system(size: 10, design: .monospaced)).foregroundStyle(p.dim)
-                            }
-                        }
-                        Spacer()
-                    }
-                    HistoryGraph(traces: fans.map { f in
-                        GraphTrace(name: "fan\(f.index)", values: e.series { $0.power.fans?.first { $0.index == f.index }?.rpm },
-                                   color: f.index == 0 ? p.accent : p.accent2, fill: f.index == 0) },
-                                 minHeadroom: 2000, format: { String(format: "%.0f rpm", $0) }).frame(height: 110)
-                }
-            }
-            Panel(title: "Sensor heatmap", trailing: "\(pw?.temperatures.count ?? 0) sensors · refreshed every \(Int(PowerSampler.sensorInterval)) s") {
-                let temps = (pw?.temperatures ?? []).sorted { $0.celsius > $1.celsius }
-                if temps.isEmpty { Text("No temperature sensors are exposed on this Mac.").foregroundStyle(p.dim) }
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 6)], spacing: 6) {
-                    ForEach(temps) { t in
-                        let heat = min(max((t.celsius - 30) / 70, 0), 1)   // 30 °C cool … 100 °C hot
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(Fmt.temp(t.celsius, digits: 1)).font(.system(size: 13, weight: .semibold, design: .monospaced))
-                            Text(t.name).font(.system(size: 9, design: .monospaced)).lineLimit(1).truncationMode(.middle)
-                        }
-                        .foregroundStyle(heat > 0.55 ? Color.black : p.text)
-                        .frame(maxWidth: .infinity, alignment: .leading).padding(6)
-                        .background(RoundedRectangle(cornerRadius: 4).fill(heatColor(heat)))
-                        .help(t.name)
-                    }
-                }
-            }
-        }
-    }
-}
+// The Thermals tab (ThermalPerf) is in ThermalsView.swift.
 
 /// GPU tab: device/renderer/tiler utilisation, clocks, power and memory, P-state residency, per-app GPU time, CPU
 /// cluster clocks and Metal device facts. Live detail comes from `Snapshot.gpuDetail` (IOAccelerator statistics plus

@@ -115,6 +115,10 @@ final class EngineMCPSource: MCPDataSource, @unchecked Sendable {
         return await Task.detached(priority: .userInitiated) { log.history() }.value
     }
     func checkup() async -> [CheckResult] { await runCheckup() }
+    func thermal() async -> (status: ThermalStatus, history: SensorHistory)? {
+        guard let w = await MainActor.run(body: { engine?.thermal }) else { return nil }
+        return (w.status(), w.history)
+    }
 }
 
 /// Settings section for the MCP server, kept here so SettingsView only gains one line.

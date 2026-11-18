@@ -28,6 +28,10 @@ public struct FanStatus: Sendable, Equatable, Identifiable {
     /// rpm as a percentage of maxRPM (nil without a maximum).
     public var percentOfMax: Double?
     public var issues: [FanIssue]
+    public init(index: Int, rpm: Double, targetRPM: Double?, minRPM: Double?, maxRPM: Double?, percentOfMax: Double?, issues: [FanIssue]) {
+        self.index = index; self.rpm = rpm; self.targetRPM = targetRPM; self.minRPM = minRPM; self.maxRPM = maxRPM
+        self.percentOfMax = percentOfMax; self.issues = issues
+    }
 }
 
 /// Sustained-condition tracking for fans. Not thread-safe: owned by ThermalWatch, which locks around it.

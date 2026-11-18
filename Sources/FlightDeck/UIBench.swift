@@ -37,7 +37,11 @@ enum UIBench {
         out("cpu", VStack { CPUPerf() })
         out("memory", height: 1900, VStack { MemoryPerf() })
         out("gpu", height: 2200, VStack { GPUPerf() })
-        out("thermals", VStack { ThermalPerf() })
+        out("thermals", height: 3000, VStack { ThermalPerf() })
+        // Temperature alert settings and the menu bar's temperature readout, drawn as the label image would be.
+        out("thermal-settings", width: 640, height: 420, VStack(alignment: .leading) { TemperatureAlertsSection(); MenuBarTemperatureSettings() })
+        let mbText = MenuBarTemperature.text(e.liveSnapshot, choice: "family:cpu", fan: true, chip: e.thermal.chip)
+        out("menubar-temp", width: 300, height: 60, Image(nsImage: MenuBarLabel.render(cpu: 0.4, mem: 0.6, severity: nil, lightOnly: false, suffix: mbText)))
         // Console: a real 5-minute query, finished before rendering (the view itself only starts queries on appear).
         let console = ConsoleModel(); console.span = .m5; console.load()
         let deadline = Date().addingTimeInterval(30)
@@ -45,9 +49,10 @@ enum UIBench {
         out("console", height: 2000, ConsoleView(model: console))
         // Thermals again from demo data, so the "why is the fan loud?" card can be reviewed on a cool Mac too.
         if let template = e.current {
-            let demo = Engine(headless: true), a = Analyzer()
+            let demo = Engine(headless: true, chip: .appleSilicon), a = Analyzer()
+            demo.thermal.note(limits: Demo.thermalLimits, at: Date())
             for f in Demo.frames(template: template, count: 30) { demo.feed(f, findings: a.ingest(f)) }
-            out("thermals-demo", height: 1300, engine: demo, VStack { ThermalPerf() })
+            out("thermals-demo", height: 2600, engine: demo, VStack { ThermalPerf() })
             // Ambient with the demo's findings, so the lit master caution light and the ticker can be reviewed.
             out("ambient-demo", width: 1600, height: 1000, engine: demo, ambientPreview())
         }

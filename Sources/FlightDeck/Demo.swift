@@ -87,14 +87,17 @@ enum Demo {
             }
             // Charging details are this Mac's real readings in the template: never shown in demo mode.
             s.power.charging = nil
-            let sensors = ["CPU performance cores", "CPU efficiency cores", "GPU", "SSD", "Battery", "Ambient"]
-            let temps = [79.0, 64, 71, 46, 34, 31]
-            s.power.temperatures = Array(template.power.temperatures.prefix(sensors.count)).enumerated().map { j, r in
-                var r = r; r.name = sensors[j]; r.celsius = temps[j] * wobble(0.02, 5 + Double(j)); return r
-            }
-            s.power.hottest = .value(79 * wobble(0.02, 5))
-            // One invented fan (not this Mac's), so the fan panels and the "why is the fan loud?" card always have data.
-            s.power.fans = [FanReading(index: 0, rpm: 3150 * wobble(0.04, 6), minRPM: 1200, maxRPM: 5800, targetRPM: 3150)]
+            // Invented sensors in the layouts Apple-silicon MacBooks publish (HID cluster/die names plus the common
+            // SMC keys), catalogued with the generic Apple-silicon table, so no reading or name comes from this Mac.
+            let (hid, smc) = sensors(wobble: wobble)
+            s.power.temperatures = hid
+            s.power.smcTemperatures = smc
+            // The real sampler re-reads sensors every 4 s; demo frames do the same so statistics count each read once.
+            s.power.sensorsReadAt = Date(timeIntervalSince1970: (time.timeIntervalSince1970 / 4).rounded(.down) * 4)
+            s.power.hottest = .value((hid + smc).filter { $0.name != "PMU tcal" }.map(\.celsius).max() ?? 79)
+            // Two invented fans (not this Mac's), so the fan panels and the "why is the fan loud?" card always have data.
+            s.power.fans = [FanReading(index: 0, rpm: 3150 * wobble(0.04, 6), minRPM: 1200, maxRPM: 5800, targetRPM: 3150),
+                            FanReading(index: 1, rpm: 3020 * wobble(0.04, 7), minRPM: 1200, maxRPM: 5800, targetRPM: 3150)]
             // GPU
             s.gpu = .value(44 * wobble(0.2, 3))
             if var g = s.gpuDetail {
@@ -110,6 +113,28 @@ enum Demo {
         }
     }
 
+    /// Invented HID and SMC temperature readings for one frame: a warm Mac exporting photos.
+    static func sensors(wobble: (Double, Double) -> Double) -> (hid: [SensorReading], smc: [SensorReading]) {
+        var hid: [SensorReading] = [], smc: [SensorReading] = []
+        func add(_ list: inout [SensorReading], _ name: String, _ c: Double, _ seed: Double) {
+            list.append(SensorReading(name: name, celsius: c * wobble(0.02, 5 + seed)))
+        }
+        for (i, c) in [78.0, 81, 76, 79].enumerated() { add(&hid, "pACC MTR Temp Sensor\(i)", c, Double(i)) }
+        for (i, c) in [63.0, 65, 62, 64].enumerated() { add(&hid, "eACC MTR Temp Sensor\(i)", c, Double(i) + 4) }
+        for (i, c) in [69.0, 71, 68, 70].enumerated() { add(&hid, "GPU MTR Temp Sensor\(i)", c, Double(i) + 8) }
+        for (i, c) in [66.0, 64].enumerated() { add(&hid, "SOC MTR Temp Sensor\(i)", c, Double(i) + 12) }
+        add(&hid, "ANE MTR Temp Sensor1", 52, 14); add(&hid, "PMU tdie1", 67, 15); add(&hid, "PMU tdie2", 68, 16)
+        add(&hid, "PMU tcal", 51, 17); add(&hid, "NAND CH0 temp", 46, 18)
+        for (k, c, seed) in [("TB0T", 34.0, 19.0), ("TB1T", 33.4, 20), ("TB2T", 34.0, 21), ("TW0P", 48, 22), ("TH0x", 46.3, 23),
+                             ("TaLP", 41, 24), ("TaRF", 43, 25), ("Ts0P", 32, 26), ("Ts1P", 31, 27)] {
+            add(&smc, k, c, seed)
+        }
+        return (hid, smc)
+    }
+
+    /// Invented pmset limits: full speed (a warm but unthrottled Mac).
+    static let thermalLimits = ThermalLimits(cpuSpeedLimit: 100, cpuSchedulerLimit: 100, availableCPUs: 8)
+
     // MARK: Live demo mode (`-demo YES`): the real app UI driven only by this file's data
 
     static var isEnabled: Bool { UserDefaults.standard.bool(forKey: "demo") }
@@ -121,6 +146,7 @@ enum Demo {
         let template = sampler.sample()   // structure only; every shown field is overwritten
         let analyzer = Analyzer()
         let now = Date()
+        e.thermal.note(limits: thermalLimits, at: now)
         for f in frames(template: template, count: 120) { e.feed(f, findings: analyzer.ingest(f)) }
         e.demoInject(incidents: incidents(now), reports: reports(now), rules: demoRules, ruleLog: demoRuleLog(now))
         e.demoTimeline = timeline(template: template, now: now)
@@ -130,6 +156,7 @@ enum Demo {
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
             MainActor.assumeIsolated {
                 let f = frame(template: template, i: i, time: Date()); i += 1
+                if i % 30 == 0 { e.thermal.note(limits: thermalLimits, at: f.time) }   // as the tab's 30 s pmset poll would
                 e.feed(f, findings: analyzer.ingest(f))
             }
         }

@@ -108,6 +108,7 @@ public struct SensorCatalog: Sendable {
     public var chip: ChipFamily
     /// Sorted by group (enum order), then by name with numbers compared numerically ("core 2" before "core 10").
     public var sensors: [CatalogSensor]
+    public init(chip: ChipFamily, sensors: [CatalogSensor]) { self.chip = chip; self.sensors = sensors }
 
     /// Catalogues one power sample: its HID sensors plus its SMC temperature keys.
     public static func build(_ p: PowerSample, chip: ChipFamily) -> SensorCatalog {
