@@ -12,6 +12,8 @@ enum UIBench {
     /// Collects ~10 s of real samples first so graphs have history. Set FD_RENDER_ALL to also render the inventory
     /// views; their loaders run asynchronously, so the main run loop is spun for 2 s before each one.
     static func renderViews(to dir: String) -> Never {
+        // Line-buffered stdout, so a crash mid-run still shows the last "wrote …" line (CI pipes the output).
+        setvbuf(stdout, nil, _IOLBF, 0)
         let e = Engine(headless: true)
         let sampler = Sampler(); let analyzer = Analyzer()
         _ = sampler.sample()

@@ -19,5 +19,21 @@ jobs:
       - name: Render views off-screen (smoke test)
         run: |
           BIN=$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)/FlightDeck
-          "$BIN" --render-views /tmp/views
+          # On a crash, print the crash report's exception and the crashing thread's frames, so the cause is in the log.
+          if ! "$BIN" --render-views /tmp/views; then
+            sleep 15   # ReportCrash writes the .ips a few seconds after the process dies
+            for f in ~/Library/Logs/DiagnosticReports/FlightDeck*.ips; do
+              [ -f "$f" ] || continue
+              python3 - "$f" <<'PY'
+          import json, sys
+          head, body = open(sys.argv[1]).read().split("\n", 1)
+          r = json.loads(body); ex = r.get("exception", {}); imgs = r.get("usedImages", [])
+          print("CRASH:", ex.get("type"), ex.get("signal"), r.get("asi"), (r.get("lastExceptionBacktrace") and "has exception backtrace"))
+          frames = r.get("lastExceptionBacktrace") or next((t["frames"] for t in r["threads"] if t.get("triggered")), [])
+          for fr in frames[:40]:
+              print("  ", imgs[fr["imageIndex"]].get("name", "?") if "imageIndex" in fr else "?", fr.get("symbol", hex(fr.get("imageOffset", 0))))
+          PY
+            done
+            exit 1
+          fi
           ls -l /tmp/views
