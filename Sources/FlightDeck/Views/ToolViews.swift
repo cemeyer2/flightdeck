@@ -262,8 +262,10 @@ struct DiskSpaceView: View {
                 if !scan.started {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Nothing scanned yet.").font(.system(size: 13, weight: .semibold))
+                        // No fixedSize(vertical:) here: in this page's stack it reported an unbounded height and the
+                        // whole window (sidebar included) stopped drawing until you left the page.
                         Text("A scan measures every folder and file under the place you pick, to find what takes the space. It reads a lot of the disk, and macOS may ask you to allow FlightDeck to access folders such as Desktop, Documents, Downloads and Photos; any you don't allow are counted as 0.")
-                            .font(.system(size: 11)).foregroundStyle(p.dim).fixedSize(horizontal: false, vertical: true)
+                            .font(.system(size: 11)).foregroundStyle(p.dim).lineLimit(4)
                         HStack {
                             Button("Scan Home Folder") { scan.scan(FileManager.default.homeDirectoryForCurrentUser.path) }
                             Button("Choose Folder…") { chooseFolder() }
@@ -315,9 +317,11 @@ struct DiskSpaceView: View {
                 }
             }
             }
+            Spacer(minLength: 0)   // pins the panels to the top when they're shorter than the window
         }
         .padding(16)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)   // pinned to the top, never vertically centred
+        // Top-aligned without an infinite-height frame (see the Spacer at the end of the VStack): a
+        // `.frame(maxHeight: .infinity)` here made the whole window, sidebar included, render blank.
         // Automation hook (like -inspectPID): `-scanFolder /path` starts a folder scan when the page first opens.
         .onAppear {
             if !scan.started, let f = UserDefaults.standard.string(forKey: "scanFolder"), !f.isEmpty { mode = .folders; scan.scan(f) }

@@ -87,13 +87,17 @@ public final class DiskSampler {
     }
 
     public static func volumes() -> [VolumeInfo] {
-        let keys: [URLResourceKey] = [.volumeNameKey, .volumeTotalCapacityKey, .volumeAvailableCapacityForImportantUsageKey,
-                                      .volumeAvailableCapacityKey, .volumeLocalizedFormatDescriptionKey, .volumeIsInternalKey, .volumeIsBrowsableKey]
+        let keys: [URLResourceKey] = [.volumeNameKey, .volumeTotalCapacityKey, .volumeAvailableCapacityKey,
+                                      .volumeLocalizedFormatDescriptionKey, .volumeIsInternalKey, .volumeIsBrowsableKey]
         let urls = FileManager.default.mountedVolumeURLs(includingResourceValuesForKeys: keys, options: [.skipHiddenVolumes]) ?? []
         return urls.compactMap { url in
             guard let v = try? url.resourceValues(forKeys: Set(keys)), v.volumeIsBrowsable ?? true,
                   let cap = v.volumeTotalCapacity, cap > 0 else { return nil }
-            let avail = freeSpace(important: v.volumeAvailableCapacityForImportantUsage, available: v.volumeAvailableCapacity.map(Int64.init))
+            // "Available for important usage" is only computed for the startup volume; asking for it on other volumes
+            // makes macOS's CacheDelete log "INVALID VOLUME" errors every refresh. So only "/" asks for it.
+            let important = url.path == "/" ? (try? url.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]))?
+                .volumeAvailableCapacityForImportantUsage : nil
+            let avail = freeSpace(important: important, available: v.volumeAvailableCapacity.map(Int64.init))
             return VolumeInfo(name: v.volumeName ?? url.lastPathComponent, path: url.path, capacity: UInt64(cap),
                               available: avail, fileSystem: v.volumeLocalizedFormatDescription ?? "",
                               isInternal: v.volumeIsInternal ?? false)
