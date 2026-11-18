@@ -98,6 +98,59 @@ pressure, swap, disk and network rates, system watts, hottest temperature, therm
 the top 20 processes by CPU (`name`, `pid` labels). Unmeasured values are omitted, never exported as 0. It does no work
 between scrapes.
 
+**AI assistants (MCP)** (Settings › AI assistants, off by default): FlightDeck serves the
+[Model Context Protocol](https://modelcontextprotocol.io), so Claude Code, Codex and other MCP clients can answer
+"why is my Mac slow?" from FlightDeck's real data. Tools, all read-only:
+
+| Tool | What it returns |
+|---|---|
+| `get_status` | findings in plain English, CPU/memory/swap/disk/network/power/thermal/GPU, top apps by CPU, memory and energy, Stress Map top causes |
+| `list_processes` | processes or apps as a table; `sort`, `limit`, `filter` (the Processes filter syntax, e.g. `cpu>50 user:root`), `by_app` |
+| `get_process` | one PID: identity, path, user, parent chain, CPU, memory, energy, disk, network, listening ports, open files, code signature; optional arguments/files/sockets/threads |
+| `sample_stacks` | 1–5 s of `/usr/bin/sample` on one of *your* processes: main-thread summary and heaviest path |
+| `recent_incidents` | the Flight Log over the last N hours |
+| `diagnostic_reports` | macOS crash, hang, memory-kill and resource-limit reports, with counts by kind and process |
+| `history` | black-box average/p95/peak, top apps and problems over the last N minutes (up to 24 h) |
+| `checkup` | the Checkup list, items needing attention first |
+| `trends` | daily rollups (or one app's days) and before/after comparisons of updates |
+
+No tool can quit, kill, renice or change anything. Unmeasured values are marked "unavailable", never 0, and every
+answer is capped at 48 KB. Two ways to connect:
+
+- **HTTP, served by the running app.** Turn on Settings › AI assistants. It listens on `http://127.0.0.1:9465/mcp`
+  (port configurable; this Mac only), requires the bearer token shown there (generated on first enable; New Token
+  replaces it), and refuses requests whose `Origin` or `Host` isn't this Mac (DNS rebinding). Settings shows these
+  commands with your port and token filled in, each with a Copy button:
+
+  ```sh
+  claude mcp add --transport http flightdeck http://127.0.0.1:9465/mcp --header "Authorization: Bearer <token>"
+  ```
+
+  Codex, in `~/.codex/config.toml`:
+
+  ```toml
+  [mcp_servers.flightdeck]
+  url = "http://127.0.0.1:9465/mcp"
+  http_headers = { "Authorization" = "Bearer <token>" }
+  ```
+
+- **stdio, as a command** (`FlightDeck --mcp`), for any client and with no token to copy:
+
+  ```sh
+  claude mcp add flightdeck -- /Applications/FlightDeck.app/Contents/MacOS/FlightDeck --mcp
+  codex mcp add flightdeck -- /Applications/FlightDeck.app/Contents/MacOS/FlightDeck --mcp
+  ```
+
+  When the app's server is on and answering, each message is forwarded to it (live findings, Flight Log, black box).
+  Otherwise `--mcp` answers standalone: it samples on demand, reads the incident log, black box, daily log and macOS
+  reports from disk (read-only), and every answer says `"source": "standalone"` with what that lacks (findings that
+  need minutes of samples). Only protocol messages go to stdout.
+
+The server speaks both MCP eras: `initialize`-based revisions 2024-11-05 to 2025-11-25, and the stateless 2026-07-28
+revision (per-request `_meta`, `server/discover`). It does no work between requests. In demo mode the HTTP server
+doesn't start (an assistant must not be handed invented data as facts about this Mac); `--mcp` then answers standalone
+from real samples.
+
 **Connection quality** (Performance › Network): Wi-Fi signal, noise, SNR, link rate, channel, band, width, PHY and
 security from CoreWLAN, plus router and DNS servers, all local. An opt-in probe (off by default) pings the router and
 an internet host every 10 s, so FlightDeck can tell "your Wi-Fi is the problem" from "your internet provider is".
@@ -143,6 +196,7 @@ flightdeck --findings               # what's wrong right now
 flightdeck --stats rec.flightlog    # statistics and findings of a recording
 flightdeck --csv rec.flightlog out.csv [--processes]
 flightdeck --report rec.flightlog out.pdf
+flightdeck --mcp                    # MCP server on stdin/stdout for AI assistants (see AI assistants above)
 flightdeck --render-views <dir>     # write 2x PNGs of the main views with live data (visual review, no window)
 flightdeck --bench-ui [N]           # render every main view off-screen N times with live data; ms per frame
 ```
@@ -218,7 +272,7 @@ netstat launched from an app returns no Internet sockets even though it works in
 - **Light in the background.** With no FlightDeck window on screen, view updates stop (graphs catch up instantly when you return) and sampling drops to every 2 s (Settings); the black box, findings and alerts keep running. Background cost is about 2.5% of one core.
 - **Self-monitoring.** FlightDeck appears in its own process list by default (Settings → toggle).
 - **Identity-safe actions.** Signals are sent only if the PID still has the same start time (`ProcessIdentity`).
-- **Private by design.** FlightDeck sends no data anywhere. By default it makes no network requests at all; the only exception is the opt-in latency probe (Settings › Network quality), which pings your router and one host you choose.
+- **Private by design.** FlightDeck sends no data anywhere. By default it makes no network requests at all; the only exception is the opt-in latency probe (Settings › Network quality), which pings your router and one host you choose. The opt-in Prometheus and MCP servers only accept connections from this Mac.
 
 ## Known limits
 

@@ -11,6 +11,7 @@ import FlightDeckCore
 ///   --report <trace> <out.pdf>
 ///   --stats <trace>                 summary statistics of a recording
 ///   --json-stream [interval] [--top N]   one JSON snapshot per line, every `interval` seconds, until killed
+///   --mcp                           MCP server over stdin/stdout for AI assistants (see MCPStdio)
 /// Developer-only (not in `usage`): --render-views <dir> and --bench-ui [renders], see UIBench.
 @MainActor
 enum CLI {
@@ -23,6 +24,8 @@ enum CLI {
       --stats <trace.flightlog>       summary statistics and findings of a recording
       --csv <trace> <out.csv> [--processes]   export system (or per-process) metrics
       --report <trace> <out.pdf>      write a PDF flight report
+      --mcp                           serve the Model Context Protocol on stdin/stdout, for AI assistants
+                                      (uses the running app when its MCP server is on, else samples itself)
       --help
     """
 
@@ -38,13 +41,14 @@ enum CLI {
         // A mistyped flag or a missing argument must not silently open the GUI instead. (Single-dash arguments are
         // left alone: macOS and the automation hooks pass those, e.g. -destination, -NSDocumentRevisionsDebugMode.)
         let known: [String: Int] = ["--snapshot": 0, "--json": 0, "--findings": 0, "--processes": 0, "--top": 1, "--stats": 1, "--csv": 2,
-                                    "--report": 2, "--json-stream": 0, "--render-views": 1, "--bench-ui": 0, "--render-iconset": 1, "--render-dock-previews": 1]
+                                    "--report": 2, "--json-stream": 0, "--mcp": 0, "--render-views": 1, "--bench-ui": 0, "--render-iconset": 1, "--render-dock-previews": 1]
         for (i, arg) in a.enumerated().dropFirst() where arg.hasPrefix("--") {
             guard let n = known[arg] else { fail("unknown option \(arg)\n\n\(usage)") }
             if n > 0 && (i + n >= a.count || a[(i + 1)...(i + n)].contains { $0.hasPrefix("--") }) && arg != "--bench-ui" {
                 fail("\(arg) needs \(n) argument\(n == 1 ? "" : "s")\n\n\(usage)")
             }
         }
+        if a.contains("--mcp") { mcpStdio() }
         if let v = value("--render-views") { UIBench.renderViews(to: v[0]) }
         if a.contains("--json-stream") { jsonStream(a) }
         if a.contains("--bench-ui") { UIBench.run(renders: Int(value("--bench-ui")?.first ?? "") ?? 20) }
@@ -109,6 +113,22 @@ enum CLI {
             d.append(0x0A)
             out.write(d)
         }
+    }
+
+    /// `--mcp`: an MCP server on stdin/stdout, launched by a client such as Claude Code or Codex. Each message goes
+    /// to the app's MCP server when it is turned on and answering, else to a standalone server here (see MCPStdio).
+    /// Nothing but protocol messages is written to stdout. `FLIGHTDECK_MCP_STANDALONE=1` skips the app (tests).
+    /// Exits when the client closes stdin.
+    static func mcpStdio() -> Never {
+        let skipApp = ProcessInfo.processInfo.environment["FLIGHTDECK_MCP_STANDALONE"] != nil
+        Task.detached {
+            await MCPStdio.run(app: { skipApp ? nil : MCPEndpoint.appEndpoint() }, standalone: {
+                MCPServer(version: MCPEndpoint.version, instructions: MCPTools.instructions, tools: MCPTools(source: StandaloneMCPSource()))
+            })
+            exit(0)
+        }
+        // The main thread only services the main queue from here on; the work happens in the task above.
+        dispatchMain()
     }
 
     /// Two samples a second apart: delta-based values (CPU %, disk/network rates) are unavailable in the first one.

@@ -175,6 +175,7 @@ final class Engine: ObservableObject {
         applyThresholds()
         applyProbe()
         MetricsEndpoint.shared.configure(engine: self)   // Prometheus endpoint, if turned on in Settings
+        MCPEndpoint.shared.configure(engine: self)       // MCP server for AI assistants, if turned on in Settings
         let r = rules; queue.async { [ruleEngine] in ruleEngine.rules = r }
         startVisibilityTracking()
         // Sleep findings: at launch, after every wake, and every 30 minutes (so they expire 12 h after waking).
