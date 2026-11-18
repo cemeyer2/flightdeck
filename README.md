@@ -40,7 +40,7 @@ build is ad-hoc signed and the release notes explain how to open it past Gatekee
 Summary · Performance (CPU per core with P/E colouring, overall/logical/cluster modes; Memory; Disk; Network with per-app traffic;
 Energy; Thermals; GPU) · Processes (live tree, sort/filter, Quit/Force Quit/Suspend/Resume) · System Info ·
 Startup Apps · Users · Services (launchd) · Power & Freq · Connections · Installed Apps · Disk Space · Benchmarks · Launches ·
-Console · Trends · Checkup · Peripherals · UPnP · Network · UniFi
+Console · Trends · Checkup · Peripherals · UPnP · Network · UniFi · Developer
 
 **Flight Recorder:** Record (⇧⌘R) captures every telemetry frame and saves it as a `.flightlog` file
 (zlib-compressed JSON). Open it (⌘O, or double-click in Finder) to scrub or replay it through the same views. Older `.mltrace` recordings from before the rename still open.
@@ -309,6 +309,28 @@ open. With nothing configured, opening the view checks whether the default gatew
 like UniFi OS (one unauthenticated HTTPS GET) and suggests it; no credentials are sent anywhere you haven't configured.
 Anything the console doesn't report is shown as unknown. For other features, `UniFiSnapshot.attachment(ofMAC:)` and
 `UniFiTopology` (FlightDeckCore) say which AP or switch port a MAC address is on.
+
+**Developer:** for people who code on this Mac. **Dev servers** lists your own processes listening on TCP ports that are
+recognised developer tools (Vite, Next.js, webpack dev server and other Node/Bun/Deno servers; uvicorn, gunicorn, Flask,
+Django runserver, Jupyter; Rails and Puma; Gradle, Spring Boot and other Java; `go run` and Cargo builds; PHP;
+Postgres, MySQL, Redis, MongoDB; Ollama and LM Studio; Docker, OrbStack and Lima port forwarders), identified from the
+executable and command line. Each row shows the port, a clickable `http://localhost:PORT`, the project folder (the
+process's working directory), uptime, CPU and memory, with Open in browser, Reveal project, Inspect and Stop (SIGTERM
+after a confirmation, then an offer of SIGKILL if it is still the same process 3 s later; identity-checked, own
+processes only). **Containers** uses whichever docker CLI is installed (Docker Desktop, OrbStack, Colima, Rancher
+Desktop): `docker ps -a` and `docker stats --no-stream`, the engine's own CPU and memory on the Mac, and start / stop /
+restart with confirmation. **Homebrew services** (`brew services list --json`) with start / stop / restart (services
+running as root need `sudo` in Terminal and are left alone). **Builds running** sums xcodebuild, swift-frontend, clang,
+the linker, cargo/rustc, Gradle, tsc, esbuild and friends with CPU and elapsed time, and the load strip says whether
+your build is what's heating the Mac. **Simulators** lists booted devices (`xcrun simctl list devices booted -j`) with
+the CPU and memory of each device's process tree. **Toolchains** shows Xcode (`xcode-select -p`, `xcodebuild
+-version`, other Xcode apps by Info.plist) and the Swift, Node, Python, Go, Rust, Java and Ruby versions found on disk:
+xcrun stubs only run when a developer directory is selected, `/usr/bin/java` only when `java_home` finds a JDK, and
+version-manager shims (pyenv, rbenv, nodenv, asdf) are never run (their global version file is read instead).
+**Port finder** answers "what's using port N?" for every process netstat can see, plus containers publishing the
+port, with a jump to the inspector. Nothing runs while the view is closed: dev servers and containers refresh every
+5 s while it is open, Homebrew and simulators every 30 s, toolchains on open and Refresh. Unknown values show "—" with
+the reason. In demo mode it shows an invented set of servers, containers and services and runs no actions.
 
 ## Measurement principles
 

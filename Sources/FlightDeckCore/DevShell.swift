@@ -24,17 +24,19 @@ public struct ToolRun: Sendable {
 }
 
 public enum DevShell {
-    /// Directories searched for developer tools, in priority order. A GUI app inherits launchd's minimal PATH
+    /// Directories searched for developer tools, in priority order (roughly a typical shell PATH). A GUI app inherits launchd's minimal PATH
     /// (/usr/bin:/bin:/usr/sbin:/sbin), not the user's shell PATH, so Homebrew, rustup, Docker Desktop and friends
     /// have to be looked for where their installers put them. /usr/bin comes last: several of its entries are stubs
     /// (see `isSafeToRun`).
     public static var searchDirs: [String] {
         let h = NSHomeDirectory()
-        return ["\(h)/.cargo/bin", "\(h)/.bun/bin", "\(h)/.deno/bin", "\(h)/.volta/bin", "\(h)/.local/bin",
+        // Version-manager shims first: when one is installed, the user's shell normally puts it ahead of everything
+        // else, so it is what `ruby` or `python3` means in their Terminal.
+        return ["\(h)/.pyenv/shims", "\(h)/.rbenv/shims", "\(h)/.nodenv/shims", "\(h)/.asdf/shims",
+                "\(h)/.cargo/bin", "\(h)/.bun/bin", "\(h)/.deno/bin", "\(h)/.volta/bin", "\(h)/.local/bin",
                 "\(h)/.orbstack/bin", "\(h)/.rd/bin", "\(h)/.docker/bin",
                 "/opt/homebrew/bin", "/usr/local/bin", "/usr/local/go/bin",
                 "/Applications/Docker.app/Contents/Resources/bin", "/Applications/OrbStack.app/Contents/MacOS/xbin",
-                "\(h)/.pyenv/shims", "\(h)/.rbenv/shims", "\(h)/.nodenv/shims", "\(h)/.asdf/shims",
                 "/usr/bin"]
     }
 
