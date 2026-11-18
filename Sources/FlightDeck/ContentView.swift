@@ -14,6 +14,7 @@ enum Destination: String, CaseIterable, Identifiable, Hashable {
          launches = "Launches", console = "Console", trends = "Trends", checkup = "Checkup", peripherals = "Peripherals",
          upnp = "UPnP", network = "Network", unifi = "UniFi"
     case internet = "Internet"
+    case developer = "Developer"
     var id: String { rawValue }
     var icon: String {
         switch self {
@@ -42,6 +43,7 @@ enum Destination: String, CaseIterable, Identifiable, Hashable {
         case .network: "wifi.router"
         case .unifi: "antenna.radiowaves.left.and.right"
         case .internet: "globe"
+        case .developer: "hammer"
         }
     }
 }
@@ -64,7 +66,7 @@ enum SidebarSection: String, CaseIterable, Identifiable {
         case .network: [.network, .internet, .connections, .upnp, .unifi]
         case .storage: [.diskSpace]
         case .system: [.systemInfo, .peripherals, .apps, .startup, .services, .users]
-        case .tools: [.rules, .benchmarks]
+        case .tools: [.rules, .developer, .benchmarks]
         case .more: Destination.allCases.filter { d in !Self.listed.contains(d) }
         }
     }
@@ -182,6 +184,7 @@ struct ContentView: View {
         case .network: NetworkMapView()
         case .unifi: UniFiView()
         case .internet: InternetView()
+        case .developer: DeveloperView()
         }
     }
 

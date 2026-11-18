@@ -113,6 +113,13 @@ enum UIBench {
         let bonjour = ProcessInfo.processInfo.environment["FD_RENDER_BONJOUR"] != nil ? BonjourBrowser.browse() : []
         let live = NetworkDiscovery.survey(services: bonjour, knownNames: [:], seen: [:], hops: []).0
         out("network", height: 1250, NetworkMapView(model: NetworkMapModel(survey: live)))
+        // Developer: invented data (no tool is run), then this Mac's real dev servers, containers, services and
+        // toolchains. Read-only: loading never starts, stops or restarts anything.
+        out("developer-demo", height: 1900, DeveloperView(model: DeveloperModel(demo: true)))
+        let dev = DeveloperModel(demo: false); dev.refreshAll()
+        let devUntil = Date().addingTimeInterval(45)
+        while !dev.busy.isEmpty && Date() < devUntil { RunLoop.main.run(until: Date().addingTimeInterval(0.2)) }
+        out("developer", height: 1900, DeveloperView(model: dev))
         out("listening_ports",height: 420, ListeningPortsPanel(loader: ready(Loader { ListeningPorts.scan() })).frame(maxHeight: .infinity, alignment: .top))
         // The inspector is rendered for FlightDeck's own process, which is always present.
         if let me = e.current?.processes.first(where: { $0.pid == getpid() }) {
