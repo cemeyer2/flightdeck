@@ -53,6 +53,11 @@ enum UIBench {
         out("trends", height: 2300, TrendsPreview(log: e.dailyLog))
         out("trends-90", height: 2300, TrendsPreview(log: e.dailyLog, days: 90))
         out("charge-drain", height: 400, ChargeDrainPanel(preview: Demo.chargeStatus()))
+        // UniFi: the invented demo network (no console is contacted), with a client selected in the detail pane.
+        UniFiModel.shared.renderDemo(ticks: 12)
+        out("unifi", height: 2300, UniFiView())
+        let demoNet = UniFiDemo.snapshot()
+        out("unifi-client", height: 600, UniFiClientDetail(client: demoNet.clients[0], snapshot: demoNet).frame(width: 360))
         if ProcessInfo.processInfo.environment["FD_RENDER_ALL"] != nil {
             for d in [Destination.systemInfo, .startup, .users, .services, .power, .connections, .apps, .diskSpace, .benchmarks] {
                 let v: AnyView
