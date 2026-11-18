@@ -88,6 +88,9 @@ public struct DayRecord: Codable, Sendable, Identifiable, Hashable {
 
     /// Busiest apps, by CPU time (trimmed when the day closes).
     public var apps: [AppDay] = []
+    /// Per-app internet data usage (DataUsage.swift). nil = not counted that day (nettop unavailable, FlightDeck not
+    /// running, or a record from before this was added: optional, so older files still decode).
+    public var dataUsage: DataUsageDay? = nil
     /// Present only while the day is still being accumulated.
     var sums: DaySums? = nil
 

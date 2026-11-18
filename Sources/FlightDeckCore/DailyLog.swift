@@ -20,6 +20,8 @@ public final class DailyLog: @unchecked Sendable {
         public var flushInterval: TimeInterval = 60
         /// Apps kept per closed day: the top `keepApps` by CPU time, plus the top 10 by energy and by peak memory.
         public var keepApps = 30
+        /// Apps kept per day in the data-usage list (by bytes); the day's totals still cover every app.
+        public var keepNetApps = 40
         /// A step between snapshots longer than this is a gap (sleep, pause, FlightDeck not running): nothing measured.
         public var gap: TimeInterval = 30
         public var baseline = AppBaseline.Rules()
@@ -52,6 +54,9 @@ public final class DailyLog: @unchecked Sendable {
     /// Cumulative counters per process at the previous pass (CPU seconds, energy joules).
     private var prevCPU: [ProcessIdentity: Double] = [:]
     private var prevEnergy: [ProcessIdentity: Double] = [:]
+    /// Per-app data usage: byte counters per process at the previous pass, and the open day's sums (DataUsage.swift).
+    private var netCounter = NetUsageCounter()
+    private var todayNet = DataUsageTally()
     /// When this instance began watching. A process that started after this is counted from zero on first sight;
     /// one that was already running only sets its baseline (what it used earlier isn't known, or belongs to an earlier day).
     private var observingSince: Date?
@@ -182,7 +187,8 @@ public final class DailyLog: @unchecked Sendable {
         var now: [String: Now] = [:]
         var nextCPU: [ProcessIdentity: Double] = [:], nextEnergy: [ProcessIdentity: Double] = [:]
         nextCPU.reserveCapacity(s.processes.count)
-        for (p, k) in zip(s.processes, AppUsage.groupKeys(s.processes)) {
+        let keys = AppUsage.groupKeys(s.processes)
+        for (p, k) in zip(s.processes, keys) {
             var a = now[k.key] ?? Now(name: k.name, icon: k.icon)
             let fresh = p.startDate >= start
             let pc = prevCPU[p.identity] ?? (fresh ? 0 : nil)
@@ -202,6 +208,8 @@ public final class DailyLog: @unchecked Sendable {
             now[k.key] = a
         }
         prevCPU = nextCPU; prevEnergy = nextEnergy
+        // Data usage: byte deltas from nettop's cumulative counters (same O(processes) pass, every appInterval).
+        if let d = netCounter.pass(s.processes, keys: keys) { todayNet.add(d, seconds: running, at: t) }
         var current: [String: (name: String, cpu: Double?, memory: Double, pids: [Int32])] = [:]
         for (id, a) in now {
             var d = todayApps[id] ?? AppDay(id: id, name: a.name)
@@ -236,9 +244,11 @@ public final class DailyLog: @unchecked Sendable {
         if let i = closed.firstIndex(where: { $0.start == start }) {
             today = closed.remove(at: i); today!.sums = today!.sums ?? DaySums()
             todayApps = Dictionary(today!.apps.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+            todayNet = DataUsageTally(today!.dataUsage)
             closedDirty = true
         } else {
             today = DayRecord(day: dayKey(t), start: start); today!.sums = DaySums(); todayApps = [:]
+            todayNet = DataUsageTally()
         }
         todayEnds = calendar.date(byAdding: .day, value: 1, to: start) ?? start.addingTimeInterval(86_400)
         // Retention: drop days older than `retentionDays`.
@@ -252,7 +262,8 @@ public final class DailyLog: @unchecked Sendable {
         guard var d = today else { return }
         d.finalizeStats(); d.sums = nil
         d.apps = Self.trim(Array(todayApps.values), keep: config.keepApps)
-        if d.observedSeconds > 0 || !d.apps.isEmpty {
+        d.dataUsage = todayNet.day(keep: config.keepNetApps); todayNet = DataUsageTally()
+        if d.observedSeconds > 0 || !d.apps.isEmpty || d.dataUsage != nil {
             closed.append(d); closed.sort { $0.start < $1.start }
         }
         closedDirty = true
@@ -273,6 +284,7 @@ public final class DailyLog: @unchecked Sendable {
         guard var d = today else { return nil }
         d.finalizeStats()
         d.apps = todayApps.values.sorted { $0.cpuSeconds > $1.cpuSeconds }
+        d.dataUsage = todayNet.day(keep: .max)
         return d
     }
 
@@ -296,6 +308,7 @@ public final class DailyLog: @unchecked Sendable {
             today = st.today
             if today != nil && today!.sums == nil { today!.sums = DaySums() }
             todayApps = Dictionary((st.today?.apps ?? []).map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+            todayNet = DataUsageTally(st.today?.dataUsage)
             session = st.session; lastSession = st.lastSession
             pendingResume = session != nil
         }
@@ -377,7 +390,7 @@ public final class DailyLog: @unchecked Sendable {
     public func history() -> History {
         lock.lock(); defer { lock.unlock() }
         var days = closed
-        if var t = todaySnapshot() { t.apps = Self.trim(t.apps, keep: config.keepApps); t.sums = nil; days.append(t) }
+        if var t = todaySnapshot() { t.apps = Self.trim(t.apps, keep: config.keepApps); t.dataUsage = todayNet.day(keep: config.keepNetApps); t.sums = nil; days.append(t) }
         return History(days: days, baselines: baselines, charge: ChargeStatus(current: session, last: lastSession), minBaselineDays: config.baseline.minDays)
     }
 
@@ -440,7 +453,7 @@ public final class DailyLog: @unchecked Sendable {
     public func replaceForDemo(days: [DayRecord], charge: ChargeStatus) {
         guard dir == nil else { return }
         lock.lock(); defer { lock.unlock() }
-        closed = days.sorted { $0.start < $1.start }; today = nil; todayApps = [:]
+        closed = days.sorted { $0.start < $1.start }; today = nil; todayApps = [:]; todayNet = DataUsageTally()
         session = charge.current; lastSession = charge.last
         baselines = AppBaseline.build(from: closed, now: closed.last.map { $0.start.addingTimeInterval(86_400) } ?? Date(), rules: config.baseline)
     }
