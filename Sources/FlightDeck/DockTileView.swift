@@ -185,7 +185,7 @@ final class DockTileView: NSView {
         for (i, row) in rows.enumerated() {
             let y = r.maxY - CGFloat(i + 1) * rowH
             text(row.0, at: NSPoint(x: r.minX, y: y + rowH - 11 * u), size: 8.5 * u, color: lit.withAlphaComponent(0.75))
-            let val = row.0 == "TMP" ? data.temp.map { String(format: "%.0f°", $0) } : row.1.map { String(format: "%.0f%%", $0 * 100) }
+            let val = row.0 == "TMP" ? data.temp.map { Fmt.tempNumber($0) + "°" } : row.1.map { String(format: "%.0f%%", $0 * 100) }
             text(val ?? "—", at: NSPoint(x: r.maxX, y: y + rowH - 11.5 * u), size: 9.5 * u, color: lit, weight: .bold, align: .right)
             segBar(NSRect(x: r.minX, y: y + 3 * u, width: r.width, height: 7 * u), row.1, segments: 12, vertical: false, color: nil, u)
         }

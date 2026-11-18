@@ -4,6 +4,10 @@ import XCTest
 @testable import FlightDeckCore
 
 final class FanExplainerTests: XCTestCase {
+    // The expected sentences are in °C; the default unit follows the Mac's region, so pin it.
+    override func setUp() { UserDefaults.standard.set("celsius", forKey: TemperatureUnit.defaultsKey) }
+    override func tearDown() { UserDefaults.standard.removeObject(forKey: TemperatureUnit.defaultsKey) }
+
     func proc(_ name: String, _ path: String, pid: Int32, cpu: Double, watts: Double?) -> ProcessSample {
         var p = BlackBoxTests.base.processes[0]; p.restricted = false   // copied from a real process, which may be a restricted system one
         p.identity = ProcessIdentity(pid: pid, startTime: 1); p.name = name; p.path = path; p.cpu = cpu; p.energyWatts = watts

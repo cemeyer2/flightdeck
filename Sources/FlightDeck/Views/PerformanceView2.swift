@@ -171,7 +171,7 @@ struct EnergyPerf: View {
                                 value: b.isCharging && b.percent >= 99 ? "Charged" : b.timeRemaining.flatMap { $0 > 0 ? "\($0 / 60)h \($0 % 60)m" : nil })
                         Readout(label: "Health", value: b.health.map { String(format: "%.0f", $0) }, unit: "%")
                         Readout(label: "Cycles", value: b.cycleCount.map(String.init))
-                        Readout(label: "Temp", value: b.temperature.map { String(format: "%.1f", $0) }, unit: "°C")
+                        Readout(label: "Temp", value: b.temperature.map { Fmt.tempNumber($0, digits: 1) }, unit: TemperatureUnit.current.symbol)
                         Readout(label: "Voltage", value: b.voltage.map { String(format: "%.2f", $0) }, unit: "V")
                         Spacer()
                     }
@@ -201,14 +201,14 @@ struct ThermalPerf: View {
             Panel(title: "Thermal pressure") {
                 HStack(spacing: 28) {
                     Readout(label: "State", value: pw.map { thermalName($0.thermalState) }, color: (pw?.thermalState ?? 0) >= 2 ? p.crit : p.accent)
-                    Readout(label: "Hotspot", value: pw?.hottest.value.map { String(format: "%.1f", $0) }, unit: "°C")
+                    Readout(label: "Hotspot", value: pw?.hottest.value.map { Fmt.tempNumber($0, digits: 1) }, unit: TemperatureUnit.current.symbol)
                     Readout(label: "Sensors", value: pw.map { "\($0.temperatures.count)" })
                     Spacer()
                 }
                 // Four-segment meter for thermal state 0–3 (nominal, fair, serious, critical); nominal lights one segment.
                 VFDMeter(fraction: pw.map { Double($0.thermalState + 1) / 4 }, segments: 4, height: 12)
                 HistoryGraph(traces: [GraphTrace(name: "hot", values: e.series { $0.power.hottest.value }, color: p.accent)],
-                             maxValue: 110, format: { String(format: "%.0f °C", $0) }).frame(height: 180)
+                             maxValue: 110, format: { Fmt.temp($0) }).frame(height: 180)
             }
             // Fanless Macs (e.g. MacBook Air) report no fans, so the panel is omitted rather than showing 0 RPM.
             if let fans = pw?.fans, !fans.isEmpty {
@@ -238,7 +238,7 @@ struct ThermalPerf: View {
                     ForEach(temps) { t in
                         let heat = min(max((t.celsius - 30) / 70, 0), 1)   // 30 °C cool … 100 °C hot
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(String(format: "%.1f °C", t.celsius)).font(.system(size: 13, weight: .semibold, design: .monospaced))
+                            Text(Fmt.temp(t.celsius, digits: 1)).font(.system(size: 13, weight: .semibold, design: .monospaced))
                             Text(t.name).font(.system(size: 9, design: .monospaced)).lineLimit(1).truncationMode(.middle)
                         }
                         .foregroundStyle(heat > 0.55 ? Color.black : p.text)
@@ -533,7 +533,7 @@ struct DriveHealthPanel: View {
                         Readout(label: "Written", value: Fmt.bytes(d.bytesWritten))
                         Readout(label: "Read", value: Fmt.bytes(d.bytesRead))
                         Readout(label: "Power-on", value: "\(d.powerOnHours)", unit: "h")
-                        Readout(label: "Temp", value: String(format: "%.0f", d.temperature), unit: "°C")
+                        Readout(label: "Temp", value: Fmt.tempNumber(d.temperature), unit: TemperatureUnit.current.symbol)
                         Spacer()
                     }
                     VFDMeter(fraction: Double(min(d.percentUsed, 100)) / 100, segments: 50, height: 6)

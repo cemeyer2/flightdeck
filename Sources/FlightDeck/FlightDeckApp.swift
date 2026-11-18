@@ -152,6 +152,8 @@ struct SettingsView: View {
     @AppStorage("dockMode") private var dockMode: DockMode = .cpuHistory
     @AppStorage("menuBarEnabled") private var menuBarEnabled = true
     @AppStorage("animationsEnabled") private var animationsEnabled = true
+    /// Stored only once chosen; until then TemperatureUnit.current follows the Mac's region.
+    @AppStorage(TemperatureUnit.defaultsKey) private var temperatureUnit: TemperatureUnit = TemperatureUnit.current
     @AppStorage("menuBarStyle") private var menuBarStyle: MenuBarStyle = .gauges
     @AppStorage("alertsEnabled") private var alertsEnabled = true
     @AppStorage("alertMinSeverity") private var alertMinSeverity = 2
@@ -173,6 +175,8 @@ struct SettingsView: View {
             Toggle("Include FlightDeck in measurements (self-monitoring)", isOn: $engine.includeSelf)
             // Read by animated views (the Stress Map); macOS's Reduce Motion also turns them off.
             Toggle("Animate the Stress Map", isOn: $animationsEnabled)
+            // Display only: recordings, CSV and Prometheus exports always use °C.
+            Picker("Temperature unit", selection: $temperatureUnit) { ForEach(TemperatureUnit.allCases) { Text($0.title).tag($0) } }
             Picker("When no window is open, sample every", selection: $engine.backgroundInterval) {
                 Text("1 s (same as visible)").tag(1.0); Text("2 s").tag(2.0); Text("5 s").tag(5.0)
             }

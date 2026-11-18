@@ -22,6 +22,11 @@ public enum Fmt {
         return i == 0 ? String(format: "%.0f %@", v, units[i]) : String(format: i >= 3 ? "%.2f %@" : "%.1f %@", v, units[i])
     }
     public static func storage(_ b: UInt64) -> String { storage(Double(b)) }
+
+    /// A temperature (given in °C, as every sensor reports it) in the user's chosen unit, e.g. "52 °C" or "126 °F".
+    public static func temp(_ celsius: Double, digits: Int = 0) -> String { tempNumber(celsius, digits: digits) + " " + TemperatureUnit.current.symbol }
+    /// Just the number, in the chosen unit, for readouts that show the unit separately.
+    public static func tempNumber(_ celsius: Double, digits: Int = 0) -> String { String(format: "%.\(digits)f", TemperatureUnit.current.convert(celsius)) }
     /// A byte rate (bytes/s), e.g. "12.3 MB/s".
     public static func rate(_ bps: Double) -> String { bytes(bps) + "/s" }
     /// A byte rate (bytes/s) shown in decimal bits per second ("Mbps"), as network speeds are usually quoted.
@@ -39,4 +44,19 @@ public enum Fmt {
         if d > 0 { return "\(d)d \(h)h \(m)m" }
         return String(format: "%d:%02d:%02d", h, m, sec)
     }
+}
+
+/// Settings › Temperature unit. Everything is measured and stored in °C (recordings, CSV and Prometheus exports stay in
+/// °C); only what people read is converted. Defaults to the Mac's region: °F where the US measurement system is used.
+public enum TemperatureUnit: String, CaseIterable, Identifiable, Sendable {
+    case celsius, fahrenheit
+    public var id: String { rawValue }
+    public static let defaultsKey = "temperatureUnit"
+    public static var current: TemperatureUnit {
+        UserDefaults.standard.string(forKey: defaultsKey).flatMap(Self.init(rawValue:))
+            ?? (Locale.current.measurementSystem == .us ? .fahrenheit : .celsius)
+    }
+    public var symbol: String { self == .celsius ? "°C" : "°F" }
+    public var title: String { self == .celsius ? "Celsius (°C)" : "Fahrenheit (°F)" }
+    public func convert(_ celsius: Double) -> Double { self == .celsius ? celsius : celsius * 9 / 5 + 32 }
 }

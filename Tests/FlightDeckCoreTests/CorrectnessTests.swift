@@ -324,3 +324,19 @@ final class VolumeSpaceTests: XCTestCase {
         XCTAssertEqual(Fmt.storage(UInt64(500_000)), "500.0 KB")
     }
 }
+
+/// Temperature display units.
+final class TemperatureUnitTests: XCTestCase {
+    override func tearDown() { UserDefaults.standard.removeObject(forKey: TemperatureUnit.defaultsKey) }
+
+    func testConversionAndFormatting() {
+        XCTAssertEqual(TemperatureUnit.fahrenheit.convert(100), 212, accuracy: 0.001)
+        XCTAssertEqual(TemperatureUnit.fahrenheit.convert(0), 32, accuracy: 0.001)
+        XCTAssertEqual(TemperatureUnit.celsius.convert(52), 52)
+        UserDefaults.standard.set("fahrenheit", forKey: TemperatureUnit.defaultsKey)
+        XCTAssertEqual(Fmt.temp(52), "126 °F")
+        XCTAssertEqual(Fmt.tempNumber(36.6, digits: 1), "97.9")
+        UserDefaults.standard.set("celsius", forKey: TemperatureUnit.defaultsKey)
+        XCTAssertEqual(Fmt.temp(52), "52 °C")
+    }
+}

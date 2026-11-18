@@ -327,7 +327,7 @@ public final class Analyzer {
         // Thermals: ProcessInfo thermal state 2 (serious) or 3 (critical). kernel_task high CPU at that point is
         // macOS's own thermal throttling, so it's explained rather than blamed.
         if s.power.thermalState >= 2 {
-            var d = s.power.hottest.value.map { String(format: "Hottest sensor %.0f °C. ", $0) } ?? ""
+            var d = s.power.hottest.value.map { "Hottest sensor \(Fmt.temp($0)). " } ?? ""
             if let kt = byKey["proc:kernel_task"], kt.cpu > 50 { d += KnownProcess.explain("kernel_task")! }
             else if let top = topCPU { d += "Biggest CPU user: \(describe(top))." }
             add("thermal", .warning, "thermometer.high",
@@ -340,7 +340,7 @@ public final class Analyzer {
         if let r = pClockRatio.value, r < 0.7, s.power.thermalState >= 1 || (s.power.hottest.value ?? 0) >= 90,
            let c = (s.gpuDetail?.cpuClusters ?? []).filter({ $0.name.hasPrefix("P") }).max(by: { $0.active < $1.active }), let mhz = c.mhz {
             add("cpu-throttled", .caution, "speedometer", String(format: "CPU is throttled: busy performance cores at %.1f of %.1f GHz", mhz / 1000, c.maxMHz / 1000),
-                (s.power.hottest.value.map { String(format: "Hottest sensor %.0f °C. ", $0) } ?? "") + "macOS lowers clocks to control heat, so work takes longer. Better airflow or a cooler room helps.",
+                (s.power.hottest.value.map { "Hottest sensor \(Fmt.temp($0)). " } ?? "") + "macOS lowers clocks to control heat, so work takes longer. Better airflow or a cooler room helps.",
                 "Performance:Thermals")
         }
 

@@ -5,7 +5,10 @@ import Foundation
 /// Summary statistics for a span of frames (flight report, CLI).
 public struct TraceStats: Sendable {
     /// Mean, maximum and 95th percentile of one metric over the frames that measured it.
-    public struct Stat: Sendable { public var avg: Double; public var peak: Double; public var p95: Double }
+    public struct Stat: Sendable {
+        public var avg: Double; public var peak: Double; public var p95: Double
+        public init(avg: Double, peak: Double, p95: Double) { self.avg = avg; self.peak = peak; self.p95 = p95 }
+    }
     public var start: Date, end: Date, frames: Int
     /// Units: cpu/gpu %, memoryUsedFraction 0..1, pressure 0..100, swap bytes, disk/net bytes/s, watts W, hottest °C.
     /// nil when no frame in the span measured that metric.

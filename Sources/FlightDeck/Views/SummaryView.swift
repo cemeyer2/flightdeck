@@ -43,7 +43,7 @@ struct SummaryView: View {
                                 detail: s.map { pw in pw.power.powerSource + (pw.power.battery.map { String(format: " · battery %.0f%%", $0.percent) } ?? "") },
                                 traces: [GraphTrace(name: "w", values: e.series { $0.power.systemWatts.value }, color: p.accent)], minHeadroom: 10)
                     // Hottest sensor on a 0–110 °C scale, matching the Thermals tab graph.
-                    SummaryCard(title: "Thermals", value: s?.power.hottest.value.map { String(format: "%.0f °C", $0) },
+                    SummaryCard(title: "Thermals", value: s?.power.hottest.value.map { Fmt.temp($0) },
                                 fraction: s?.power.hottest.value.map { $0 / 110 },
                                 detail: s.map { "thermal pressure: " + thermalName($0.power.thermalState) },
                                 traces: [GraphTrace(name: "t", values: e.series { $0.power.hottest.value }, color: p.accent)], maxValue: 110)

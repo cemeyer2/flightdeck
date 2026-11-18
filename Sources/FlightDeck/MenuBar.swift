@@ -118,7 +118,7 @@ struct MenuBarPanel: View {
                 MiniGauge(label: "MEM", value: s.flatMap { $0.memory.isMeasured ? Double($0.memory.used) / Double(max($0.memory.total, 1)) : nil },
                           text: s.flatMap { $0.memory.isMeasured ? Fmt.bytes($0.memory.used) : nil })
                 // Gauge scales: temperature against 110 °C, power against 60 W (both are just display ranges).
-                MiniGauge(label: "TEMP", value: s?.power.hottest.value.map { $0 / 110 }, text: s?.power.hottest.value.map { String(format: "%.0f°", $0) })
+                MiniGauge(label: "TEMP", value: s?.power.hottest.value.map { $0 / 110 }, text: s?.power.hottest.value.map { Fmt.tempNumber($0) + "°" })
                 MiniGauge(label: "POWER", value: s?.power.systemWatts.value.map { min($0 / 60, 1) }, text: s?.power.systemWatts.value.map { String(format: "%.1fW", $0) })
             }
             HStack(spacing: 14) {

@@ -68,7 +68,7 @@ enum CLI {
         if let v = value("--stats"), let t = load(v[0]) {
             let st = TraceStats.compute(t)
             print("\(t.host) · \(st.frames) samples · \(st.start.formatted()) – \(st.end.formatted())")
-            for (k, s, f) in [("CPU %", st.cpu, "%.1f"), ("Mem pressure %", st.pressure, "%.1f"), ("Power W", st.watts, "%.1f"), ("Hottest °C", st.hottest, "%.1f")] {
+            for (k, s, f) in [("CPU %", st.cpu, "%.1f"), ("Mem pressure %", st.pressure, "%.1f"), ("Power W", st.watts, "%.1f"), ("Hottest " + TemperatureUnit.current.symbol, st.hottest.map { s in TraceStats.Stat(avg: TemperatureUnit.current.convert(s.avg), peak: TemperatureUnit.current.convert(s.peak), p95: TemperatureUnit.current.convert(s.p95)) }, "%.1f")] {
                 if let s { print(k.padding(toLength: 16, withPad: " ", startingAt: 0) + String(format: " avg \(f)  p95 \(f)  peak \(f)", s.avg, s.p95, s.peak)) }
             }
             print("Top CPU: " + st.topCPU.prefix(5).map { String(format: "%@ %.1f%%", $0.name, $0.avg) }.joined(separator: ", "))
@@ -135,7 +135,7 @@ enum CLI {
         print("CPU \(m(s.cpu.total.value, "%.1f%%"))  load \(s.cpu.loadAverage.map { String(format: "%.2f", $0) }.joined(separator: " "))")
         print("Memory \(Fmt.bytes(s.memory.used)) of \(Fmt.bytes(s.memory.total))  pressure \(m(s.memory.pressure.value, "%.0f%%"))  swap \(s.memory.swapUsed.value.map(Fmt.bytes) ?? "—")")
         print("Disk R \(s.disk.readBps.value.map(Fmt.rate) ?? "—")  W \(s.disk.writeBps.value.map(Fmt.rate) ?? "—")   Net ↓ \(s.network.inBps.value.map(Fmt.rate) ?? "—")  ↑ \(s.network.outBps.value.map(Fmt.rate) ?? "—")")
-        print("Power \(m(s.power.systemWatts.value, "%.1f W"))  hottest \(m(s.power.hottest.value, "%.0f °C"))  thermal \(["Nominal", "Fair", "Serious", "Critical"][min(s.power.thermalState, 3)])  GPU \(m(s.gpu.value, "%.0f%%"))")
+        print("Power \(m(s.power.systemWatts.value, "%.1f W"))  hottest \(s.power.hottest.value.map { Fmt.temp($0) } ?? "—")  thermal \(["Nominal", "Fair", "Serious", "Critical"][min(s.power.thermalState, 3)])  GPU \(m(s.gpu.value, "%.0f%%"))")
         print("")
         func l(_ x: String, _ w: Int) -> String { x.count >= w ? String(x.prefix(w)) : x + String(repeating: " ", count: w - x.count) }
         func r(_ x: String, _ w: Int) -> String { x.count >= w ? x : String(repeating: " ", count: w - x.count) + x }

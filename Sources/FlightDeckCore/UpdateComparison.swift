@@ -153,7 +153,7 @@ public enum Trends {
             level("Average power", "energy", mean(b.map(\.averageWatts)), mean(a.map(\.averageWatts)), minAbs: 0.5, fmt: { String(format: "%.1f W", $0) }),
             level("Memory pressure", "memory pressure", mean(b.map(\.pressureAverage)), mean(a.map(\.pressureAverage)), minAbs: 5, fmt: { String(format: "%.0f%%", $0) }),
             level("Peak swap", "swap", mean(b.map(\.swapMax)), mean(a.map(\.swapMax)), minAbs: 512e6, pct: 50, fmt: { Fmt.bytes($0) }),
-            level("Hottest", "temperature", mean(b.map(\.hottest)), mean(a.map(\.hottest)), minAbs: 4, pct: 5, fmt: { String(format: "%.0f °C", $0) }),
+            level("Hottest", "temperature", mean(b.map(\.hottest)), mean(a.map(\.hottest)), minAbs: 4, pct: 5, fmt: { Fmt.temp($0) }),
             count("crashes", total(b, \.crashes), total(a, \.crashes)),
             count("hangs", total(b, \.hangs), total(a, \.hangs)),
         ]

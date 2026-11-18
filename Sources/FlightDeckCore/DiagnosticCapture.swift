@@ -233,7 +233,7 @@ public enum DiagnosticCapture {
         out += "  Memory \(Fmt.bytes(s.memory.used)) of \(Fmt.bytes(s.memory.total)), pressure \(m(s.memory.pressure.value, "%.0f%%")), swap \(s.memory.swapUsed.value.map(Fmt.bytes) ?? "—")\n"
         out += "  Disk read \(s.disk.readBps.value.map(Fmt.rate) ?? "—"), write \(s.disk.writeBps.value.map(Fmt.rate) ?? "—")\n"
         out += "  Network in \(s.network.inBps.value.map(Fmt.rate) ?? "—"), out \(s.network.outBps.value.map(Fmt.rate) ?? "—")\n"
-        out += "  Power \(m(s.power.systemWatts.value, "%.1f W")), hottest \(m(s.power.hottest.value, "%.0f °C")), thermal state \(["nominal", "fair", "serious", "critical"][min(max(s.power.thermalState, 0), 3)])\n"
+        out += "  Power \(m(s.power.systemWatts.value, "%.1f W")), hottest \(s.power.hottest.value.map { Fmt.temp($0) } ?? "—"), thermal state \(["nominal", "fair", "serious", "critical"][min(max(s.power.thermalState, 0), 3)])\n"
         out += "\nFINDINGS\n"
         if findings.isEmpty { out += "  None: no sustained problems right now.\n" }
         for f in findings.sorted(by: { $0.severity > $1.severity }) {

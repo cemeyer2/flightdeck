@@ -51,7 +51,7 @@ public enum FanExplainer {
         let blame: String? = culprits.first.map { c in
             "\(c.name) is responsible for ~\(Int((c.share * 100).rounded()))% of the \(byEnergy ? "power draw" : "CPU load")"
         }
-        let heat = hot.map { "\($0.part) is at \(String(format: "%.0f", $0.celsius)) °C" }
+        let heat = hot.map { "\($0.part) is at \(Fmt.temp($0.celsius))" }
 
         var headline: String
         if let top = busy.max(by: { $0.rpm < $1.rpm }) {

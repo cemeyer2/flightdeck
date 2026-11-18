@@ -169,7 +169,7 @@ struct TimelinePanel: View {
                 VStack(spacing: 3) {
                     strip("CPU", top: 100) { $0.cpuMax }
                     strip("MEM PRESSURE", top: 100) { $0.pressure }
-                    strip("HOTTEST °C", top: 110) { $0.hottest }
+                    strip("HOTTEST " + TemperatureUnit.current.symbol, top: 110) { $0.hottest }
                     incidentsStrip
                 }
                 HStack {
@@ -190,7 +190,7 @@ struct TimelinePanel: View {
     /// Hover readout shown in the panel's trailing title; "—" for a metric the bucket never measured.
     func describe(_ b: TimelineBucket) -> String {
         b.isGap ? "\(b.start.formatted(date: .omitted, time: .shortened)) · no data"
-            : "\(b.start.formatted(date: .omitted, time: .shortened)) · CPU peak \(b.cpuMax.map { String(format: "%.0f%%", $0) } ?? "—") · pressure \(b.pressure.map { String(format: "%.0f%%", $0) } ?? "—") · \(b.hottest.map { String(format: "%.0f °C", $0) } ?? "—")"
+            : "\(b.start.formatted(date: .omitted, time: .shortened)) · CPU peak \(b.cpuMax.map { String(format: "%.0f%%", $0) } ?? "—") · pressure \(b.pressure.map { String(format: "%.0f%%", $0) } ?? "—") · \(b.hottest.map { Fmt.temp($0) } ?? "—")"
     }
 
     /// Reads the black box and folds it into buckets on a detached utility task, keeping disk reads and decoding

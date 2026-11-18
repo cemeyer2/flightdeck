@@ -63,7 +63,7 @@ struct FlightReportView: View {
                 row("Disk I/O", stats.diskBps) { Fmt.rate($0) }
                 row("Network", stats.netBps) { Fmt.rate($0) }
                 row("System power", stats.watts) { String(format: "%.1f W", $0) }
-                row("Hottest sensor", stats.hottest) { String(format: "%.0f °C", $0) }
+                row("Hottest sensor", stats.hottest) { Fmt.temp($0) }
                 row("GPU", stats.gpu) { String(format: "%.0f%%", $0) }
             }.font(.system(size: 11, design: .monospaced))
             Text("Worst thermal pressure: \(["Nominal", "Fair", "Serious", "Critical"][min(stats.worstThermalState, 3)])")
@@ -86,7 +86,7 @@ struct FlightReportView: View {
             Divider()
             ForEach([("CPU %", downsample { $0.cpu.total.value }, 100.0),
                      ("Memory pressure %", downsample { $0.memory.pressure.value }, 100.0),
-                     ("Hottest sensor °C", downsample { $0.power.hottest.value }, 110.0)], id: \.0) { title, values, maxV in
+                     ("Hottest sensor " + TemperatureUnit.current.symbol, downsample { $0.power.hottest.value.map(TemperatureUnit.current.convert) }, TemperatureUnit.current.convert(110))], id: \.0) { title, values, maxV in
                 Text(title.uppercased()).font(.system(size: 10, weight: .bold, design: .monospaced)).foregroundStyle(.secondary)
                 HistoryGraph(traces: [GraphTrace(name: title, values: values, color: p.accent)], maxValue: maxV).frame(height: 70)
             }

@@ -133,7 +133,7 @@ public enum Stress {
         case .gpu: return s.gpu.value.map { String(format: "%.0f%%", $0) } ?? "—"
         case .thermal:
             let state = ["Nominal", "Fair", "Serious", "Critical"][min(max(s.power.thermalState, 0), 3)]
-            return s.power.hottest.value.map { String(format: "%@ · %.0f °C", state, $0) } ?? state
+            return s.power.hottest.value.map { "\(state) · \(Fmt.temp($0))" } ?? state
         case .energy: return s.power.systemWatts.value.map { String(format: "%.1f W", $0) } ?? "—"
         }
     }

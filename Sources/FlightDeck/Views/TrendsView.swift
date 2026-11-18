@@ -151,7 +151,7 @@ struct TrendsContent: View, Equatable {
             }
             GridRow {
                 chart("Energy used", data.series(\.energyWh), style: .bars, headroom: 10, note: "system, per day", format: { String(format: "%.0f Wh", $0) })
-                chart("Hottest sensor", data.series(\.hottest), headroom: 50, format: { String(format: "%.0f °C", $0) })
+                chart("Hottest sensor", data.series(\.hottest), headroom: 50, format: { Fmt.temp($0) })
             }
             GridRow {
                 chart("Crashes and hangs", data.series { d in d.crashes == nil && d.hangs == nil ? nil : Double((d.crashes ?? 0) + (d.hangs ?? 0)) },

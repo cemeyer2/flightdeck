@@ -117,7 +117,7 @@ struct CompareView: View {
                     statRow("Disk I/O", a.stats.diskBps, b.stats.diskBps, lowerIsBetter: true) { Fmt.rate($0) }
                     statRow("Network", a.stats.netBps, b.stats.netBps, lowerIsBetter: nil) { Fmt.rate($0) }
                     statRow("System power", a.stats.watts, b.stats.watts, lowerIsBetter: true) { String(format: "%.1f W", $0) }
-                    statRow("Hottest sensor", a.stats.hottest, b.stats.hottest, lowerIsBetter: true) { String(format: "%.0f °C", $0) }
+                    statRow("Hottest sensor", a.stats.hottest, b.stats.hottest, lowerIsBetter: true) { Fmt.temp($0) }
                     statRow("GPU", a.stats.gpu, b.stats.gpu, lowerIsBetter: nil) { String(format: "%.0f%%", $0) }
                 }.font(.system(size: 12, design: .monospaced))
                 Text("Findings: A \(a.stats.findings.count) · B \(b.stats.findings.count)").font(.system(size: 11, design: .monospaced)).foregroundStyle(p.dim)
@@ -126,7 +126,7 @@ struct CompareView: View {
                 overlay("CPU %", a, b, span, max: 100) { $0.cpu.total.value }
                 overlay("Memory pressure %", a, b, span, max: 100) { $0.memory.pressure.value }
                 overlay("System power W", a, b, span, max: nil) { $0.power.systemWatts.value }
-                overlay("Hottest sensor °C", a, b, span, max: 110) { $0.power.hottest.value }
+                overlay("Hottest sensor " + TemperatureUnit.current.symbol, a, b, span, max: TemperatureUnit.current.convert(110)) { $0.power.hottest.value.map(TemperatureUnit.current.convert) }
             }
             Panel(title: "Apps: what changed", trailing: "average CPU over each recording") {
                 // Apps are matched by display name; if two entries share a name the larger average wins.
