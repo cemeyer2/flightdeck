@@ -142,7 +142,11 @@ public final class PowerSampler {
                            lowPowerMode: ProcessInfo.processInfo.isLowPowerModeEnabled,
                            thermalState: ProcessInfo.processInfo.thermalState.rawValue,
                            temperatures: temps,
-                           hottest: temps.map(\.celsius).max().map { .value($0) } ?? .unavailable("no sensors"),
+                           // The hottest of every sensor read, HID and SMC alike (the per-core SMC readings are often the
+                           // hottest). "tcal" is a calibration reference, not a component; it reads several °C above every
+                           // real part, so it never counts (SensorCatalog excludes it the same way).
+                           hottest: (temps + lastSMCTemps).filter { !$0.name.lowercased().contains("tcal") }
+                               .map(\.celsius).max().map { .value($0) } ?? .unavailable("no sensors"),
                            fans: SMC.shared.fans(), charging: charging,
                            smcTemperatures: lastSMCTemps, sensorsReadAt: lastSensorRead)
     }
