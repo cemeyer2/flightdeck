@@ -58,6 +58,13 @@ enum UIBench {
         out("unifi", height: 2300, UniFiView())
         let demoNet = UniFiDemo.snapshot()
         out("unifi-client", height: 600, UniFiClientDetail(client: demoNet.clients[0], snapshot: demoNet).frame(width: 360))
+        // Internet: invented speed tests and data usage (networkQuality never runs here), then the real page: no test
+        // history, and data usage counted by an in-memory log from ~16 s of real nettop samples.
+        out("internet-demo", height: 2100, InternetView(model: InternetModel(preview: Demo.speedTests()), previewUsage: DataUsageReport.build(days: Demo.dataUsageDays())))
+        var usageConfig = DailyLog.Config(); usageConfig.appInterval = 4
+        let usageLog = DailyLog(dir: nil, config: usageConfig), usageSampler = Sampler()
+        for _ in 0..<16 { usageLog.ingest(usageSampler.sample()); Thread.sleep(forTimeInterval: 1) }
+        out("internet", height: 1500, InternetView(model: InternetModel(preview: [], demo: false), previewUsage: DataUsageReport.build(days: usageLog.history().days)))
         if ProcessInfo.processInfo.environment["FD_RENDER_ALL"] != nil {
             for d in [Destination.systemInfo, .startup, .users, .services, .power, .connections, .apps, .diskSpace, .benchmarks] {
                 let v: AnyView

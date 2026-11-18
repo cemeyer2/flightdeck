@@ -40,7 +40,7 @@ build is ad-hoc signed and the release notes explain how to open it past Gatekee
 Summary · Performance (CPU per core with P/E colouring, overall/logical/cluster modes; Memory; Disk; Network with per-app traffic;
 Energy; Thermals; GPU) · Processes (live tree, sort/filter, Quit/Force Quit/Suspend/Resume) · System Info ·
 Startup Apps · Users · Services (launchd) · Power & Freq · Connections · Installed Apps · Disk Space · Benchmarks · Launches ·
-Console · Trends · Checkup · Peripherals · UPnP · Network · UniFi
+Console · Trends · Checkup · Peripherals · UPnP · Network · UniFi · Internet
 
 **Flight Recorder:** Record (⇧⌘R) captures every telemetry frame and saves it as a `.flightlog` file
 (zlib-compressed JSON). Open it (⌘O, or double-click in Finder) to scrub or replay it through the same views. Older `.mltrace` recordings from before the rename still open.
@@ -314,6 +314,21 @@ open. With nothing configured, opening the view checks whether the default gatew
 like UniFi OS (one unauthenticated HTTPS GET) and suggests it; no credentials are sent anywhere you haven't configured.
 Anything the console doesn't report is shown as unknown. For other features, `UniFiSnapshot.attachment(ofMAC:)` and
 `UniFiTopology` (FlightDeckCore) say which AP or switch port a MAC address is on.
+
+**Internet** (speed test only on request or on the opt-in schedule): runs macOS's own `networkQuality` (Apple's
+test servers) and shows download and upload in Mbps, responsiveness in RPM (round trips per minute under load, with
+Low < 200 · Medium < 800 · High as FlightDeck's bands), idle latency and the loaded latency derived from RPM, then
+explains the result in plain English: what the speeds are good for, bufferbloat (how much a busy link adds to latency),
+and whether Wi-Fi (signal and link rate) or the router (latency probe) looks like the bottleneck, compared with the
+link as it was when the test started. A test takes about 15–20 s and transfers real data (hundreds of MB on a fast
+line). Settings › Network can schedule one every 1, 3 or 6 hours (off by default); scheduled tests only run while
+FlightDeck runs and are skipped on battery below 20%, on hotspots or metered connections (`NWPath.isExpensive`) and in
+Low Data Mode. Results are kept for 90 days in `~/Library/Application Support/Flightdeck/speedtests.json`, with 7- and
+30-day charts. **Data usage by app**: today, 7 and 30 days per app (in and out, with a 30-day sparkline), the totals,
+and a flag when an app's day is far above its own median day. Counted from nettop's per-process byte counters in the
+daily log's 10 s per-app pass (no extra sampling; a restarted process starts a new counter), stored per day in the
+daily log (`DayRecord.dataUsage`, optional so older logs still load). Only traffic while FlightDeck runs is counted;
+days it didn't run are gaps. Demo mode shows invented tests and usage and never runs networkQuality.
 
 ## Measurement principles
 
