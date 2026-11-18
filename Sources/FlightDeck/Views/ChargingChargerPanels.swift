@@ -17,8 +17,10 @@ struct ChargerPanel: View {
             } else if let a {
                 HStack(spacing: 28) {
                     Readout(label: "Rated", value: a.watts.map(String.init), unit: "W")
-                    Readout(label: "Contract", value: a.volts.flatMap { v in a.amps.map { String(format: "%g V × %.2f A", v, $0) } }, size: 16)
-                    Readout(label: "Negotiated", value: a.negotiatedWatts.map { String(format: "%.0f", $0) }, unit: "W", color: p.accent)
+                    // The contract's voltage: as negotiated when reported, else what the adapter says it supplies.
+                    let cv = a.volts ?? a.adapterVolts
+                    Readout(label: "Contract", value: cv.flatMap { v in a.amps.map { String(format: "%g V × %.2f A", v, $0) } }, size: 16)
+                    Readout(label: "Negotiated", value: cv.flatMap { v in a.amps.map { String(format: "%.0f", v * $0) } }, unit: "W", color: p.accent)
                     Readout(label: "Type", value: a.familyName ?? a.adapterDescription, size: 16)
                     Readout(label: "Port", value: a.port.map { "controller \($0 + 1) of \(a.portCount ?? $0 + 1)" }, size: 16)
                     Readout(label: "Wireless", value: a.isWireless.map { $0 ? "Yes" : "No" }, size: 16)
@@ -57,7 +59,7 @@ struct ChargerPanel: View {
                 Spacer()
             }
             Text(a.offersSource == .portController
-                 ? "Offers decoded from the USB-C port controller's Power Delivery capabilities; the highlighted one is the contract it requested."
+                 ? "Offers decoded from the USB-C port controller's Power Delivery capabilities; the highlighted one matches the voltage the charger is supplying."
                  : "Offers from the charger's USB-PD menu as macOS reports it; the highlighted one is in use.")
                 .font(.caption).foregroundStyle(p.dim)
         }
@@ -72,7 +74,7 @@ struct ChargerPanel: View {
         let volts = a.offers.filter { $0.kind == .fixed }.map { String(format: "%g", $0.volts) }.joined(separator: "/")
         var s = "This charger offers \(volts) V"
         if a.offers.contains(where: { $0.kind != .fixed }) { s += " plus adjustable ranges" }
-        if let v = a.volts ?? a.activeOffer?.volts, let i = a.amps ?? a.activeOffer?.amps {
+        if let v = a.volts ?? a.adapterVolts ?? a.activeOffer?.volts, let i = a.amps ?? a.activeOffer?.amps {
             s += String(format: "; it's using %g V × %.3g A = %.0f W", v, i, v * i)
         }
         return s + "."

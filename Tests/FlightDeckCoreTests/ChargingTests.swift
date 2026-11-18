@@ -215,3 +215,25 @@ final class ChargingTests: XCTestCase {
         if let a = c.adapter, let i = a.activeOfferIndex, !a.offers.isEmpty { XCTAssertNotNil(a.offers.first { $0.index == i }) }
     }
 }
+
+/// Apple's 140 W charger in USB-PD 3.1 EPR mode, as captured live: UsbHvcMenu stops at 20 V and its index points past
+/// it; the port controller lists the 28 V offers but its contract names the 20 V one. The 28 V the adapter reports wins.
+final class ChargingEPRTests: XCTestCase {
+    func testEPRContractPicksTheOfferMatchingTheAdapterVoltage() {
+        // PDOs: fixed 5 V 2.96 A, 9 V 2.97 A, 15 V 2.98 A, 20 V 4.99 A (positions 1–4), then EPR fixed 28 V 4.99 A at 8.
+        func fixed(_ v: Double, _ a: Double) -> Int { (Int(v * 20) << 10) | Int(a * 100) }
+        let pdos: [Int] = [fixed(5, 2.96), fixed(9, 2.97), fixed(15, 2.98), fixed(20, 4.99), 0, 0, 0, fixed(28, 4.99)]
+        let menu: [[String: Any]] = [[ "Index": 0, "MaxVoltage": 5000, "MaxCurrent": 2960 ], [ "Index": 1, "MaxVoltage": 9000, "MaxCurrent": 2970 ],
+                                     [ "Index": 2, "MaxVoltage": 15000, "MaxCurrent": 2980 ], [ "Index": 3, "MaxVoltage": 20000, "MaxCurrent": 4990 ]]
+        let d: [String: Any] = [
+            "ExternalConnected": true,
+            "AdapterDetails": ["Watts": 140, "AdapterVoltage": 28000, "Current": 4990, "Name": "140W USB-C Power Adapter",
+                               "UsbHvcMenu": menu, "UsbHvcHvcIndex": 7],
+            "PortControllerInfo": [["PortControllerActiveContractRdo": 4 << 28 | 0x1F3, "PortControllerNPDOs": pdos.count, "PortControllerPortPDO": pdos]],
+        ]
+        let a = ChargingDetails.parse(d).adapter
+        XCTAssertEqual(a?.offersSource, .portController)
+        XCTAssertEqual(a?.activeOffer?.volts ?? 0, 28, accuracy: 0.01)
+        XCTAssertEqual(a?.adapterVolts ?? 0, 28, accuracy: 0.01)
+    }
+}

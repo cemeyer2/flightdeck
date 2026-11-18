@@ -173,9 +173,20 @@ extension ChargingDetails {
             if let ports = d["PortControllerInfo"] as? [[String: Any]] {
                 let pc = portContract(ports)
                 a.port = pc?.port; a.portCount = ports.count
-                if a.offers.isEmpty, let pc, !pc.offers.isEmpty {
+                // Also when the menu doesn't contain the offer in use: Apple's 140 W charger lists only its 5–20 V offers
+                // in UsbHvcMenu while supplying 28 V (a USB-PD 3.1 EPR offer) and reports UsbHvcHvcIndex 7, past the
+                // menu's end. The port controller's own list includes the EPR offers, so it describes the contract.
+                if let pc, !pc.offers.isEmpty, a.offers.isEmpty || a.activeOffer == nil {
                     a.offers = pc.offers; a.offersSource = .portController; a.activeOfferIndex = pc.position
                 }
+            }
+            // Trust the voltage the adapter reports supplying over an offer index that disagrees with it. With Apple's
+            // 140 W charger at 28 V (EPR), the port controller's contract record still names the 20 V offer; only
+            // 28 V × 4.99 A gives the 140 W it delivers, so pick the offer that matches the measured voltage.
+            if let v = a.adapterVolts ?? a.volts, abs((a.activeOffer?.volts ?? 0) - v) > 0.5,
+               let match = a.offers.first(where: { $0.kind == .fixed && abs($0.volts - v) < 0.5 })
+                   ?? a.offers.first(where: { $0.kind != .fixed && v >= ($0.minVolts ?? 0) - 0.5 && v <= $0.volts + 0.5 }) {
+                a.activeOfferIndex = match.index
             }
             adapter = a.isEmpty ? nil : a
         }
