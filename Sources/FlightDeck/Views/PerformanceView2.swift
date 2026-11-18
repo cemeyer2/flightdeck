@@ -178,6 +178,7 @@ struct EnergyPerf: View {
                     VFDMeter(fraction: b.percent / 100, segments: 40, color: b.percent < 20 ? p.crit : p.accent)
                 }
             }
+            ChargingSection()   // charger contract, power flow, charge curve, battery facts (ChargingSection.swift)
             EnergyBudgetPanel()
             ChargeDrainPanel()   // per-app shares since unplugged (daily log)
             Panel(title: "Top energy processes (measured energy)") {

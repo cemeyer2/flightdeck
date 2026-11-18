@@ -53,6 +53,9 @@ enum UIBench {
         out("trends", height: 2300, TrendsPreview(log: e.dailyLog))
         out("trends-90", height: 2300, TrendsPreview(log: e.dailyLog, days: 90))
         out("charge-drain", height: 400, ChargeDrainPanel(preview: Demo.chargeStatus()))
+        // Charging insights: this Mac's live readings, then the invented demo session (96 W USB-C PD at 20 V).
+        out("charging", height: 1400, ChargingSection())
+        out("charging-demo", height: 1400, ChargingSection(preview: DemoCharging.inputs()))
         // UniFi: the invented demo network (no console is contacted), with a client selected in the detail pane.
         UniFiModel.shared.renderDemo(ticks: 12)
         out("unifi", height: 2300, UniFiView())

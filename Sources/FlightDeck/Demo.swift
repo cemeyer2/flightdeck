@@ -78,6 +78,8 @@ enum Demo {
             s.power.systemWatts = .value(24 * wobble(0.12, 6)); s.power.batteryWatts = .value(-24)
             s.power.powerSource = "Battery"; s.power.lowPowerMode = false; s.power.thermalState = 1
             if var b = s.power.battery { b.percent = 62; b.isCharging = false; b.externalConnected = false; b.cycleCount = 214; s.power.battery = b }
+            // Charging details are this Mac's real readings in the template: never shown in demo mode.
+            s.power.charging = nil
             let sensors = ["CPU performance cores", "CPU efficiency cores", "GPU", "SSD", "Battery", "Ambient"]
             let temps = [79.0, 64, 71, 46, 34, 31]
             s.power.temperatures = Array(template.power.temperatures.prefix(sensors.count)).enumerated().map { j, r in
