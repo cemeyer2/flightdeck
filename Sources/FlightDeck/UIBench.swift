@@ -18,15 +18,16 @@ enum UIBench {
         for _ in 0..<40 { Thread.sleep(forTimeInterval: 0.25); let s = sampler.sample(); e.feed(s, findings: analyzer.ingest(s)) }
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         let p = Palette.of(.dark)
-        func out<V: View>(_ name: String, height: CGFloat = 1500, engine: Engine? = nil, _ v: V) {
+        func out<V: View>(_ name: String, width: CGFloat = 1100, height: CGFloat = 1500, engine: Engine? = nil, _ v: V) {
             let r = ImageRenderer(content: v.environmentObject(engine ?? e).environment(\.palette, p).environment(\.colorScheme, .dark).environment(\.offscreen, true)
-                .padding(16).frame(width: 1100, height: height, alignment: .top).background(p.background))
+                .padding(16).frame(width: width, height: height, alignment: .top).background(p.background))
             r.scale = 2
             if let img = r.nsImage, let tiff = img.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff), let png = rep.representation(using: .png, properties: [:]) {
                 try? png.write(to: URL(fileURLWithPath: dir).appendingPathComponent(name + ".png")); print("wrote \(name).png")
             }
         }
         out("summary", SummaryView())
+        for r in cockpitRenders() { out(r.name, width: r.width, height: r.height, r.view) }   // CockpitBench.swift
         out("stressmap", height: 900, StressMapView())
         out("welcome", height: 640, WelcomeView())
         out("sleep", height: 1500, SleepPreview())
@@ -45,6 +46,8 @@ enum UIBench {
             let demo = Engine(headless: true), a = Analyzer()
             for f in Demo.frames(template: template, count: 30) { demo.feed(f, findings: a.ingest(f)) }
             out("thermals-demo", height: 1300, engine: demo, VStack { ThermalPerf() })
+            // Ambient with the demo's findings, so the lit master caution light and the ticker can be reviewed.
+            out("ambient-demo", width: 1600, height: 1000, engine: demo, ambientPreview())
         }
         // Trends: first with this headless engine's empty in-memory log (the "needs more days" states), then with
         // demo history and a demo battery session (the headless log is never persisted).
@@ -141,6 +144,8 @@ enum UIBench {
             print(name.padding(toLength: 22, withPad: " ", startingAt: 0) + String(format: "%6.1f ms/frame", ms))
         }
         bench("Summary", SummaryView())
+        bench("Cockpit (edit mode)", CockpitView(model: CockpitModel(preview: editedCockpit(), editing: true)))
+        bench("Ambient", ambientPreview())
         bench("Flight Log", FlightLogView())
         for t in PerfTab.allCases {
             bench("Perf › \(t.rawValue)", Group {

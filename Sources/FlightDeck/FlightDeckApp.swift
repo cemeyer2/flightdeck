@@ -81,6 +81,7 @@ struct FlightDeckApp: App {
             }
         }
         .commands { PowerToolsCommands() }   // View › Command Palette (⌘K), Help › Capture Diagnostics
+        .commands { AmbientCommands(engine: engine) }   // View › Ambient Mode (⌃⌘A), Ambient Mode on Display
         // One inspector window per process identity (PID + start time), so reopening for the same process reuses its
         // window and a recycled PID gets a new one.
         WindowGroup("Inspector", id: "inspector", for: ProcessIdentity.self) { $id in
