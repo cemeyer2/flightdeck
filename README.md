@@ -50,6 +50,25 @@ for the last hour and one sample every 10 s for 24 hours, capped at 50 MB, in
 `~/Library/Application Support/Flightdeck/BlackBox` as ordinary `.flightlog` segments. Recorder › Save from Black Box
 saves the last 5 minutes to 24 hours after the fact; Recorder › Replay Black Box (⇧⌘B: last 10 minutes) replays it.
 
+**Customizable cockpit:** the Summary page is a grid of instruments you can arrange. Click **Edit** (⌥⌘E) to get a
+strip above each instrument with a drag handle, a size control (S = one column, M = two, L = the whole row), move
+buttons and a remove (×) button, plus an "Add instrument" palette. Drag instruments onto each other to reorder them;
+**Done** leaves edit mode. Besides the classic Summary cards (annunciator, findings, CPU, Memory, Disk, Network, Energy,
+Thermals, GPU, Top Processes) there are CPU Cores (a per-core strip, or per-core tiles when large), Memory Pressure,
+Swap, Fans, Battery & Charge, Wi-Fi Signal, a static mini Stress Map, and Clock & Uptime. Layouts are named and saved
+as JSON in user defaults (`cockpitLayouts`); the layout menu switches between them (Default, Thermals, Network,
+Ambient, plus your own via Duplicate Layout) and resets one or all of them. Nothing is saved until you edit, and the
+Default layout is the classic Summary page, so the page looks the same until you change it.
+
+**Ambient mode:** View › Ambient Mode (⌃⌘A), or the Ambient menu on Summary, opens a separate full-screen instrument
+panel, meant for a second display or an iPad via Sidecar (View › Ambient Mode on Display picks the screen; the last one
+used is remembered). It shows a big clock and uptime, the master caution light (lit with a steady glow while an
+unmuted caution or warning is active), large gauges for the gauge-type instruments of the Ambient layout (or another
+layout chosen under "Gauges From"), and a findings ticker that steps to the next finding every 8 s. It's dim by
+default (right-click for brightness), the pointer hides when it rests, and Esc exits. To avoid burn-in the whole
+panel moves by one point a minute around a 12-point square. Like the cockpit it redraws only once per sample (plus a
+once-a-minute tick for the clock), with no continuous animation.
+
 **Stress Map:** a graphical answer to "what is making my Mac miserable?". Subsystems (CPU, GPU, Thermal, Energy,
 Network, Disk, Memory) are hubs around a ring, coloured by how strained each one is; apps are bubbles sized by how much
 misery they cause and pulled toward the hubs they strain, with routes whose width shows how much they add there.
@@ -402,6 +421,9 @@ the reason. In demo mode it shows an invented set of servers, containers and ser
   (system info, launchd, connections, apps, disk usage, frequency, benchmarks), and `Snapshot`/`Trace`.
 - `Sources/FlightDeck`: the SwiftUI app. `Engine` owns sampling, history and recording/replay. The process
   table is an AppKit `NSOutlineView` updated by diffing, for low overhead.
+- Cockpit and Ambient mode: the layout model (instrument kinds, sizes, layouts, JSON, grid packing, burn-in shift) is
+  `FlightDeckCore/Cockpit.swift` and `CockpitStore.swift`, tested in `CockpitTests`; the views are `Views/Cockpit*.swift`
+  and `Views/AmbientView.swift`, the window is `AmbientWindow.swift`.
 
 Automation hooks: `open build/FlightDeck.app --args -destination "Processes" -theme green -replayIndex 10`.
 

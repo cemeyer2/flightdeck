@@ -1,63 +1,14 @@
 import SwiftUI
 import FlightDeckCore
 // Summary destination, the app's front page: the annunciator panel, the diagnosis banner (analyzer findings),
-// one card per subsystem with a short history graph, and the top process per resource. Everything is read from
-// `e.current` / `e.series`, so the page also replays recordings.
+// one card per subsystem with a short history graph, and the top process per resource, arranged by the user's cockpit
+// layout. Everything is read from `e.current` / `e.series`, so the page also replays recordings.
 
-/// Wrapped in MaybeScroll so UIBench can render it off-screen (a ScrollView renders empty there).
+/// The Summary page is the customizable cockpit (CockpitView.swift): the user's chosen layout of instruments, which by
+/// default is exactly the classic Summary (annunciator, findings banner, one card per subsystem, top processes).
+/// The cards' contents live in CockpitReadings.swift; the panels below are instruments too.
 struct SummaryView: View {
-    @EnvironmentObject var e: Engine
-    @Environment(\.palette) var p
-
-    var body: some View {
-        MaybeScroll {
-            VStack(spacing: 12) {
-                AnnunciatorPanel()
-                DiagnosisBanner()
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), spacing: 12)], spacing: 12) {
-                    let s = e.current
-                    SummaryCard(title: "CPU", value: s?.cpu.total.value.map { Fmt.pct($0) },
-                                fraction: s?.cpu.total.value.map { $0 / 100 },
-                                detail: s.map { String(format: "load %.2f %.2f %.2f", $0.cpu.loadAverage[0], $0.cpu.loadAverage[1], $0.cpu.loadAverage[2]) },
-                                traces: [GraphTrace(name: "cpu", values: e.series { $0.cpu.total.value }, color: p.accent)], maxValue: 100)
-                    SummaryCard(title: "Memory", value: s.flatMap { $0.memory.isMeasured ? Fmt.bytes($0.memory.used) : nil },
-                                fraction: s.flatMap { $0.memory.isMeasured ? Double($0.memory.used) / Double(max($0.memory.total, 1)) : nil },
-                                detail: s.map { "pressure " + ($0.memory.pressure.value.map { Fmt.pct($0) } ?? "—") + " · swap " + ($0.memory.swapUsed.value.map { Fmt.bytes($0) } ?? "—") },
-                                traces: [GraphTrace(name: "mem", values: e.series { Double($0.memory.used) / Double(max($0.memory.total, 1)) * 100 }, color: p.accent),
-                                         GraphTrace(name: "pressure", values: e.series { $0.memory.pressure.value }, color: p.accent2, fill: false)], maxValue: 100)
-                    // Disk, Network and Energy have no natural 0–100% scale, so they show no meter; the value is "—"
-                    // unless both directions were measured, rather than adding a known half to an unknown one.
-                    SummaryCard(title: "Disk", value: s?.disk.readBps.value.flatMap { r in s?.disk.writeBps.value.map { Fmt.rate(r + $0) } },
-                                fraction: nil, showMeter: false,
-                                detail: s.map { "R " + ($0.disk.readBps.value.map(Fmt.rate) ?? "—") + " · W " + ($0.disk.writeBps.value.map(Fmt.rate) ?? "—") },
-                                traces: [GraphTrace(name: "r", values: e.series { $0.disk.readBps.value }, color: p.accent),
-                                         GraphTrace(name: "w", values: e.series { $0.disk.writeBps.value }, color: p.accent2)], minHeadroom: 1_048_576)
-                    // Network is shown in bits/s (as ISPs quote it); the detail line and graph stay in bytes/s.
-                    SummaryCard(title: "Network", value: s?.network.inBps.value.flatMap { i in s?.network.outBps.value.map { Fmt.bits(i + $0) } },
-                                fraction: nil, showMeter: false,
-                                detail: s.map { "↓ " + ($0.network.inBps.value.map(Fmt.rate) ?? "—") + " · ↑ " + ($0.network.outBps.value.map(Fmt.rate) ?? "—") },
-                                traces: [GraphTrace(name: "in", values: e.series { $0.network.inBps.value }, color: p.accent),
-                                         GraphTrace(name: "out", values: e.series { $0.network.outBps.value }, color: p.accent2)], minHeadroom: 65_536)
-                    SummaryCard(title: "Energy", value: s?.power.systemWatts.value.map { String(format: "%.1f W", $0) },
-                                fraction: nil, showMeter: false,
-                                detail: s.map { pw in pw.power.powerSource + (pw.power.battery.map { String(format: " · battery %.0f%%", $0.percent) } ?? "") },
-                                traces: [GraphTrace(name: "w", values: e.series { $0.power.systemWatts.value }, color: p.accent)], minHeadroom: 10)
-                    // Hottest sensor on a 0–110 °C scale, matching the Thermals tab graph.
-                    SummaryCard(title: "Thermals", value: s?.power.hottest.value.map { Fmt.temp($0) },
-                                fraction: s?.power.hottest.value.map { $0 / 110 },
-                                detail: s.map { "thermal pressure: " + thermalName($0.power.thermalState) },
-                                traces: [GraphTrace(name: "t", values: e.series { $0.power.hottest.value }, color: p.accent)], maxValue: 110)
-                    SummaryCard(title: "GPU", value: s?.gpu.value.map { Fmt.pct($0) }, fraction: s?.gpu.value.map { $0 / 100 },
-                                detail: s.flatMap { x in x.gpuDetail.map { g in
-                                    [g.frequencyMHz.map { String(format: "%.0f MHz", $0) }, g.powerWatts.map { String(format: "%.1f W", $0) },
-                                     g.memoryInUse.map { Fmt.bytes($0) + " in use" }].compactMap { $0 }.joined(separator: " · ") } } ?? "device utilization",
-                                traces: [GraphTrace(name: "g", values: e.series { $0.gpu.value }, color: p.accent)], maxValue: 100)
-                    TopProcessesCard()
-                }
-            }
-            .padding(16)
-        }
-    }
+    var body: some View { CockpitView() }
 }
 
 /// Display name for macOS thermal state 0–3 (ProcessInfo.ThermalState order); out-of-range values are clamped.
@@ -75,6 +26,10 @@ struct SummaryCard: View {
     var traces: [GraphTrace]
     var maxValue: Double? = nil
     var minHeadroom: Double = 1
+    /// Taller for medium and large cockpit instruments; 70 pt is the classic Summary card.
+    var graphHeight: CGFloat = 70
+    /// Single meter colour (see InstrumentReading.meterColor); nil keeps the usual level shading.
+    var meterColor: Color? = nil
 
     var body: some View {
         Panel(title: title) {
@@ -82,8 +37,8 @@ struct SummaryCard: View {
                 Readout(label: "now", value: value, size: 26)
                 Spacer()
             }
-            if showMeter { VFDMeter(fraction: fraction, segments: 30) }
-            HistoryGraph(traces: traces, maxValue: maxValue, minHeadroom: minHeadroom).frame(height: 70)
+            if showMeter { VFDMeter(fraction: fraction, segments: 30, color: meterColor) }
+            HistoryGraph(traces: traces, maxValue: maxValue, minHeadroom: minHeadroom).frame(height: graphHeight)
             Text(detail ?? "—").font(.system(size: 11, design: .monospaced)).foregroundStyle(p.dim).lineLimit(1)
         }
     }
