@@ -143,8 +143,8 @@ struct CoreTile: View {
                          maxValue: 100, showGrid: false).frame(height: 54)
         }
         .padding(8)
-        .background(RoundedRectangle(cornerRadius: 8).fill(p.panel))
-        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(c.opacity(0.25)))
+        .background(PanelSurface(cornerRadius: 9))
+        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(c.opacity(0.25)))
     }
 }
 

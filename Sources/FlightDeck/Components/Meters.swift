@@ -84,8 +84,39 @@ struct Panel<Content: View>: View {
             content
         }
         .padding(12)
-        .background(RoundedRectangle(cornerRadius: 10).fill(p.panel))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(p.panelBorder))
+        .background(PanelSurface())
+    }
+}
+
+/// The panel "glass": the panel colour with a faint top-lit sheen, a hairline highlight along the top edge, and a soft
+/// drop shadow. Deliberately no live blur (`.material`/glass effects): dozens of panels redraw every sample, and a
+/// blur behind each would cost GPU time for little visible gain over the app's solid backdrop. The shadow sits on this
+/// background shape only, so it's rasterized once rather than re-rendered with the panel's changing content.
+struct PanelSurface: View {
+    @Environment(\.palette) var p
+    var cornerRadius: CGFloat = 12
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        let dark = p.scheme == .dark
+        shape.fill(p.panel)
+            .overlay(shape.fill(LinearGradient(colors: [.white.opacity(dark ? 0.045 : 0.0), .clear], startPoint: .top, endPoint: .center)))
+            .overlay(shape.strokeBorder(LinearGradient(colors: [.white.opacity(dark ? 0.10 : 0.7), p.panelBorder],
+                                                       startPoint: .top, endPoint: .bottom), lineWidth: 1))
+            .shadow(color: .black.opacity(dark ? 0.35 : 0.07), radius: dark ? 10 : 6, y: dark ? 4 : 2)
+    }
+}
+
+/// The window's backdrop: the theme background with a faint glow of the accent colour from the top, so pages have a
+/// little depth instead of a flat fill. Static, drawn once per page.
+struct Backdrop: View {
+    @Environment(\.palette) var p
+    var body: some View {
+        ZStack {
+            p.background
+            RadialGradient(colors: [p.accent.opacity(p.scheme == .dark ? 0.07 : 0.05), .clear],
+                           center: UnitPoint(x: 0.5, y: -0.15), startRadius: 0, endRadius: 900)
+        }
+        .ignoresSafeArea()
     }
 }
 

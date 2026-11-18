@@ -44,6 +44,34 @@ enum Destination: String, CaseIterable, Identifiable, Hashable {
     }
 }
 
+/// Sidebar grouping. Only the presentation changes: destinations keep their raw values, which stored incidents,
+/// notifications, `-destination` and the palette use. A destination not listed in any section (e.g. one just added)
+/// still appears, in "More", so nothing can go missing from the sidebar.
+enum SidebarSection: String, CaseIterable, Identifiable {
+    case overview = "Overview", activity = "Activity", power = "Power", network = "Network", storage = "Storage",
+         system = "System", tools = "Tools", more = "More"
+    var id: String { rawValue }
+
+    /// Listed order within each section. Overview answers "is my Mac OK?" now and over time; Activity is what's running;
+    /// System is inventory; Tools are things you set up or run.
+    var members: [Destination] {
+        switch self {
+        case .overview: [.summary, .stressMap, .flightLog, .trends, .checkup]
+        case .activity: [.performance, .processes, .launches, .console]
+        case .power: [.power, .sleep]
+        case .network: [.network, .connections, .upnp, .unifi]
+        case .storage: [.diskSpace]
+        case .system: [.systemInfo, .peripherals, .apps, .startup, .services, .users]
+        case .tools: [.rules, .benchmarks]
+        case .more: Destination.allCases.filter { d in !Self.listed.contains(d) }
+        }
+    }
+    private static let listed = Set(Self.allCases.filter { $0 != .more }.flatMap(\.members))
+
+    /// Every destination in sidebar order (for the Go menu and ⌘1…⌘9).
+    static var ordered: [Destination] { allCases.flatMap(\.members) }
+}
+
 /// Main window content. Selection and Performance tab are per-window scene storage, so they survive relaunches.
 struct ContentView: View {
     @Environment(\.palette) var p
@@ -53,13 +81,35 @@ struct ContentView: View {
     @Environment(\.openWindow) private var openWindow
     // Shown on first launch until WelcomeView sets "welcomed"; "skipWelcome" lets automation suppress it.
     @State private var showWelcome = !UserDefaults.standard.bool(forKey: "welcomed") && !UserDefaults.standard.bool(forKey: "skipWelcome")
+    /// Collapsed sidebar sections, as comma-separated SidebarSection raw values.
+    @AppStorage("sidebarCollapsed") private var collapsed = ""
+
+    /// Expanded unless collapsed. The section holding the current page always shows, so navigating to a page (from a
+    /// finding, the palette or the Go menu) never leaves it hidden in a folded section.
+    func expandedBinding(_ s: SidebarSection) -> Binding<Bool> {
+        Binding(get: { !collapsed.split(separator: ",").contains(Substring(s.rawValue)) || s.members.contains(selection) },
+                set: { open in
+                    var set = Set(collapsed.split(separator: ",").map(String.init))
+                    if open { set.remove(s.rawValue) } else { set.insert(s.rawValue) }
+                    collapsed = set.sorted().joined(separator: ",")
+                })
+    }
 
     var body: some View {
         NavigationSplitView {
-            // The binding ignores nil so clicking empty sidebar space can't deselect everything.
-            List(Destination.allCases, selection: Binding(get: { selection }, set: { if let v = $0 { selection = v } })) { d in
-                Label(d.rawValue, systemImage: d.icon).tag(d)
+            // The binding ignores nil so clicking empty sidebar space can't deselect everything. Sections collapse; which
+            // ones are collapsed is remembered.
+            List(selection: Binding(get: { selection }, set: { if let v = $0 { selection = v } })) {
+                ForEach(SidebarSection.allCases) { section in
+                    let members = section.members
+                    if !members.isEmpty {
+                        Section(section.rawValue, isExpanded: expandedBinding(section)) {
+                            ForEach(members) { d in Label(d.rawValue, systemImage: d.icon).tag(d) }
+                        }
+                    }
+                }
             }
+            .listStyle(.sidebar)
             .navigationSplitViewColumnWidth(min: 180, ideal: 200)
             .safeAreaInset(edge: .bottom) { SidebarFooter() }
         } detail: {
@@ -67,7 +117,7 @@ struct ContentView: View {
                 ReplayBar()
                 detail
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(p.background)
+                    .background(Backdrop())
             }
             .navigationTitle(selection.rawValue)
         }

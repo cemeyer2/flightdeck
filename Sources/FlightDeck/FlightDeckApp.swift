@@ -41,10 +41,21 @@ struct FlightDeckApp: App {
             CommandGroup(replacing: .newItem) {}
             CommandGroup(replacing: .appInfo) { Button("About FlightDeck") { AboutPanel.show() } }
             CommandMenu("Go") {
-                // ⌘1…⌘9 jump to the first nine sidebar destinations.
-                ForEach(Array(Destination.allCases.prefix(9).enumerated()), id: \.offset) { i, d in
-                    Button(d.rawValue) { AppActions.showMain(navigate: d.rawValue, engine: engine) }
-                        .keyboardShortcut(KeyEquivalent(Character("\(i + 1)")), modifiers: .command)
+                // Every destination, grouped as in the sidebar; ⌘1…⌘9 jump to the first nine in sidebar order.
+                let shortcut = Dictionary(uniqueKeysWithValues: SidebarSection.ordered.prefix(9).enumerated().map { ($1, $0 + 1) })
+                ForEach(SidebarSection.allCases) { section in
+                    if !section.members.isEmpty {
+                        Section(section.rawValue) {
+                            ForEach(section.members) { d in
+                                if let n = shortcut[d] {
+                                    Button(d.rawValue) { AppActions.showMain(navigate: d.rawValue, engine: engine) }
+                                        .keyboardShortcut(KeyEquivalent(Character("\(n)")), modifiers: .command)
+                                } else {
+                                    Button(d.rawValue) { AppActions.showMain(navigate: d.rawValue, engine: engine) }
+                                }
+                            }
+                        }
+                    }
                 }
                 Divider()
                 ForEach(PerfTab.allCases) { t in
