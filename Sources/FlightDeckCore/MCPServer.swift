@@ -130,14 +130,34 @@ public final class MCPServer: Sendable {
             guard args.isObject else { return error(id, Code.invalidParams, "Invalid params: arguments must be an object", status: 200) }
             let r = await tools.call(name, arguments: args)
             return ok(id, ["content": [["type": "text", "text": .str(Self.capped(r.text))]], "isError": r.isError ? true : nil], modern: modern)
+        case "prompts/list":
+            let list: [JSON] = MCPPrompts.all.map { p in
+                ["name": .str(p.name), "title": .str(p.title), "description": .str(p.description),
+                 "arguments": .array(p.arguments.map { ["name": .str($0.name), "description": .str($0.description), "required": .bool($0.required)] })]
+            }
+            return ok(id, ["prompts": .array(list)], modern: modern)
+        case "prompts/get":
+            guard let name = params["name"]?.string, let p = MCPPrompts.find(name) else {
+                return error(id, Code.invalidParams, "Unknown prompt. Available: \(MCPPrompts.all.map(\.name).joined(separator: ", "))", status: 200)
+            }
+            // Arguments arrive as strings (the spec's prompt arguments are string-valued); blanks count as missing.
+            var args: [String: String] = [:]
+            if case .object(let o)? = params["arguments"] {
+                for (k, v) in o { if let s = v.string ?? v.int.map(String.init), !s.trimmingCharacters(in: .whitespaces).isEmpty { args[k] = s } }
+            }
+            if let missing = p.arguments.first(where: { $0.required && args[$0.name] == nil }) {
+                return error(id, Code.invalidParams, "Missing required argument '\(missing.name)' for prompt \(name)", status: 200)
+            }
+            return ok(id, ["description": .str(p.description),
+                           "messages": [["role": "user", "content": ["type": "text", "text": .str(p.render(args))]]]], modern: modern)
         default:
             // A modern server answers an unknown method with HTTP 404 so clients can tell it from a legacy server.
             return error(id, Code.methodNotFound, "Method not found: \(method)", status: modern ? 404 : 200)
         }
     }
 
-    /// Only tools; no resources, prompts or subscriptions, so there is nothing to list-change.
-    var capabilities: JSON { ["tools": ["listChanged": false]] }
+    /// Tools and prompts (fixed lists, so nothing ever list-changes); no resources or subscriptions.
+    var capabilities: JSON { ["tools": ["listChanged": false], "prompts": ["listChanged": false]] }
 
     /// Cuts text at `maxToolTextBytes` (on a character boundary) and says so, so the model knows to narrow its request.
     static func capped(_ s: String) -> String {

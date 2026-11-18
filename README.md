@@ -117,6 +117,11 @@ between scrapes.
 | `checkup` | the Checkup list, items needing attention first |
 | `trends` | daily rollups (or one app's days) and before/after comparisons of updates |
 
+**Guided prompts** (MCP prompts; Claude Code shows them as `/mcp__flightdeck__<name>`) run a whole investigation with
+those tools and report in plain English: `diagnose_slow_mac`, `investigate_app` (needs `app`), `battery_drain`,
+`thermal_check`, `crash_triage`, `health_checkup` and `since_update`. They only call the read-only tools and tell the
+assistant to suggest, not perform, any fix.
+
 No tool can quit, kill, renice or change anything. Unmeasured values are marked "unavailable", never 0, and every
 answer is capped at 48 KB. Two ways to connect:
 

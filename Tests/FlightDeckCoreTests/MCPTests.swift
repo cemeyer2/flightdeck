@@ -135,3 +135,44 @@ final class MCPTests: XCTestCase {
         XCTAssertEqual(MCPServer.capped("short"), "short")
     }
 }
+
+/// Guided prompts: listed with their arguments, rendered with them, and refused without required ones.
+final class MCPPromptTests: XCTestCase {
+    let server = MCPServer(version: "test", instructions: "Use echo.", tools: EchoTools())
+    func send(_ text: String) async -> JSON? { await server.handle(Data(text.utf8)).body }
+
+    func testPromptsAreAdvertisedAndListed() async {
+        let initReply = await send(#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}"#)
+        XCTAssertNotNil(initReply?["result"]?["capabilities"]?["prompts"])
+        let list = await send(#"{"jsonrpc":"2.0","id":2,"method":"prompts/list"}"#)
+        guard case .array(let prompts)? = list?["result"]?["prompts"] else { return XCTFail("no prompts array") }
+        XCTAssertEqual(prompts.count, MCPPrompts.all.count)
+        XCTAssertTrue(prompts.contains { $0["name"]?.string == "diagnose_slow_mac" })
+        let app = prompts.first { $0["name"]?.string == "investigate_app" }
+        guard case .array(let args)? = app?["arguments"] else { return XCTFail("no arguments") }
+        XCTAssertEqual(args.first?["name"]?.string, "app")
+    }
+
+    func testPromptRendersArgumentsAndOnlyNamesRealTools() async {
+        let r = await send(#"{"jsonrpc":"2.0","id":3,"method":"prompts/get","params":{"name":"investigate_app","arguments":{"app":"Safari"}}}"#)
+        guard case .array(let msgs)? = r?["result"]?["messages"], let text = msgs.first?["content"]?["text"]?.string else { return XCTFail("no message") }
+        XCTAssertEqual(msgs.first?["role"]?.string, "user")
+        XCTAssertTrue(text.contains("\"Safari\""))
+        // Every tool a prompt mentions must exist, so an assistant following it never calls something unknown.
+        let toolNames = ["get_status", "list_processes", "get_process", "sample_stacks", "recent_incidents", "diagnostic_reports", "history", "checkup", "trends"]
+        for p in MCPPrompts.all {
+            let body = p.render(["app": "X", "minutes": "30", "hours": "3", "days": "7"])
+            let mentioned = body.split(whereSeparator: { !$0.isLetter && $0 != "_" }).map(String.init).filter { $0.contains("_") && $0 == $0.lowercased() }
+            for m in mentioned where m.hasPrefix("get_") || m.hasPrefix("list_") || m.hasSuffix("_reports") || m.hasSuffix("_stacks") || m.hasSuffix("_incidents") {
+                XCTAssertTrue(toolNames.contains(m), "\(p.name) mentions unknown tool \(m)")
+            }
+        }
+    }
+
+    func testMissingRequiredArgumentAndUnknownPrompt() async {
+        let missing = await send(#"{"jsonrpc":"2.0","id":4,"method":"prompts/get","params":{"name":"investigate_app","arguments":{"app":"  "}}}"#)
+        XCTAssertEqual(missing?["error"]?["code"]?.int, -32602)
+        let unknown = await send(#"{"jsonrpc":"2.0","id":5,"method":"prompts/get","params":{"name":"nope"}}"#)
+        XCTAssertEqual(unknown?["error"]?["code"]?.int, -32602)
+    }
+}
