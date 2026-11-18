@@ -164,81 +164,105 @@ struct SettingsView: View {
     @State private var loginError: String?
     @State private var blackBoxBytes: UInt64 = 0
     @State private var confirmClear = false
+
+    /// One Settings tab: a grouped form that scrolls when its content is taller than the window.
+    func tab<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        Form { content() }.formStyle(.grouped)
+    }
+
     var body: some View {
-        Form {
-            Picker("Theme", selection: $theme) { ForEach(ThemeID.allCases) { Text($0.title).tag($0) } }
-            Picker("Dock icon", selection: $dockMode) { ForEach(DockMode.allCases) { Text($0.rawValue).tag($0) } }
-            Picker("Sample interval", selection: $engine.interval) {
-                Text("0.5 s").tag(0.5); Text("1 s").tag(1.0); Text("2 s").tag(2.0); Text("5 s").tag(5.0)
-            }
-            Toggle("Include FlightDeck in measurements (self-monitoring)", isOn: $engine.includeSelf)
-            // Read by animated views (the Stress Map); macOS's Reduce Motion also turns them off.
-            Toggle("Animate the Stress Map", isOn: $animationsEnabled)
-            // Display only: recordings, CSV and Prometheus exports always use °C.
-            Picker("Temperature unit", selection: $temperatureUnit) { ForEach(TemperatureUnit.allCases) { Text($0.title).tag($0) } }
-            Picker("When no window is open, sample every", selection: $engine.backgroundInterval) {
-                Text("1 s (same as visible)").tag(1.0); Text("2 s").tag(2.0); Text("5 s").tag(5.0)
-            }
-            Text("Keeps FlightDeck light in the background. The black box, findings and alerts keep running.")
-                .font(.caption).foregroundStyle(.secondary)
-            Section("Menu bar and alerts") {
-                Toggle("Show in menu bar (keeps running when the window is closed)", isOn: $menuBarEnabled)
-                Picker("Menu bar shows", selection: $menuBarStyle) { ForEach(MenuBarStyle.allCases) { Text($0.rawValue).tag($0) } }
-                    .disabled(!menuBarEnabled)
-                Toggle("Open at login", isOn: Binding(get: { loginItem }, set: { on in
-                    do { try LoginItem.set(on); loginItem = LoginItem.isEnabled } catch { loginError = error.localizedDescription }
-                }))
-                if let loginError { Text(loginError).font(.caption).foregroundStyle(.red) }
-                Toggle("Notify me about sustained problems", isOn: $alertsEnabled)
-                    .onChange(of: alertsEnabled) { if alertsEnabled { Alerts.shared.requestPermission() } }
-                Picker("Notify for", selection: $alertMinSeverity) { Text("Cautions and warnings").tag(2); Text("Warnings only").tag(3) }
-                    .disabled(!alertsEnabled)
-                Picker("After it lasts", selection: $alertAfterMinutes) {
-                    Text("1 minute").tag(1.0); Text("2 minutes").tag(2.0); Text("5 minutes").tag(5.0); Text("10 minutes").tag(10.0)
-                }.disabled(!alertsEnabled)
-                HStack {
-                    Text("Muted alerts: \(mutedCount)").font(.caption)
-                    Spacer()
-                    // `muted` holds finding keys the user silenced from a finding's context menu.
-                    Button("Unmute All") { Alerts.shared.muted = []; mutedCount = 0 }.disabled(mutedCount == 0)
-                }.onAppear { mutedCount = Alerts.shared.muted.count }
-                Toggle("Capture call stacks automatically when an app hangs or hogs the CPU", isOn: $autoEvidence)
-                Text("Right-click any finding to mute its alerts, inspect the responsible process or quit its app.")
+        // Tabs, as macOS Settings windows do: the single form had grown taller than most screens.
+        TabView {
+            tab { 
+                Picker("Theme", selection: $theme) { ForEach(ThemeID.allCases) { Text($0.title).tag($0) } }
+                Picker("Dock icon", selection: $dockMode) { ForEach(DockMode.allCases) { Text($0.rawValue).tag($0) } }
+                Picker("Sample interval", selection: $engine.interval) {
+                    Text("0.5 s").tag(0.5); Text("1 s").tag(1.0); Text("2 s").tag(2.0); Text("5 s").tag(5.0)
+                }
+                Toggle("Include FlightDeck in measurements (self-monitoring)", isOn: $engine.includeSelf)
+                // Read by animated views (the Stress Map); macOS's Reduce Motion also turns them off.
+                Toggle("Animate the Stress Map", isOn: $animationsEnabled)
+                // Display only: recordings, CSV and Prometheus exports always use °C.
+                Picker("Temperature unit", selection: $temperatureUnit) { ForEach(TemperatureUnit.allCases) { Text($0.title).tag($0) } }
+                Picker("When no window is open, sample every", selection: $engine.backgroundInterval) {
+                    Text("1 s (same as visible)").tag(1.0); Text("2 s").tag(2.0); Text("5 s").tag(5.0)
+                }
+                Text("Keeps FlightDeck light in the background. The black box, findings and alerts keep running.")
                     .font(.caption).foregroundStyle(.secondary)
-                Picker("An app is \"busy\" above", selection: $engine.appCPUThreshold) {
-                    Text("50% of a core").tag(50.0); Text("80% of a core").tag(80.0); Text("1.5 cores").tag(150.0); Text("3 cores").tag(300.0)
+                Section("Menu bar") {
+                    Toggle("Show in menu bar (keeps running when the window is closed)", isOn: $menuBarEnabled)
+                    Picker("Menu bar shows", selection: $menuBarStyle) { ForEach(MenuBarStyle.allCases) { Text($0.rawValue).tag($0) } }
+                        .disabled(!menuBarEnabled)
+                    Toggle("Open at login", isOn: Binding(get: { loginItem }, set: { on in
+                        do { try LoginItem.set(on); loginItem = LoginItem.isEnabled } catch { loginError = error.localizedDescription }
+                    }))
+                    if let loginError { Text(loginError).font(.caption).foregroundStyle(.red) }
                 }
             }
-            Section("Black box") {
-                Toggle("Always-on black box recorder", isOn: $engine.blackBoxEnabled)
-                Text("Keeps every sample for the last hour and one sample every 10 s for 24 hours (at most 50 MB), so you can save or replay what happened after the fact.")
-                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                HStack {
-                    Text("Using \(Fmt.bytes(blackBoxBytes))").font(.caption).monospacedDigit()
-                    if let err = engine.blackBox.lastWriteError {
-                        Text("Can't write: \(err)").font(.caption).foregroundStyle(.red).lineLimit(2).help(err)
+            .tabItem { Label("General", systemImage: "gearshape") }
+            tab {
+                Section("Alerts") {
+                    Toggle("Notify me about sustained problems", isOn: $alertsEnabled)
+                        .onChange(of: alertsEnabled) { if alertsEnabled { Alerts.shared.requestPermission() } }
+                    Picker("Notify for", selection: $alertMinSeverity) { Text("Cautions and warnings").tag(2); Text("Warnings only").tag(3) }
+                        .disabled(!alertsEnabled)
+                    Picker("After it lasts", selection: $alertAfterMinutes) {
+                        Text("1 minute").tag(1.0); Text("2 minutes").tag(2.0); Text("5 minutes").tag(5.0); Text("10 minutes").tag(10.0)
+                    }.disabled(!alertsEnabled)
+                    HStack {
+                        Text("Muted alerts: \(mutedCount)").font(.caption)
+                        Spacer()
+                        // `muted` holds finding keys the user silenced from a finding's context menu.
+                        Button("Unmute All") { Alerts.shared.muted = []; mutedCount = 0 }.disabled(mutedCount == 0)
+                    }.onAppear { mutedCount = Alerts.shared.muted.count }
+                    Toggle("Capture call stacks automatically when an app hangs or hogs the CPU", isOn: $autoEvidence)
+                    Text("Right-click any finding to mute its alerts, inspect the responsible process or quit its app.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Picker("An app is \"busy\" above", selection: $engine.appCPUThreshold) {
+                        Text("50% of a core").tag(50.0); Text("80% of a core").tag(80.0); Text("1.5 cores").tag(150.0); Text("3 cores").tag(300.0)
                     }
-                    Spacer()
-                    Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([engine.blackBox.dir]) }
-                    Button("Clear…") { confirmClear = true }
                 }
             }
-            Section("Network quality") {
-                Toggle("Measure latency and packet loss", isOn: $engine.netProbeEnabled)
-                TextField("Internet host to ping", text: $engine.netProbeHost).disabled(!engine.netProbeEnabled)
-                Text("Off by default. When on, FlightDeck pings your router and this host every 10 seconds (5 small ICMP packets each) to tell Wi-Fi problems from internet-provider problems.")
-                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            .tabItem { Label("Alerts", systemImage: "bell.badge") }
+            tab {
+                Section("Black box") {
+                    Toggle("Always-on black box recorder", isOn: $engine.blackBoxEnabled)
+                    Text("Keeps every sample for the last hour and one sample every 10 s for 24 hours (at most 50 MB), so you can save or replay what happened after the fact.")
+                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    HStack {
+                        Text("Using \(Fmt.bytes(blackBoxBytes))").font(.caption).monospacedDigit()
+                        if let err = engine.blackBox.lastWriteError {
+                            Text("Can't write: \(err)").font(.caption).foregroundStyle(.red).lineLimit(2).help(err)
+                        }
+                        Spacer()
+                        Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([engine.blackBox.dir]) }
+                        Button("Clear…") { confirmClear = true }
+                    }
+                }
             }
-            MetricsExportSection()
-            MCPSection()
-            UniFiSettingsSection()
-            // Kept honest as features are added: list every way FlightDeck itself touches the network.
-            Text("FlightDeck sends no data off this Mac. It only uses the network when you ask: latency pings (if on above), "
-                 + "device discovery while the Network or UPnP page is open, scans and traceroutes you start there, and your "
-                 + "UniFi console once you've set it up. The metrics and MCP servers listen on this Mac only.")
-                .font(.caption).foregroundStyle(.secondary)
+            .tabItem { Label("Recording", systemImage: "record.circle") }
+            tab {
+                Section("Network quality") {
+                    Toggle("Measure latency and packet loss", isOn: $engine.netProbeEnabled)
+                    TextField("Internet host to ping", text: $engine.netProbeHost).disabled(!engine.netProbeEnabled)
+                    Text("Off by default. When on, FlightDeck pings your router and this host every 10 seconds (5 small ICMP packets each) to tell Wi-Fi problems from internet-provider problems.")
+                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+                UniFiSettingsSection()
+                // Kept honest as features are added: list every way FlightDeck itself touches the network.
+                Text("FlightDeck sends no data off this Mac. It only uses the network when you ask: latency pings (if on above), "
+                     + "device discovery while the Network or UPnP page is open, scans and traceroutes you start there, and your "
+                     + "UniFi console once you've set it up. The metrics and MCP servers listen on this Mac only.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            .tabItem { Label("Network", systemImage: "network") }
+            tab {
+                MetricsExportSection()
+                MCPSection()
+            }
+            .tabItem { Label("Integrations", systemImage: "puzzlepiece.extension") }
         }
-        .padding(20).frame(width: 480)
+        .frame(width: 600, height: 560)
         // Poll black box disk usage while Settings is open; it changes as samples are written.
         .task { while !Task.isCancelled { blackBoxBytes = engine.blackBox.diskUsage; try? await Task.sleep(for: .seconds(5)) } }
         .confirmationDialog("Delete all black box data?", isPresented: $confirmClear) {
