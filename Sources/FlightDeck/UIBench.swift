@@ -104,12 +104,16 @@ enum UIBench {
         while CheckupModel.shared.running && Date() < until { RunLoop.main.run(until: Date().addingTimeInterval(0.2)) }
         out("checkup", height: 2000, CheckupView())
         // The loaders are started and awaited here and handed to the views, since ImageRenderer doesn't run onAppear.
+        // Always call this *before* building the view, never inline as a view argument: a @StateObject initializer
+        // runs during SwiftUI's graph update, and spinning the run loop there re-enters SwiftUI and aborts (an
+        // AttributeGraph precondition). That only happened when the load was slow enough to spin, as on CI's VMs.
         func ready<T>(_ l: Loader<T>) -> Loader<T> {
             l.load(); let until = Date().addingTimeInterval(30)
             while l.value == nil && Date() < until { RunLoop.main.run(until: Date().addingTimeInterval(0.2)) }
             return l
         }
-        out("peripherals", height: 1500, PeripheralsView(loader: ready(Loader { Peripherals.collect() })))
+        let peripherals = ready(Loader { Peripherals.collect() })   // before building the view: see `ready`
+        out("peripherals", height: 1500, PeripheralsView(loader: peripherals))
         // UPnP: the invented demo network, then a real ~3 s SSDP scan of this network (run here, since onAppear doesn't).
         out("upnp-demo", height: 1250, UPnPView(model: UPnPModel(preview: Demo.upnpScan())))
         let upnp = Loader { UPnPScan.run() }
@@ -128,7 +132,8 @@ enum UIBench {
         let devUntil = Date().addingTimeInterval(45)
         while !dev.busy.isEmpty && Date() < devUntil { RunLoop.main.run(until: Date().addingTimeInterval(0.2)) }
         out("developer", height: 1900, DeveloperView(model: dev))
-        out("listening_ports",height: 420, ListeningPortsPanel(loader: ready(Loader { ListeningPorts.scan() })).frame(maxHeight: .infinity, alignment: .top))
+        let ports = ready(Loader { ListeningPorts.scan() })   // before building the view: see `ready`
+        out("listening_ports", height: 420, ListeningPortsPanel(loader: ports).frame(maxHeight: .infinity, alignment: .top))
         // The inspector is rendered for FlightDeck's own process, which is always present.
         if let me = e.current?.processes.first(where: { $0.pid == getpid() }) {
             let model = InspectorModel(identity: me.identity, engine: e)
