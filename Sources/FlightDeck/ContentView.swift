@@ -11,7 +11,8 @@ enum Destination: String, CaseIterable, Identifiable, Hashable {
     case summary = "Summary", stressMap = "Stress Map", flightLog = "Flight Log", rules = "Rules", performance = "Performance", processes = "Processes", systemInfo = "System Info",
          startup = "Startup Apps", users = "Users", services = "Services", power = "Power & Freq", sleep = "Sleep & Wake",
          connections = "Connections", apps = "Installed Apps", diskSpace = "Disk Space", benchmarks = "Benchmarks",
-         launches = "Launches", console = "Console", trends = "Trends", checkup = "Checkup", peripherals = "Peripherals"
+         launches = "Launches", console = "Console", trends = "Trends", checkup = "Checkup", peripherals = "Peripherals",
+         network = "Network"
     var id: String { rawValue }
     var icon: String {
         switch self {
@@ -36,6 +37,7 @@ enum Destination: String, CaseIterable, Identifiable, Hashable {
         case .trends: "chart.xyaxis.line"
         case .checkup: "checkmark.shield"
         case .peripherals: "cable.connector.horizontal"
+        case .network: "wifi.router"
         }
     }
 }
@@ -121,6 +123,7 @@ struct ContentView: View {
         case .trends: TrendsView()
         case .checkup: CheckupView()
         case .peripherals: PeripheralsView()
+        case .network: NetworkMapView()
         }
     }
 

@@ -40,7 +40,7 @@ build is ad-hoc signed and the release notes explain how to open it past Gatekee
 Summary · Performance (CPU per core with P/E colouring, overall/logical/cluster modes; Memory; Disk; Network with per-app traffic;
 Energy; Thermals; GPU) · Processes (live tree, sort/filter, Quit/Force Quit/Suspend/Resume) · System Info ·
 Startup Apps · Users · Services (launchd) · Power & Freq · Connections · Installed Apps · Disk Space · Benchmarks · Launches ·
-Console · Trends · Checkup · Peripherals
+Console · Trends · Checkup · Peripherals · Network
 
 **Flight Recorder:** Record (⇧⌘R) captures every telemetry frame and saves it as a `.flightlog` file
 (zlib-compressed JSON). Open it (⌘O, or double-click in Finder) to scrub or replay it through the same views. Older `.mltrace` recordings from before the rename still open.
@@ -208,6 +208,23 @@ devices with battery levels, audio devices and the power adapter. **Connections*
 process listens on which port, flagging services open on all interfaces. It uses `netstat` (every process) when macOS
 gives the app the socket table, and otherwise falls back to `lsof` (your own processes only) and says so; on macOS 27,
 netstat launched from an app returns no Internet sockets even though it works in Terminal.
+
+**Network** is a map of the local network: this Mac, its interface (Wi-Fi with network name, access point BSSID and
+channel), the subnet with every device seen on it, the gateway, and the path to the internet. Other interfaces (a VPN
+tunnel, a second Ethernet) are separate branches. Click a device for its details: IPv4 and IPv6 addresses, MAC,
+manufacturer (from a bundled table of ~13,000 MAC prefixes of common vendors, generated from the IEEE registry by
+`scripts/gen-oui.py`), model, reverse-DNS and Bonjour names, advertised services, first and last seen, and a guessed type
+(router, phone, computer, printer, TV, speaker, smart home, NAS, camera…) with the reason for the guess. A sortable list
+of every device sits below. Sources: the ARP and IPv6 neighbour tables, the routing table, this Mac's interfaces,
+CoreWLAN, reverse DNS and a Bonjour browse of ~25 common service types (with `_device-info` models). Randomized
+(private) Wi-Fi MAC addresses are shown as "private address", never as a vendor. Nothing runs unless the view is open:
+a full survey when it appears or on Refresh, then a re-read of the ARP table every 10 s. Two buttons send packets, and only
+when pressed: **Active scan** pings each address of the subnet once (at most a /24, 50 per second) so every device
+that's on answers ARP, and **Traceroute** traces the hops to 1.1.1.1. A Mac can't see link-layer topology (which switch
+port or access point each device uses), so devices are drawn on their subnet, not wired to the router. macOS asks
+for **Local Network** permission the first time; without it, macOS 27 returns an empty ARP table and blocks Bonjour, and
+the view says so. The Wi-Fi name and BSSID need Location Services permission. In demo mode the view shows an invented
+network.
 
 ## Measurement principles
 

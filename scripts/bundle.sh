@@ -36,6 +36,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>LSApplicationCategoryType</key><string>public.app-category.utilities</string>
   <key>NSHighResolutionCapable</key><true/>
+  <key>NSLocalNetworkUsageDescription</key><string>FlightDeck's Network view lists the devices on your local network (ARP table, Bonjour and an optional scan you start). Nothing is sent off this Mac.</string>
+  <key>NSBonjourServices</key><array><string>_airplay._tcp</string><string>_raop._tcp</string><string>_googlecast._tcp</string><string>_spotify-connect._tcp</string><string>_sonos._tcp</string><string>_amzn-wplay._tcp</string><string>_ipp._tcp</string><string>_ipps._tcp</string><string>_printer._tcp</string><string>_pdl-datastream._tcp</string><string>_uscan._tcp</string><string>_scanner._tcp</string><string>_smb._tcp</string><string>_afpovertcp._tcp</string><string>_ssh._tcp</string><string>_sftp-ssh._tcp</string><string>_rfb._tcp</string><string>_hap._tcp</string><string>_hap._udp</string><string>_homekit._tcp</string><string>_matter._tcp</string><string>_hue._tcp</string><string>_companion-link._tcp</string><string>_device-info._tcp</string><string>_http._tcp</string><string>_https._tcp</string></array>
   <key>NSAppleEventsUsageDescription</key><string>FlightDeck reads your Login Items from System Events to list startup apps.</string>
   <key>CFBundleDocumentTypes</key><array><dict>
     <key>CFBundleTypeName</key><string>FlightDeck Trace</string>

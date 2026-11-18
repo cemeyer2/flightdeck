@@ -192,6 +192,13 @@ final class NetworkMapTests: XCTestCase {
         XCTAssertEqual(vt.primary?.interface.name, "utun4"); XCTAssertTrue(vt.internetViaVPN)
     }
 
+    /// The app's Info.plist (written by scripts/bundle.sh) must declare every browsed Bonjour type in NSBonjourServices.
+    func testBonjourTypesDeclaredInInfoPlist() throws {
+        let script = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../scripts/bundle.sh")
+        let s = try String(contentsOf: script, encoding: .utf8)
+        for t in BonjourBrowser.serviceTypes { XCTAssertTrue(s.contains("<string>\(t)</string>"), t) }
+    }
+
     // MARK: live (reads only; sends nothing)
 
     func testLiveInterfacesAndNeighbours() throws {

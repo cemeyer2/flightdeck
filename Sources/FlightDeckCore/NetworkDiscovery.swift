@@ -75,7 +75,9 @@ public enum NetworkDiscovery {
                     guard d.sdl_alen == 6 else { return }
                     let base = UnsafeRawPointer(dl).advanced(by: MemoryLayout<sockaddr_dl>.offset(of: \sockaddr_dl.sdl_data)! + Int(d.sdl_nlen))
                     let bytes = (0..<6).map { base.load(fromByteOffset: $0, as: UInt8.self) }
-                    if bytes.contains(where: { $0 != 0 }) { byName[name]?.mac = bytes.map { String(format: "%02x", $0) }.joined(separator: ":") }
+                    // 02:00:00:00:00:00 is the placeholder macOS reports instead of the real address to processes it
+                    // keeps from local-network details; it's no address at all, so it's dropped.
+                    if bytes.contains(where: { $0 != 0 }), bytes != [2, 0, 0, 0, 0, 0] { byName[name]?.mac = bytes.map { String(format: "%02x", $0) }.joined(separator: ":") }
                 }
             default: break
             }
@@ -157,6 +159,12 @@ public enum NetworkDiscovery {
         let topo = NetTopology.build(interfaces: ifs, devices: devices, route: route, wifi: ap, hops: hops)
         var notes: [String] = []
         if route == nil { notes.append("No default route: this Mac isn't connected to a network with a router.") }
+        // The kernel's ARP table always holds at least the gateway once there's traffic, so an empty one while online
+        // means macOS withheld it. On macOS 27 the routing-table dump returns nothing to a process that hasn't been
+        // allowed to find devices on the local network (seen with arp, ndp and sysctl alike), while Terminal sees it.
+        if route != nil, nb.isEmpty {
+            notes.append("macOS returned an empty ARP/NDP table, which it does for apps not allowed to find devices on the local network: allow FlightDeck in System Settings › Privacy & Security › Local Network. Until then only the gateway (from the routing table) and Bonjour devices can be shown.")
+        }
         if let ap, ap.bssid == nil { notes.append("Wi-Fi network name and access point (BSSID) are hidden by macOS unless FlightDeck has Location Services permission.") }
         return (NetworkSurvey(time: Date(), interfaces: ifs, devices: devices, topology: topo, route: route, dns: NetworkConfig.dnsServers(),
                               accessPoint: ap, notes: notes), names)

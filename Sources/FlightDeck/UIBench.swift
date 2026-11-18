@@ -78,7 +78,14 @@ enum UIBench {
             return l
         }
         out("peripherals", height: 1500, PeripheralsView(loader: ready(Loader { Peripherals.collect() })))
-        out("listening_ports", height: 420, ListeningPortsPanel(loader: ready(Loader { ListeningPorts.scan() })).frame(maxHeight: .infinity, alignment: .top))
+        // Network: the invented demo network, then this Mac's real one from the passive sources only (interfaces,
+        // routes, ARP/NDP, reverse DNS). Bonjour is skipped here unless FD_RENDER_BONJOUR is set, since browsing can
+        // raise macOS's Local Network permission prompt for whatever launched the render.
+        out("network-demo", height: 1250, NetworkMapView(model: NetworkMapModel(survey: Demo.networkSurvey())))
+        let bonjour = ProcessInfo.processInfo.environment["FD_RENDER_BONJOUR"] != nil ? BonjourBrowser.browse() : []
+        let live = NetworkDiscovery.survey(services: bonjour, knownNames: [:], seen: [:], hops: []).0
+        out("network", height: 1250, NetworkMapView(model: NetworkMapModel(survey: live)))
+        out("listening_ports",height: 420, ListeningPortsPanel(loader: ready(Loader { ListeningPorts.scan() })).frame(maxHeight: .infinity, alignment: .top))
         // The inspector is rendered for FlightDeck's own process, which is always present.
         if let me = e.current?.processes.first(where: { $0.pid == getpid() }) {
             let model = InspectorModel(identity: me.identity, engine: e)
