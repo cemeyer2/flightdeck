@@ -46,6 +46,12 @@ public struct PowerSample: Codable, Sendable {
     /// Charger contract, power telemetry and battery facts (ChargingDetails.swift); nil on Macs without a battery node
     /// and in traces recorded before charging insights existed.
     public var charging: ChargingDetails? = nil
+    /// SMC temperature keys with a known meaning on this chip (SensorKeyTables), named by key ("Tp01"); read on the
+    /// same cadence as `temperatures`. nil in traces recorded before they were read. SensorCatalog names and groups them.
+    public var smcTemperatures: [SensorReading]? = nil
+    /// When `temperatures` and `smcTemperatures` were last actually read (between reads the same values repeat), so
+    /// per-sensor statistics count each reading once. nil in older traces.
+    public var sensorsReadAt: Date? = nil
 }
 
 /// One named temperature sensor in °C.
@@ -53,6 +59,8 @@ public struct SensorReading: Codable, Sendable, Identifiable, Hashable {
     public var id: String { name }
     public var name: String
     public var celsius: Double
+    /// Public so demo mode and tests can describe sensors this Mac may not have.
+    public init(name: String, celsius: Double) { self.name = name; self.celsius = celsius }
 }
 
 /// Stateful (sensor cache); confined to the sampling queue.
@@ -64,6 +72,9 @@ public final class PowerSampler {
     public var background = false
     private var lastSensorRead: Date?
     private var lastTemps: [SensorReading] = []
+    private var lastSMCTemps: [SensorReading] = []
+    /// The SMC keys worth reading on this chip: only those with a known meaning (about 25 on an M1 Max, ~6 ms).
+    private let smcKeys = SensorKeyTables.keys(for: .current)
     public init() {}
 
     public func sample() -> PowerSample {
@@ -124,7 +135,7 @@ public final class PowerSampler {
             source = t == kIOPMACPowerKey ? "AC Power" : t == kIOPMBatteryPowerKey ? "Battery" : t
         }
         if lastSensorRead.map({ Date().timeIntervalSince($0) >= (background ? 10 : Self.sensorInterval) }) ?? true {
-            lastTemps = thermal.read(); lastSensorRead = Date()
+            lastTemps = thermal.read(); lastSMCTemps = SMC.shared.temperatures(smcKeys); lastSensorRead = Date()
         }
         let temps = lastTemps
         return PowerSample(batteryWatts: batteryW, systemWatts: systemW, battery: battery, powerSource: source,
@@ -132,7 +143,8 @@ public final class PowerSampler {
                            thermalState: ProcessInfo.processInfo.thermalState.rawValue,
                            temperatures: temps,
                            hottest: temps.map(\.celsius).max().map { .value($0) } ?? .unavailable("no sensors"),
-                           fans: SMC.shared.fans(), charging: charging)
+                           fans: SMC.shared.fans(), charging: charging,
+                           smcTemperatures: lastSMCTemps, sensorsReadAt: lastSensorRead)
     }
 }
 

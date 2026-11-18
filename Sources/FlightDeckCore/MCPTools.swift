@@ -23,7 +23,7 @@ public struct MCPTools: MCPToolProvider {
     returns plain-English findings, the system's numbers, the top apps and which apps strain which subsystem. Then drill \
     down with list_processes, get_process and sample_stacks (why a process of the user's is busy or hung), history (the \
     black box: statistics over the last minutes or hours), recent_incidents (the Flight Log), diagnostic_reports (crashes \
-    and hangs), checkup (health and security checklist) and trends (daily history, before/after app and macOS updates). \
+    and hangs), checkup (health and security checklist), temperatures (every sensor, fans, throttling) and trends (daily history, before/after app and macOS updates). \
     All tools are read-only. Values FlightDeck could not measure are marked "unavailable", never reported as 0.
     """
 
@@ -80,6 +80,7 @@ public struct MCPTools: MCPToolProvider {
             case "history": out = try await history(a)
             case "checkup": out = try await checkup()
             case "trends": out = try await trends(a)
+            case "temperatures": out = try await temperatures()
             default: return .error("Unknown tool \(name)")
             }
             return MCPToolResult(text: out.text)
@@ -159,6 +160,9 @@ public struct MCPTools: MCPToolProvider {
                             ("days", Self.int("Days to include, ending today.", 1, 90, 7)),
                             ("app", ["type": "string", "description": "App name (e.g. 'Safari') to show that app's days."]),
                         ])),
+            MCPToolSpec(name: "temperatures", title: "Temperatures, fans and throttling",
+                        description: "Every temperature sensor with a friendly name, grouped (CPU performance/efficiency cores, GPU, SoC, SSD, battery, Wi-Fi, palm rest, airflow…), each with now/min/average/max since FlightDeck started; the hottest sensor per group; fans with RPM against target, min and max and any fan problem; and whether macOS is slowing the Mac down for heat (pmset CPU speed limit, thermal pressure, GPU heat cap) with time spent throttled. Temperatures in °C.",
+                        inputSchema: Self.schema([])),
         ]
     }
 }

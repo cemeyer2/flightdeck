@@ -87,6 +87,39 @@ public final class SMC: @unchecked Sendable {
         }
     }
 
+    /// Size and type of each temperature key found by `temperatures(_:)`, so later reads skip the key-info round trip
+    /// (halving their cost). Keys this SMC doesn't have are remembered as nil and never asked for again.
+    /// Guarded by `lock`.
+    private var tempKeyInfo: [String: (size: UInt32, type: UInt32)?] = [:]
+
+    /// Temperatures (°C) for the given SMC keys, as SensorReadings named by key. Keys that don't exist, use a type other
+    /// than "flt " (Apple silicon) or "sp78" (signed 8.8 fixed point, Intel), or read outside 1…150 °C are left out:
+    /// many keys read 0 for absent parts (a second SSD, say), which is "no sensor", not a temperature.
+    public func temperatures(_ keys: [String]) -> [SensorReading] {
+        guard conn != 0 else { return [] }
+        lock.lock(); defer { lock.unlock() }
+        let flt = Self.fourCC("flt "), sp78 = Self.fourCC("sp78")
+        var out: [SensorReading] = []
+        for key in keys {
+            let code = Self.fourCC(key)
+            if tempKeyInfo[key] == nil {   // first time: look the key up (op 9) and cache the answer, even "missing"
+                var info = KeyData(); info.key = code; info.data8 = 9
+                let found = call(&info) && (info.keyInfo.dataType == flt || info.keyInfo.dataType == sp78)
+                tempKeyInfo[key] = .some(found ? (info.keyInfo.dataSize, info.keyInfo.dataType) : nil)
+            }
+            guard let cached = tempKeyInfo[key], let (size, type) = cached else { continue }
+            var r = KeyData(); r.key = code; r.keyInfo.dataSize = size; r.data8 = 5   // read key
+            guard call(&r) else { continue }
+            let b = withUnsafeBytes(of: r.bytes) { Array($0.prefix(Int(min(size, 32)))) }
+            let v: Double
+            if type == flt, b.count >= 4 { v = Double(b.withUnsafeBytes { $0.loadUnaligned(as: Float.self) }) }
+            else if type == sp78, b.count >= 2 { v = Double(Int16(bitPattern: UInt16(b[0]) << 8 | UInt16(b[1]))) / 256 }
+            else { continue }
+            if v >= 1 && v < 150 { out.append(SensorReading(name: key, celsius: v)) }
+        }
+        return out
+    }
+
     /// Fans from FNum and the per-fan F<i>Ac/Mn/Mx/Tg keys (actual, minimum, maximum, target). Empty on fanless Macs or
     /// when the SMC is unreadable. At most 8 fans are queried so a garbage FNum can't trigger a long loop.
     public func fans() -> [FanReading] {

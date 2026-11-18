@@ -72,8 +72,9 @@ public enum MCPPrompts {
             """
             My Mac is hot or its fan is loud. Investigate with FlightDeck:
             1. Call get_status for temperatures, fan speed, thermal pressure, GPU load and findings.
-            2. Call list_processes sorted by cpu and by energy (limit 10 each).
-            3. Call history for the last 30 minutes to see when it started and whether the Mac is being throttled.
+            2. Call temperatures for every sensor by group, fan health and whether macOS is limiting the CPU for heat.
+            3. Call list_processes sorted by cpu and by energy (limit 10 each).
+            4. Call history for the last 30 minutes to see when it started and whether the Mac is being throttled.
             Tell me what is generating the heat, whether macOS is slowing the CPU or GPU to cope, and whether it's expected for the work being done.
             """ + reporting
         },

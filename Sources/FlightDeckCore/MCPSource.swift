@@ -26,9 +26,14 @@ public protocol MCPDataSource: AnyObject, Sendable {
     func dailyHistory() async -> DailyLog.History?
     /// The Checkup list (runs the checks; takes a few seconds).
     func checkup() async -> [CheckResult]
+    /// Session thermal state (per-sensor statistics, throttling, fan health), or nil when there is none (standalone).
+    func thermal() async -> (status: ThermalStatus, history: SensorHistory)?
 }
 
 extension MCPDataSource {
+    /// Sources without a session (the standalone CLI, tests) have no thermal history; `temperatures` then reports the
+    /// latest snapshot only.
+    public func thermal() async -> (status: ThermalStatus, history: SensorHistory)? { nil }
     /// Checkup with the swap trend taken from the black box's coarse tier, as the Checkup view does.
     public func runCheckup() async -> [CheckResult] {
         let trace = await blackBox(.coarse, from: Date().addingTimeInterval(-86_400), to: Date())
