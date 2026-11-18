@@ -36,8 +36,11 @@ public enum DirectorySizer {
     /// link can't pull in a tree that lives elsewhere. Returns nil if `cancelled` became true; it's polled every 500
     /// files, so cancelling a large tree takes effect within a few milliseconds. `progress`, if given, is called at the
     /// same cadence with the files seen and bytes counted so far in this tree, so a long scan can show it's moving.
+    /// `visit`, if given, sees every entry under the folder in depth-first order with its enumerator depth (1 = a
+    /// direct child), size and whether it's a folder, so a caller can build per-folder rollups in the same pass.
     public static func size(of path: String, cancelled: () -> Bool = { false },
-                            progress: (_ files: Int, _ bytes: UInt64) -> Void = { _, _ in }) -> SizeResult? {
+                            progress: (_ files: Int, _ bytes: UInt64) -> Void = { _, _ in },
+                            visit: (_ level: Int, _ url: URL, _ bytes: UInt64, _ isDirectory: Bool) -> Void = { _, _, _, _ in }) -> SizeResult? {
         let url = URL(fileURLWithPath: path)
         let fm = FileManager.default
         // lstat rather than fileExists: it doesn't follow links, and its errno separates "not there" (ENOENT) from
@@ -67,7 +70,14 @@ public enum DirectorySizer {
                 if cancelled() { return nil }
                 progress(n, total)
             }
-            total += UInt64((try? u.resourceValues(forKeys: [.totalFileAllocatedSizeKey]).totalFileAllocatedSize) ?? 0)
+            // Per-entry autorelease pool: the URL and the bridged strings a visitor makes (paths, names) are autoreleased,
+            // and a long scan on one thread would otherwise keep every one of them until it ends (hundreds of MB).
+            autoreleasepool {
+                let rv = try? u.resourceValues(forKeys: [.totalFileAllocatedSizeKey, .isDirectoryKey])
+                let bytes = UInt64(rv?.totalFileAllocatedSize ?? 0)
+                total += bytes
+                visit(e.level, u, bytes, rv?.isDirectory ?? false)
+            }
         }
         progress(n, total)
         return .size(bytes: total, unreadable: errors.n)

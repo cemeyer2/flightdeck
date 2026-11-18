@@ -376,3 +376,64 @@ final class FolderScanProgressTests: XCTestCase {
         XCTAssertEqual(f.entries, 0, "cancelled mid-folder: the half-measured folder is not reported")
     }
 }
+
+/// Folder-scan rollups saved in SQLite: totals match direct sizing, drill-down needs no rescan, results survive a new
+/// store instance (a relaunch), cancelled scans leave nothing, and rescanning a folder replaces its old scan.
+final class FolderTreeTests: XCTestCase {
+    var dir: URL!
+    override func setUp() { dir = FileManager.default.temporaryDirectory.appendingPathComponent("fd-tree-\(UUID().uuidString)") }
+    override func tearDown() { try? FileManager.default.removeItem(at: dir) }
+
+    func makeTree() throws -> URL {
+        let root = dir.appendingPathComponent("data"), fm = FileManager.default
+        for d in ["a/b/c", "a/d", "e"] { try fm.createDirectory(at: root.appendingPathComponent(d), withIntermediateDirectories: true) }
+        func file(_ p: String, _ n: Int) throws { try Data(count: n).write(to: root.appendingPathComponent(p)) }
+        try file("a/b/c/big", 200_000); try file("a/b/small", 5_000); try file("a/d/mid", 50_000); try file("e/x", 9_000)
+        for i in 0..<(FolderTree.filesPerFolder + 5) { try file("e/f\(i)", 4_096 * (i + 1)) }   // more than are kept
+        try file("top.bin", 70_000)
+        return root
+    }
+    func scan(_ root: URL, _ store: FolderStore) -> FolderTree? {
+        DiskUsage.scan(items: DiskUsage.scanItems(of: root.path), recorder: FolderTreeRecorder(store: store, root: root.path),
+                       progress: { _ in }, entry: { _ in }, cancelled: { false })
+    }
+    func size(_ tree: FolderTree, _ path: String) -> UInt64? {
+        tree.entries(of: (path as NSString).deletingLastPathComponent)?.first { $0.path == path }?.size
+    }
+
+    func testRollupsMatchDirectSizingAndSurviveRelaunch() throws {
+        let root = try makeTree()
+        let dbURL = dir.appendingPathComponent("scans.sqlite")
+        let tree = try XCTUnwrap(scan(root, try XCTUnwrap(FolderStore(url: dbURL))))
+        for rel in ["a", "a/b", "a/b/c", "a/d", "e"] {
+            let p = root.appendingPathComponent(rel).path
+            XCTAssertEqual(size(tree, p), DirectorySizer.size(of: p)?.bytes, rel)
+        }
+        XCTAssertEqual(Set(tree.entries(of: root.path)?.map(\.name) ?? []), ["a", "e", "top.bin"])
+        XCTAssertEqual(Set(tree.entries(of: root.appendingPathComponent("a/b").path)?.map(\.name) ?? []), ["c", "small"])
+        let e = tree.entries(of: root.appendingPathComponent("e").path) ?? []
+        XCTAssertEqual(e.filter { !$0.path.contains("\u{0}") }.count, FolderTree.filesPerFolder)
+        XCTAssertTrue(e.contains { $0.name.hasSuffix("smaller files") })
+        XCTAssertEqual(e.reduce(0) { $0 + $1.size }, size(tree, root.appendingPathComponent("e").path))
+        XCTAssertTrue(tree.covers(root.appendingPathComponent("a/b").path))
+        XCTAssertFalse(tree.covers(dir.path))
+        // A fresh store on the same file (as after a relaunch) still answers.
+        let reopened = try XCTUnwrap(FolderStore(url: dbURL))
+        let info = try XCTUnwrap(reopened.latestScan())
+        XCTAssertEqual(info.root, root.path)
+        XCTAssertEqual(FolderTree(store: reopened, info: info).entries(of: root.appendingPathComponent("a").path)?.count, 2)
+    }
+
+    func testCancelledScanKeepsNothingAndRescanReplaces() throws {
+        let root = try makeTree()
+        let store = try XCTUnwrap(FolderStore(url: dir.appendingPathComponent("scans.sqlite")))
+        let cancelled = DiskUsage.scan(items: DiskUsage.scanItems(of: root.path), recorder: FolderTreeRecorder(store: store, root: root.path),
+                                       progress: { _ in }, entry: { _ in }, cancelled: { true })
+        XCTAssertNil(cancelled); XCTAssertNil(store.latestScan())
+        let first = try XCTUnwrap(scan(root, store)), second = try XCTUnwrap(scan(root, store))
+        XCTAssertNotEqual(first.info.id, second.info.id)
+        XCTAssertNil(store.entries(scan: first.info.id, path: root.path), "the older scan of the same folder is gone")
+        XCTAssertNotNil(second.entries(of: root.path))
+        store.forgetAll(); XCTAssertNil(store.latestScan())
+    }
+}

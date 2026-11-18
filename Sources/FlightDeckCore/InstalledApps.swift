@@ -114,26 +114,36 @@ public enum DiskUsage {
     /// Measures each of `items` (from `scanItems`), reporting results as they finish (`entry`) and progress as it goes
     /// (`progress`: the item list up front, then every few hundred files and after each item). Unlike `children` it
     /// can be cancelled inside a large folder, within a few milliseconds. Blocking: call off the main thread.
-    public static func scan(items: [(name: String, path: String, isDirectory: Bool)], progress: @Sendable (ScanProgress) -> Void,
-                            entry: @Sendable (DirEntry) -> Void, cancelled: @Sendable () -> Bool) {
+    /// With `recorder`, every folder's rollup (size, subfolders, largest files) is saved as it goes, so the UI can show
+    /// any subfolder of the scan without scanning again (see FolderTree); the saved scan is returned when it completes.
+    /// A cancelled scan returns nil and nothing of it is kept.
+    @discardableResult
+    public static func scan(items: [(name: String, path: String, isDirectory: Bool)], recorder: FolderTreeRecorder? = nil,
+                            progress: @Sendable (ScanProgress) -> Void,
+                            entry: @Sendable (DirEntry) -> Void, cancelled: @Sendable () -> Bool) -> FolderTree? {
+        var done: [DirEntry] = []
         var p = ScanProgress(total: items.count, done: 0, current: nil, files: 0, bytes: 0)
         progress(p)
         for item in items {
-            if cancelled() { return }
+            if cancelled() { recorder?.discard(); return nil }
             p.current = item.name; progress(p)
             let filesBefore = p.files, bytesBefore = p.bytes
             var itemFiles = 0                  // the sizer's final count for this item (its last progress call)
-            let result = DirectorySizer.size(of: item.path, cancelled: cancelled) { f, b in
+            let builder = recorder.map { FolderTreeRecorder.Builder(recorder: $0, item: item.path) }
+            let result = DirectorySizer.size(of: item.path, cancelled: cancelled, progress: { f, b in
                 itemFiles = f
                 var q = p; q.files = filesBefore + f; q.bytes = bytesBefore + b; progress(q)
-            }
-            guard let result else { return }   // cancelled
+            }, visit: { level, url, bytes, isDir in builder?.visit(level: level, url: url, bytes: bytes, isDirectory: isDir) })
+            guard let result else { recorder?.discard(); return nil }   // cancelled
+            if item.isDirectory { builder?.finish() }
             let size = result.bytes ?? 0       // unreadable items count as 0, as the footer explains
             // A plain file reports no progress (nothing to enumerate), so it counts as one.
             p.done += 1; p.bytes = bytesBefore + size; p.files = filesBefore + max(itemFiles, 1); p.current = nil
-            entry(DirEntry(name: item.name, path: item.path, size: size, isDirectory: item.isDirectory))
+            let e = DirEntry(name: item.name, path: item.path, size: size, isDirectory: item.isDirectory)
+            done.append(e); entry(e)
             progress(p)
         }
+        return recorder?.finish(entries: done)
     }
 
     /// Immediate children of `path` with recursive sizes. Calls `progress` as each child completes.

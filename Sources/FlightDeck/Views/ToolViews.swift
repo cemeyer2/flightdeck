@@ -151,6 +151,12 @@ final class DiskScan: ObservableObject {
     @Published var startedAt: Date?
     /// Set when the user cancelled, so the list says it's partial.
     @Published var cancelled = false
+    /// The last completed scan's saved rollups: drilling into (or back up within) it is answered from here, instantly,
+    /// and it survives relaunches (FolderStore, SQLite in Application Support). nil in demo mode or if the store can't open.
+    @Published private(set) var tree: FolderTree?
+    let store: FolderStore? = Demo.isEnabled ? nil : FolderStore()
+    /// True when `entries` came from `tree` rather than a scan of `path` itself.
+    @Published private(set) var fromTree = false
     /// Bumped on every new scan. Results and the cancellation check compare against it, so navigating to another folder
     /// abandons the old scan and its late results are dropped instead of mixing into the new list.
     private var generation = 0
@@ -161,9 +167,33 @@ final class DiskScan: ObservableObject {
     private let latest = ProgressBox()
     private var ticker: Timer?
 
+    /// Shows `newPath` from the last scan's rollups when it was recorded there (drill-down, back up); otherwise scans it.
+    func open(_ newPath: String) {
+        if !scanning, let t = tree, t.covers(newPath), let e = t.entries(of: newPath) {
+            path = newPath; entries = e; pending = []; fromTree = true; cancelled = false
+            return
+        }
+        scan(newPath)
+    }
+
+    /// On first showing the page: the most recent saved scan, if there is one, so earlier results are browsable at once.
+    func restoreLastScan() {
+        guard !started, !scanning, let store, let info = store.latestScan() else { return }
+        let t = FolderTree(store: store, info: info)
+        guard let e = t.entries(of: info.root) else { return }
+        tree = t; path = info.root; entries = e; started = true; fromTree = true
+    }
+
+    /// Deletes every saved scan (the stored file and folder names) and clears the list.
+    func forgetSavedScans() {
+        store?.forgetAll(); tree = nil
+        if fromTree { entries = []; started = false; fromTree = false }
+    }
+
+    /// Scans `newPath` (or the current folder again), replacing the stored rollups.
     func scan(_ newPath: String? = nil) {
         if let newPath { path = newPath }
-        started = true; cancelled = false
+        started = true; cancelled = false; fromTree = false; tree = nil
         generation += 1; let gen = generation
         liveGeneration.set(gen)
         entries = []; pending = []; progress = nil; scanning = true; startedAt = Date()
@@ -173,6 +203,7 @@ final class DiskScan: ObservableObject {
             MainActor.assumeIsolated { if let self, let p = self.latest.get() { self.progress = p } }
         }
         let target = path
+        let recorder = store.flatMap { FolderTreeRecorder(store: $0, root: target) }
         let live = liveGeneration, box = latest
         // A constant weak box rather than `[weak self]`: a weak capture is a `var`, which Swift won't share safely with
         // the background closure. It is only dereferenced on the main thread.
@@ -181,7 +212,7 @@ final class DiskScan: ObservableObject {
             let items = DiskUsage.scanItems(of: target)
             let names = items.map(\.name)
             await MainActor.run { if let self = owner.value, self.generation == gen { self.pending = names } }
-            DiskUsage.scan(items: items, progress: { box.set($0) }, entry: { entry in
+            let saved = DiskUsage.scan(items: items, recorder: recorder, progress: { box.set($0) }, entry: { entry in
                 DispatchQueue.main.async {
                     guard let self = owner.value, self.generation == gen else { return }
                     // Insert in size order instead of re-sorting the whole list for every streamed result.
@@ -192,6 +223,7 @@ final class DiskScan: ObservableObject {
             }, cancelled: { live.get() != gen })
             await MainActor.run {
                 guard let self = owner.value, self.generation == gen else { return }
+                if let saved { self.tree = saved }   // nil when cancelled: nothing partial is kept
                 self.finish()
             }
         }
@@ -273,13 +305,20 @@ struct DiskSpaceView: View {
                     }
                 } else {
                 HStack {
-                    Button { scan.scan((scan.path as NSString).deletingLastPathComponent) } label: { Image(systemName: "arrow.up") }.disabled(scan.path == "/")
+                    Button { scan.open((scan.path as NSString).deletingLastPathComponent) } label: { Image(systemName: "arrow.up") }.disabled(scan.path == "/" || scan.scanning)
                     Text(scan.path).font(.system(size: 12, design: .monospaced)).lineLimit(1).truncationMode(.head)
                     Spacer()
                     Button("Choose Folder…") { chooseFolder() }
                     Button("Rescan") { scan.scan() }.disabled(scan.scanning)
+                    Button("Forget Saved Scans") { scan.forgetSavedScans() }.disabled(scan.scanning || scan.tree == nil)
+                        .help("Delete the saved scan results (folder and file names and sizes) from this Mac")
                 }
                 if scan.scanning { ScanProgressStrip(scan: scan) }
+                if scan.fromTree, let t = scan.tree {
+                    // Answered from the rollups: say from which scan, so stale numbers are never a surprise.
+                    Text("From the scan of \((t.root as NSString).abbreviatingWithTildeInPath) on \(t.date.formatted(date: .abbreviated, time: .shortened)) · Rescan to refresh this folder\(t.truncated ? " · very large scan: some deep folders weren't kept" : "")")
+                        .font(.system(size: 10, design: .monospaced)).foregroundStyle(p.dim)
+                }
                 let top = scan.entries.first?.size ?? 1
                 ScrollView {
                     LazyVStack(spacing: 3) {
@@ -294,10 +333,11 @@ struct DiskSpaceView: View {
                             }
                             .font(.system(size: 12, design: .monospaced))
                             .contentShape(Rectangle())
-                            .onTapGesture(count: 2) { if d.isDirectory { scan.scan(d.path) } }
+                            .onTapGesture(count: 2) { if d.isDirectory { scan.open(d.path) } }
                             .contextMenu {
-                                Button("Reveal in Finder") { NSWorkspace.shared.selectFile(d.path, inFileViewerRootedAtPath: "") }
-                                if d.isDirectory { Button("Open Here") { scan.scan(d.path) } }
+                                // Not for the summed "N smaller files" row, which isn't a real item.
+                                if !d.path.contains("\u{0}") { Button("Reveal in Finder") { NSWorkspace.shared.selectFile(d.path, inFileViewerRootedAtPath: "") } }
+                                if d.isDirectory { Button("Open Here") { scan.open(d.path) } }
                             }
                         }
                         // Items listed but not measured yet: the one being measured now, then the queue.
@@ -325,6 +365,7 @@ struct DiskSpaceView: View {
         // Automation hook (like -inspectPID): `-scanFolder /path` starts a folder scan when the page first opens.
         .onAppear {
             if !scan.started, let f = UserDefaults.standard.string(forKey: "scanFolder"), !f.isEmpty { mode = .folders; scan.scan(f) }
+            else { scan.restoreLastScan() }
         }
         // No scan on appear: opening the page (or clicking it by accident) must not start a full scan.
     }
