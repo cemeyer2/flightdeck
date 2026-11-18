@@ -24,8 +24,7 @@ struct FlightDeckApp: App {
         Window("FlightDeck", id: "main") {
             ContentView()
                 .environmentObject(engine)
-                .environment(\.palette, Palette.of(theme))
-                .preferredColorScheme(Palette.of(theme).scheme)
+                .themed(theme)
                 .frame(minWidth: 980, minHeight: 640)
                 .onOpenURL { engine.open($0) }
                 // The Dock tile is drawn by AppKit outside SwiftUI, so it must be told to redraw on theme/mode changes.
@@ -87,23 +86,22 @@ struct FlightDeckApp: App {
         WindowGroup("Inspector", id: "inspector", for: ProcessIdentity.self) { $id in
             InspectorWindow(identity: id)
                 .environmentObject(engine)
-                .environment(\.palette, Palette.of(theme))
-                .preferredColorScheme(Palette.of(theme).scheme)
+                .themed(theme)
         }
         .defaultSize(width: 900, height: 760)
         Window("Compare Recordings", id: "compare") {
-            CompareView().environment(\.palette, Palette.of(theme)).preferredColorScheme(Palette.of(theme).scheme)
+            CompareView().themed(theme)
         }
         .defaultSize(width: 980, height: 820)
         // The menu bar extra uses the `.window` style (a panel, not a menu) and can be turned off in Settings.
         MenuBarExtra(isInserted: $menuBarEnabled) {
-            MenuBarPanel().environmentObject(engine).environment(\.palette, Palette.of(theme))
+            MenuBarPanel().environmentObject(engine).themed(theme)
         } label: {
             MenuBarLabel().environmentObject(engine)
         }
         .menuBarExtraStyle(.window)
         Settings {
-            SettingsView().environmentObject(engine).environment(\.palette, Palette.of(theme))
+            SettingsView().environmentObject(engine).themed(theme)
         }
     }
 }

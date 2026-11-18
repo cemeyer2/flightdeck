@@ -1,12 +1,40 @@
 // Colour themes. Every view reads the active Palette from the environment (`\.palette`), set at each scene root in
 // FlightDeckApp from the "theme" user default. Fonts for VFD-style readouts are defined at the bottom.
 import SwiftUI
+import AppKit
 
 /// User-selectable theme; the raw value is what's stored in the "theme" user default.
 enum ThemeID: String, CaseIterable, Identifiable {
-    case light, dark, green, amber, blue, mono
+    /// Follows macOS's light/dark appearance: the Light or Dark palette, switching live when the system does.
+    case system, light, dark, green, amber, blue, mono
     var id: String { rawValue }
     var title: String { rawValue.capitalized }
+}
+
+extension ThemeID {
+    /// The concrete theme to draw with: `.system` becomes `.light` or `.dark` for `scheme` (the effective colour scheme
+    /// of the view), or, without one, for the app's current appearance.
+    func resolved(_ scheme: ColorScheme? = nil) -> ThemeID {
+        guard self == .system else { return self }
+        if let scheme { return scheme == .light ? .light : .dark }
+        let dark = NSApp?.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        return dark ? .dark : .light
+    }
+}
+
+/// Applies a theme to a window's content. For `.system` it leaves the colour scheme to macOS and picks the palette
+/// from the scheme it's given, so the window changes along with the system's appearance.
+struct Themed: ViewModifier {
+    var theme: ThemeID
+    @Environment(\.colorScheme) private var systemScheme
+    func body(content: Content) -> some View {
+        let p = Palette.of(theme.resolved(systemScheme))
+        content.environment(\.palette, p).preferredColorScheme(theme == .system ? nil : p.scheme)
+    }
+}
+
+extension View {
+    func themed(_ theme: ThemeID) -> some View { modifier(Themed(theme: theme)) }
 }
 
 /// All colours a view needs. The four phosphor themes (green, amber, blue, mono) are single-hue CRT/VFD looks:
@@ -32,7 +60,8 @@ struct Palette {
     var mono: Bool { id == .green || id == .amber || id == .blue || id == .mono }
 
     /// Builds the palette for a theme. Pure, cheap, and called freely from view bodies.
-    static func of(_ id: ThemeID) -> Palette {
+    static func of(_ requested: ThemeID) -> Palette {
+        let id = requested.resolved()
         // Shared recipe for phosphor themes: near-black background, everything else derived from one colour `c`
         // (plus `c2` for secondary traces and E-cores).
         func phosphor(_ c: Color, _ c2: Color) -> Palette {
@@ -48,7 +77,7 @@ struct Palette {
                            meterOff: Color.black.opacity(0.07), grid: Color.black.opacity(0.06),
                            pCore: Color(red: 0.0, green: 0.48, blue: 0.85), eCore: Color(red: 0.15, green: 0.65, blue: 0.35),
                            warn: .orange, crit: .red, glow: 0, scheme: .light)
-        case .dark:
+        case .dark, .system:   // .system never reaches here (resolved above); listed for exhaustiveness
             return Palette(id: id, background: Color(red: 0.07, green: 0.08, blue: 0.09), panel: Color(red: 0.11, green: 0.12, blue: 0.13),
                            panelBorder: Color.white.opacity(0.07), text: Color(white: 0.92), dim: Color(white: 0.55),
                            accent: Color(red: 0.25, green: 0.78, blue: 1.0), accent2: Color(red: 1.0, green: 0.55, blue: 0.25),
