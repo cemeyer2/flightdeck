@@ -13,6 +13,7 @@ enum Destination: String, CaseIterable, Identifiable, Hashable {
          connections = "Connections", apps = "Installed Apps", diskSpace = "Disk Space", benchmarks = "Benchmarks",
          launches = "Launches", console = "Console", trends = "Trends", checkup = "Checkup", peripherals = "Peripherals",
          upnp = "UPnP", network = "Network", unifi = "UniFi"
+    case internet = "Internet"
     var id: String { rawValue }
     var icon: String {
         switch self {
@@ -40,6 +41,7 @@ enum Destination: String, CaseIterable, Identifiable, Hashable {
         case .upnp: "dot.radiowaves.left.and.right"
         case .network: "wifi.router"
         case .unifi: "antenna.radiowaves.left.and.right"
+        case .internet: "globe"
         }
     }
 }
@@ -85,6 +87,7 @@ struct ContentView: View {
         }
         .onAppear {
             if Demo.isEnabled && engine.demoSleep == nil { Demo.start(engine) }   // screenshot mode: synthetic data only
+            InternetModel.shared.attach(engine)   // speed-test history and the opt-in schedule (idempotent)
             // The inspector WindowGroup is opened by value (a ProcessIdentity), which only a SwiftUI view can do.
             // (Not in demo mode: demo PIDs are invented and could match real processes, whose details must not be shown.)
             AppActions.openInspector = Demo.isEnabled ? nil : { openWindow(id: "inspector", value: $0) }
@@ -128,6 +131,7 @@ struct ContentView: View {
         case .upnp: UPnPView()
         case .network: NetworkMapView()
         case .unifi: UniFiView()
+        case .internet: InternetView()
         }
     }
 
