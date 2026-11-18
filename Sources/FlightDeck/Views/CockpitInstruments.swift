@@ -119,7 +119,8 @@ struct ClockInstrument: View {
     var size: InstrumentSize
 
     /// Boot time doesn't change while we run, so it's read once.
-    static let bootTime = Sysctl.timeval("kern.boottime")
+    /// This Mac's boot time; in demo mode an invented one (3 days 4 hours ago), so screenshots don't reveal real uptime.
+    static let bootTime = Demo.isEnabled ? Date().addingTimeInterval(-(3 * 86_400 + 4 * 3600 + 17 * 60)) : Sysctl.timeval("kern.boottime")
 
     var body: some View {
         let now = Date()

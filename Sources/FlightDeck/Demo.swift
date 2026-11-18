@@ -75,9 +75,16 @@ enum Demo {
             s.network.totalIn = 18_400_000_000; s.network.totalOut = 2_100_000_000
             s.network.interfaces = Array(template.network.interfaces.prefix(1)).map { var n = $0; n.name = "en0"; n.addresses = []; n.mac = nil; return n }
             // Power and thermals: on battery, warm
-            s.power.systemWatts = .value(24 * wobble(0.12, 6)); s.power.batteryWatts = .value(-24)
-            s.power.powerSource = "Battery"; s.power.lowPowerMode = false; s.power.thermalState = 1
-            if var b = s.power.battery { b.percent = 62; b.isCharging = false; b.externalConnected = false; b.cycleCount = 214; s.power.battery = b }
+            // Charging on the invented 96 W USB-C charger (the same session DemoCharging shows), so every power panel
+            // agrees. Every battery field is overwritten: none of this Mac's battery or charger may appear in demo mode.
+            s.power.systemWatts = .value(24 * wobble(0.12, 6)); s.power.batteryWatts = .value(48)
+            s.power.powerSource = "AC Power"; s.power.lowPowerMode = false; s.power.thermalState = 1
+            if var b = s.power.battery {
+                b.percent = 62; b.isCharging = true; b.externalConnected = true; b.cycleCount = 214
+                b.maxCapacity = 4_620; b.designCapacity = 5_000; b.temperature = 31.5; b.voltage = 12.42; b.amperage = 3.86
+                b.timeRemaining = 58; b.adapterWatts = 96
+                s.power.battery = b
+            }
             // Charging details are this Mac's real readings in the template: never shown in demo mode.
             s.power.charging = nil
             let sensors = ["CPU performance cores", "CPU efficiency cores", "GPU", "SSD", "Battery", "Ambient"]

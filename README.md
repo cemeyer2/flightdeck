@@ -5,14 +5,19 @@ by showing which process and which subsystem is responsible.
 
 ## Screenshots
 
-These are taken in demo mode, which feeds the real UI invented data (a busy "Demo Mac"), so nothing here describes a real machine.
+These are taken in demo mode, which feeds the real UI invented data (a busy "Demo Mac" on an invented network), so nothing here describes a real machine.
 
 | | |
 |---|---|
-| ![Summary](docs/screenshots/summary.png) **Summary:** every subsystem at a glance, with what's wrong right now | ![Stress Map](docs/screenshots/stress-map.png) **Stress Map:** which apps are straining which parts of the Mac |
-| ![Flight Log](docs/screenshots/flight-log.png) **Flight Log:** a 24 h timeline, past incidents with stack evidence, and macOS crash/hang reports | ![Processes](docs/screenshots/processes.png) **Processes:** grouped by app, with GPU, disk, network and energy per process |
-| ![CPU](docs/screenshots/cpu.png) **Performance › CPU:** per-core load, coloured by performance/efficiency core | ![Memory](docs/screenshots/memory.png) **Performance › Memory:** composition, pressure, swap and paging |
-| ![Sleep & Wake](docs/screenshots/sleep-wake.png) **Sleep & Wake:** dark wakes, battery drain overnight, and who kept the Mac awake | ![Rules](docs/screenshots/rules.png) **Rules:** automatic responses to sustained problems |
+| ![Summary](docs/screenshots/summary.jpg) **Summary:** a customisable cockpit of instruments, the annunciator panel and what's wrong right now | ![Stress Map](docs/screenshots/stress-map.jpg) **Stress Map:** which apps are straining which parts of the Mac, animated between samples |
+| ![Flight Log](docs/screenshots/flight-log.jpg) **Flight Log:** a 24 h timeline, past incidents with stack evidence, and macOS crash/hang reports | ![Trends](docs/screenshots/trends.jpg) **Trends:** 90 days of daily history, with before/after comparisons around updates |
+| ![Processes](docs/screenshots/processes.jpg) **Processes:** grouped by app, with GPU, disk, network and energy per process | ![Performance › CPU](docs/screenshots/cpu.jpg) **Performance › CPU:** per-cluster load and clocks, coloured by performance/efficiency core |
+| ![Performance › Energy](docs/screenshots/charging.jpg) **Performance › Energy:** what the charger negotiated and where the power goes | ![Sleep & Wake](docs/screenshots/sleep-wake.jpg) **Sleep & Wake:** dark wakes, overnight drain, and who kept the Mac awake |
+| ![Network](docs/screenshots/network.jpg) **Network:** the devices on the local network, from this Mac to the internet | ![Internet](docs/screenshots/internet.jpg) **Internet:** speed and responsiveness tests explained, and data usage per app |
+| ![UPnP](docs/screenshots/upnp.jpg) **UPnP:** UPnP devices and the port mappings apps opened on the router | ![UniFi](docs/screenshots/unifi.jpg) **UniFi:** a UniFi console's real topology: which AP or switch port each client is on |
+| ![Disk Space](docs/screenshots/disk-space.jpg) **Disk Space:** what is using the disk, "System Data" explained, and safe cleanups | ![Developer](docs/screenshots/developer.jpg) **Developer:** dev servers, containers, Homebrew services, builds and toolchains |
+| ![Rules](docs/screenshots/rules.jpg) **Rules:** automatic responses to sustained problems | ![Cockpit editing](docs/screenshots/cockpit-edit.jpg) **Cockpit editing:** add, remove, reorder and resize instruments; save layouts |
+| ![Ambient mode](docs/screenshots/ambient.jpg) **Ambient mode:** a dim full-screen instrument panel for a second display |  |
 
 ## Build & run
 
@@ -488,5 +493,6 @@ Automation hooks: `open build/FlightDeck.app --args -destination "Processes" -th
 
 **Demo mode:** `open build/FlightDeck.app --args -demo YES -skipWelcome YES` runs the UI on synthetic data
 (`Sources/FlightDeck/Demo.swift`) for screenshots. It never saves rules, never posts alerts and can't act on real
-processes. Only the views above are fully synthetic; System Info, Disk Space, Connections, the GPU tab and the process
-inspector still read this Mac, so don't screenshot those in demo mode.
+processes, run cleanups, start or stop services, or contact the network. The pages in the screenshots above (plus Console,
+Checkup and Peripherals, which show a placeholder) are synthetic. System Info, Connections, Installed Apps, Startup
+Apps, Services, Users, the GPU tab and the process inspector still read this Mac, so don't screenshot those in demo mode.
