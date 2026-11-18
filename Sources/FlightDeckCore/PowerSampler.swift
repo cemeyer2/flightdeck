@@ -43,6 +43,9 @@ public struct PowerSample: Codable, Sendable {
     public var hottest: Measured<Double>
     /// Fan speeds from the SMC (empty on fanless Macs; nil in traces recorded before fans were read).
     public var fans: [FanReading]? = nil
+    /// Charger contract, power telemetry and battery facts (ChargingDetails.swift); nil on Macs without a battery node
+    /// and in traces recorded before charging insights existed.
+    public var charging: ChargingDetails? = nil
 }
 
 /// One named temperature sensor in °C.
@@ -67,6 +70,7 @@ public final class PowerSampler {
         var battery: BatteryInfo?
         var batteryW: Measured<Double> = .unavailable("no battery")
         var systemW: Measured<Double> = .unavailable("not reported by this Mac")
+        var charging: ChargingDetails?
         // Desktops have no AppleSmartBattery node, which leaves battery nil and both wattages unavailable.
         let svc = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("AppleSmartBattery"))
         if svc != 0 {
@@ -98,6 +102,8 @@ public final class PowerSampler {
                     voltage: volt, amperage: amp,
                     timeRemaining: (tr ?? 65535) < 65535 ? tr : nil,
                     adapterWatts: (d["AdapterDetails"] as? [String: Any]).flatMap { ($0["Watts"] as? NSNumber)?.intValue })
+                // Charging insights come from the same dictionary, so this costs no extra registry read.
+                charging = ChargingDetails.parse(d)
                 // Battery power is V × A, signed like the amperage: positive while charging, negative while draining.
                 if let volt, let amp { batteryW = .value(volt * amp) }
                 // Whole-system power: Apple silicon laptops publish SystemLoad (mW) in PowerTelemetryData. Without it,
@@ -126,7 +132,7 @@ public final class PowerSampler {
                            thermalState: ProcessInfo.processInfo.thermalState.rawValue,
                            temperatures: temps,
                            hottest: temps.map(\.celsius).max().map { .value($0) } ?? .unavailable("no sensors"),
-                           fans: SMC.shared.fans())
+                           fans: SMC.shared.fans(), charging: charging)
     }
 }
 
