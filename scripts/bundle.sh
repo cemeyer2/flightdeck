@@ -4,8 +4,11 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 ARCHS="${ARCHS:---arch arm64 --arch x86_64}"
 # Version shown in Finder and About; the release workflow sets these from the git tag (v1.2.3 → 1.2.3).
-VERSION="${VERSION:-1.0}"
-BUILD_NUMBER="${BUILD_NUMBER:-1}"
+# Local builds: the latest tag's version, and "<commits since it>-<hash>" (e.g. 1.0.1 and 3-ge5d4b7e) as the build.
+DESCRIBE="$(git describe --tags --long --match 'v[0-9]*' 2>/dev/null || true)"   # v1.0.1-3-ge5d4b7e
+if [ -n "$DESCRIBE" ]; then TAG_VERSION="${DESCRIBE%%-*}"; TAG_VERSION="${TAG_VERSION#v}"; TAG_BUILD="${DESCRIBE#*-}"; fi
+VERSION="${VERSION:-${TAG_VERSION:-1.0}}"
+BUILD_NUMBER="${BUILD_NUMBER:-${TAG_BUILD:-1}}"
 # The Command Line Tools lack the SwiftUIMacros plugin that the macOS 27 SDK needs for @State,
 # so without full Xcode, build against the macOS 26 SDK instead (set SDKROOT to override).
 CLT_SDK="/Library/Developer/CommandLineTools/SDKs/MacOSX26.sdk"
@@ -26,6 +29,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
   <key>CFBundleName</key><string>FlightDeck</string>
+  <key>NSHumanReadableCopyright</key><string>© Charlie Meyer</string>
   <key>CFBundleDisplayName</key><string>FlightDeck</string>
   <key>CFBundleIdentifier</key><string>app.flightdeck.Flightdeck</string>
   <key>CFBundleExecutable</key><string>FlightDeck</string>

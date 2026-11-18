@@ -40,6 +40,7 @@ struct FlightDeckApp: App {
         .commands {
             // No "New Window": there is one main window and documents are traces opened for replay.
             CommandGroup(replacing: .newItem) {}
+            CommandGroup(replacing: .appInfo) { Button("About FlightDeck") { AboutPanel.show() } }
             CommandMenu("Go") {
                 // ⌘1…⌘9 jump to the first nine sidebar destinations.
                 ForEach(Array(Destination.allCases.prefix(9).enumerated()), id: \.offset) { i, d in
@@ -249,4 +250,31 @@ struct SettingsView: View {
 struct OpenCompareButton: View {
     @Environment(\.openWindow) private var openWindow
     var body: some View { Button("Compare Recordings…") { openWindow(id: "compare") } }
+}
+
+/// FlightDeck › About: the standard macOS About panel, with the version from the bundle (stamped from the git tag by
+/// scripts/bundle.sh and the release workflow), the author, and a credit to Claude, which helped build it.
+enum AboutPanel {
+    static func show() {
+        let info = Bundle.main.infoDictionary ?? [:]
+        let version = info["CFBundleShortVersionString"] as? String ?? "—"
+        let build = info["CFBundleVersion"] as? String ?? "—"
+        let body = NSFont.systemFont(ofSize: 11), bold = NSFont.boldSystemFont(ofSize: 11)
+        let centered = NSMutableParagraphStyle(); centered.alignment = .center; centered.paragraphSpacing = 4
+        func line(_ s: String, _ f: NSFont, _ c: NSColor = .labelColor) -> NSAttributedString {
+            NSAttributedString(string: s + "\n", attributes: [.font: f, .foregroundColor: c, .paragraphStyle: centered])
+        }
+        let credits = NSMutableAttributedString()
+        credits.append(line("By Charlie Meyer", bold))
+        credits.append(line("Built with Claude, by Anthropic", body, .secondaryLabelColor))
+        credits.append(line("A flight deck for your Mac: every instrument on one panel, and a black box for when something goes wrong.", body, .secondaryLabelColor))
+        NSApp.activate(ignoringOtherApps: true)
+        NSApp.orderFrontStandardAboutPanel(options: [
+            .applicationName: "FlightDeck",
+            .applicationVersion: version,
+            .version: build,
+            .credits: credits,
+            NSApplication.AboutPanelOptionKey(rawValue: "Copyright"): "© \(Calendar.current.component(.year, from: Date())) Charlie Meyer",
+        ])
+    }
 }
