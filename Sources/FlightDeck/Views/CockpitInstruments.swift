@@ -16,6 +16,10 @@ struct InstrumentView: View {
     }
 
     var body: some View {
+        content.modifier(DrillDown(target: slot.kind.drillDown))
+    }
+
+    @ViewBuilder var content: some View {
         switch slot.kind {
         case .annunciator: AnnunciatorPanel()
         case .findings: DiagnosisBanner()
@@ -142,4 +146,50 @@ struct ClockInstrument: View {
         let t = Int(max(s, 0)) / 60, d = t / 1440, h = (t % 1440) / 60, m = t % 60
         return d > 0 ? "\(d)d \(h)h \(m)m" : h > 0 ? "\(h)h \(m)m" : "\(m)m"
     }
+}
+
+/// Makes a Summary instrument a way into its detailed page: the whole tile is clickable, the cursor becomes a pointing
+/// hand, a "›" in the corner brightens on hover, and the tooltip names the destination. Not applied while editing (the
+/// edit strip wraps a different view) or when the instrument has no single page to open.
+struct DrillDown: ViewModifier {
+    @EnvironmentObject var e: Engine
+    @Environment(\.palette) var p
+    var target: String?
+    @State private var hover = false
+
+    func body(content: Content) -> some View {
+        if let target {
+            let label = target.replacingOccurrences(of: ":", with: " › ")
+            content
+                .overlay(alignment: .topTrailing) {
+                    Image(systemName: "chevron.right").font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(hover ? p.accent : p.dim.opacity(0.6))
+                        .padding(.top, 12).padding(.trailing, 12)
+                        .allowsHitTesting(false)
+                }
+                .overlay {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(p.accent.opacity(hover ? 0.45 : 0), lineWidth: 1)
+                        .allowsHitTesting(false)
+                }
+                .contentShape(Rectangle())
+                .onTapGesture { endHover(); e.navigationRequest = target }
+                .onHover { inside in
+                    if inside && !hover { NSCursor.pointingHand.push() } else if !inside { endHover() }
+                    hover = inside
+                }
+                // Clicking navigates away while the pointer is still inside, so the exit event may never come:
+                // restore the cursor on click and on disappear rather than leaving the pointing hand stuck.
+                .onDisappear { endHover() }
+                .help("Open \(label)")
+                // One accessible button per tile (its texts combined), not a button per label inside it.
+                .accessibilityElement(children: .combine)
+                .accessibilityAddTraits(.isButton)
+                .accessibilityHint("Opens \(label)")
+                .accessibilityAction { e.navigationRequest = target }
+        } else {
+            content
+        }
+    }
+
+    private func endHover() { if hover { NSCursor.pop(); hover = false } }
 }

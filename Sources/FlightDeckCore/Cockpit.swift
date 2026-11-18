@@ -36,6 +36,24 @@ public enum InstrumentKind: String, Codable, CaseIterable, Sendable, Identifiabl
         }
     }
 
+    /// Where clicking the instrument goes: a navigation request in the app's "Destination[:Performance tab]" form
+    /// ("Performance:Energy", "Processes"). nil for instruments with no single detail page (the clock) or whose rows
+    /// already navigate individually (the annunciator lights, each finding).
+    public var drillDown: String? {
+        switch self {
+        case .cpu, .cpuCores: "Performance:CPU"
+        case .memory, .memoryPressure, .swap: "Performance:Memory"
+        case .disk: "Performance:Disk"
+        case .network, .wifi: "Performance:Network"
+        case .energy, .battery: "Performance:Energy"
+        case .thermals, .fans: "Performance:Thermals"
+        case .gpu: "Performance:GPU"
+        case .topProcesses: "Processes"
+        case .stressMap: "Stress Map"
+        case .annunciator, .findings, .clock: nil
+        }
+    }
+
     /// Size a newly added instrument gets. The two banner-like kinds read best across the whole row.
     public var defaultSize: InstrumentSize {
         switch self {

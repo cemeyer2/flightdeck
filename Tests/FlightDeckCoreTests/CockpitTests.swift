@@ -159,3 +159,20 @@ final class CockpitTests: XCTestCase {
         XCTAssertEqual(BurnIn.minute(of: Date(timeIntervalSince1970: 125)), 2)
     }
 }
+
+/// Summary drill-down: every navigating instrument names a real page (and a real Performance tab).
+final class CockpitDrillDownTests: XCTestCase {
+    func testDrillDownTargetsAreRealPages() {
+        let pages = ["Processes", "Stress Map", "Performance"]
+        let tabs = ["CPU", "Memory", "Disk", "Network", "Energy", "Thermals", "GPU"]
+        for k in InstrumentKind.allCases {
+            guard let t = k.drillDown else { continue }
+            let parts = t.split(separator: ":").map(String.init)
+            XCTAssertTrue(pages.contains(parts[0]), "\(k) → \(t)")
+            if parts.count > 1 { XCTAssertTrue(tabs.contains(parts[1]), "\(k) → \(t)") }
+        }
+        XCTAssertEqual(InstrumentKind.energy.drillDown, "Performance:Energy")
+        XCTAssertEqual(InstrumentKind.battery.drillDown, "Performance:Energy")
+        XCTAssertNil(InstrumentKind.findings.drillDown, "findings rows navigate one by one")
+    }
+}

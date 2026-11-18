@@ -57,6 +57,8 @@ demo-data version for screenshots (see Demo mode at the end).
 
 Is my Mac OK, now and over time?
 
+**Drill down from Summary:** click any instrument (a "›" in its corner, a pointing-hand cursor and a tooltip show where it goes) to open the detailed view behind it: CPU and CPU Cores open Performance › CPU; Memory, Memory Pressure and Swap open Performance › Memory; Disk, Network and Wi-Fi Signal, GPU, Energy and Battery & Charge, and Thermals and Fans open their Performance tabs; Top Processes opens Processes; the mini Stress Map opens the Stress Map. The annunciator lights and each finding already open their own causes.
+
 **Customizable cockpit:** the Summary page is a grid of instruments you can arrange. Click **Edit** (⌥⌘E) to get a
 strip above each instrument with a drag handle, a size control (S = one column, M = two, L = the whole row), move
 buttons and a remove (×) button, plus an "Add instrument" palette. Drag instruments onto each other to reorder them;
