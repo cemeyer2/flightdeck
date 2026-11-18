@@ -139,6 +139,8 @@ final class DiskScan: ObservableObject {
     @Published var path: String = FileManager.default.homeDirectoryForCurrentUser.path
     @Published var entries: [DirEntry] = []
     @Published var scanning = false
+    /// False until the user starts the first scan; the page then shows an explanation and Scan buttons instead.
+    @Published var started = false
     /// Bumped on every new scan. Results and the cancellation check compare against it, so navigating to another folder
     /// abandons the old scan and its late results are dropped instead of mixing into the new list.
     private var generation = 0
@@ -147,6 +149,7 @@ final class DiskScan: ObservableObject {
 
     func scan(_ newPath: String? = nil) {
         if let newPath { path = newPath }
+        started = true
         generation += 1; let gen = generation
         liveGeneration.set(gen)
         entries = []; scanning = true
@@ -193,19 +196,33 @@ struct DiskSpaceView: View {
         VStack(spacing: 12) {
             Panel(title: "Volumes") {
                 // Falls back to a direct volume query before the first sample arrives.
+                // Scanning is always an explicit button press: a scan reads every file under the folder, which is heavy
+                // and makes macOS ask for access to Desktop, Documents, Downloads, Photos and so on.
                 ForEach(e.current?.disk.volumes ?? DiskSampler.volumes()) { v in
-                    VolumeRow(v: v).contentShape(Rectangle()).onTapGesture { scan.scan(v.path) }
+                    HStack(spacing: 10) {
+                        VolumeRow(v: v)
+                        Button("Scan") { scan.scan(v.path) }.controlSize(.small).disabled(scan.scanning)
+                            .help("Find the largest folders and files on \(v.name)")
+                    }
                 }
             }
-            Panel(title: "Largest items", trailing: scan.scanning ? "scanning…" : "\(Fmt.storage(scan.entries.reduce(0) { $0 + $1.size })) in \(scan.entries.count) items") {
+            Panel(title: "Largest items", trailing: scan.scanning ? "scanning…" : scan.started ? "\(Fmt.storage(scan.entries.reduce(0) { $0 + $1.size })) in \(scan.entries.count) items" : nil) {
+                if !scan.started {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Nothing scanned yet.").font(.system(size: 13, weight: .semibold))
+                        Text("A scan measures every folder and file under the place you pick, to find what takes the space. It reads a lot of the disk, and macOS may ask you to allow FlightDeck to access folders such as Desktop, Documents, Downloads and Photos; any you don't allow are counted as 0.")
+                            .font(.system(size: 11)).foregroundStyle(p.dim).fixedSize(horizontal: false, vertical: true)
+                        HStack {
+                            Button("Scan Home Folder") { scan.scan(FileManager.default.homeDirectoryForCurrentUser.path) }
+                            Button("Choose Folder…") { chooseFolder() }
+                        }
+                    }
+                } else {
                 HStack {
                     Button { scan.scan((scan.path as NSString).deletingLastPathComponent) } label: { Image(systemName: "arrow.up") }.disabled(scan.path == "/")
                     Text(scan.path).font(.system(size: 12, design: .monospaced)).lineLimit(1).truncationMode(.head)
                     Spacer()
-                    Button("Choose Folder…") {
-                        let pnl = NSOpenPanel(); pnl.canChooseDirectories = true; pnl.canChooseFiles = false
-                        if pnl.runModal() == .OK, let u = pnl.url { scan.scan(u.path) }
-                    }
+                    Button("Choose Folder…") { chooseFolder() }
                     Button("Rescan") { scan.scan() }
                 }
                 let top = scan.entries.first?.size ?? 1
@@ -231,10 +248,16 @@ struct DiskSpaceView: View {
                     }
                 }
                 Text("Double-click a folder to drill in. Folders without Full Disk Access permission are counted as 0.").font(.system(size: 10)).foregroundStyle(p.dim)
+                }
             }
         }
         .padding(16)
-        .onAppear { if scan.entries.isEmpty { scan.scan() } }
+        // No scan on appear: opening the page (or clicking it by accident) must not start a full scan.
+    }
+
+    func chooseFolder() {
+        let pnl = NSOpenPanel(); pnl.canChooseDirectories = true; pnl.canChooseFiles = false
+        if pnl.runModal() == .OK, let u = pnl.url { scan.scan(u.path) }
     }
 }
 
