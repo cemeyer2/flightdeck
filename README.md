@@ -203,6 +203,20 @@ and a battery charge history, all from the black box. Battery health uses the sa
 lifetime reads and writes, power-on hours, unsafe shutdowns, media errors) and how many days until the startup
 disk fills at the current rate. Unhealthy drives raise a warning.
 
+**Charging insights** (Performance › Energy): what the charger negotiated, read from AppleSmartBattery via IOKit in
+the same read as the battery readings: rated watts, the USB-PD offers and the one in use ("this charger offers
+5/9/15/20 V; it's using 20 V × 4.7 A = 94 W", from `UsbHvcMenu`, or decoded from the USB-C port controller's PD
+capabilities), the adapter type and the port controller carrying the contract. A **flow diagram** shows adapter → Mac
+and adapter → battery (or battery → Mac) in watts each sample, from Voltage × Amperage and PowerTelemetryData. The
+current charge session's **charge curve** (charge % and charge power, in memory only) comes with time to 80% and
+100%, labelled as macOS's own estimate or the recent rate, an explanation of the constant-voltage slowdown above 80%,
+and **hold detection**: plugged in but not charging (Optimized Battery Charging, a charge limit or heat), backed by
+`pmset -g batt` wording and the charger's not-charging code when present. Weak chargers are flagged from measurements
+only: macOS's slow-charging flag, the battery draining while plugged in, or a charger rated below the most this Mac
+has drawn since launch. **Battery facts** add cycles vs design cycles, design vs full-charge capacity, temperature,
+cell voltages, condition and the manufacture date where decodable, with a link to the health history in Trends.
+Anything a Mac doesn't publish shows as "not reported by this Mac"; desktops get a "no battery" note.
+
 **Thermals** adds fan speeds from the SMC (RPM, min, max, target, history) and a sensor heatmap of every
 temperature sensor, hottest first.
 

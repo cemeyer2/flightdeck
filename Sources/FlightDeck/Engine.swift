@@ -145,6 +145,8 @@ final class Engine: ObservableObject {
     /// 90-day daily rollups, per-app baselines and battery sessions (Trends view). Internally locked: ingested on
     /// `queue`, read by views on demand. In-memory only (never written) for a headless engine.
     nonisolated let dailyLog: DailyLog
+    /// The current charge session's curve and the peak system draw (Performance › Energy › Charging). In memory only.
+    nonisolated let chargeCurve = ChargeCurve()
 
     init(headless: Bool = false) {
         self.headless = headless
@@ -399,6 +401,7 @@ final class Engine: ObservableObject {
             // Respawn loops and baseline findings ("3× its usual memory") join the Analyzer's, so they reach the banner,
             // alerts and the Flight Log the same way.
             let found = analyzer.ingest(s) + dailyLog.ingest(s) + self.launchLog.findings(now: s.time)
+            self.chargeCurve.ingest(s)
             ruleEngine.frontmostPID = front
             let firings = ruleEngine.evaluate(s)
             let fullDays = analyzer.daysUntilFull()
@@ -435,6 +438,7 @@ final class Engine: ObservableObject {
     func feed(_ s: Snapshot, findings: [Finding]) {
         processHistory.record(s.processes)
         launchLog.ingest(s.processes, at: s.time)
+        chargeCurve.ingest(s)
         liveFindings = findings; liveSnapshot = s; current = s
         var light = s; light.processes = Array(s.processes.sorted { $0.cpu > $1.cpu }.prefix(12))
         frames.removeFirst(); frames.append(light)
