@@ -77,6 +77,18 @@ enum UIBench {
                 out(d.rawValue.replacingOccurrences(of: " ", with: "_"), height: 1300, v)
             }
         }
+        // Disk Space › What's using my disk: this Mac's real breakdown (diskutil/tmutil only) before Analyze, then the
+        // invented demo disk with a few rows open. FD_RENDER_HOGS also measures this Mac's categories that macOS doesn't
+        // guard with a privacy prompt (so the render can't trigger one).
+        out("diskusage", height: 1300, DiskUsageOverview(model: StorageModel(preview: false, breakdown: StorageBreakdownReader.read(), results: [])))
+        out("diskusage-demo", height: 2600, DiskUsageOverview(model: StorageModel(preview: true, breakdown: .success(Demo.storageBreakdown()),
+                                                                                   results: Demo.hogResults(), expanded: ["caches", "downloads", "messages", "simDevices"])))
+        if ProcessInfo.processInfo.environment["FD_RENDER_HOGS"] != nil {
+            var real: [HogResult] = []
+            SpaceHogScanner.analyze(SpaceHogCategory.catalog.filter { !$0.privacyProtected }, result: { real.append($0) }, cancelled: { false })
+            out("diskusage-real", height: 2600, DiskUsageOverview(model: StorageModel(preview: false, breakdown: StorageBreakdownReader.read(),
+                                                                                       results: real, expanded: ["caches", "simDevices", "homebrew"])))
+        }
         // Checkup, Peripherals and the listening-ports panel read the real machine; their loaders run asynchronously,
         // so the run loop is spun until each has a result (Checkup waits on the black box and ~17 tools).
         CheckupModel.shared.run(engine: e)

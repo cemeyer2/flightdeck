@@ -330,6 +330,27 @@ daily log's 10 s per-app pass (no extra sampling; a restarted process starts a n
 daily log (`DayRecord.dataUsage`, optional so older logs still load). Only traffic while FlightDeck runs is counted;
 days it didn't run are gaps. Demo mode shows invented tests and usage and never runs networkQuality.
 
+**Disk Space › What's Using My Disk** (next to the folder scanner): the startup disk's APFS container as one stacked
+bar, from `diskutil apfs list -plist` and `diskutil info -plist /` (no root): your data, purgeable space ("available
+for important usage" minus available), the sealed macOS volume, Preboot, Recovery, swap (VM), Update, APFS overhead and
+free, each explained. What Storage settings calls "System Data" is mostly the Data volume's caches, snapshots and app
+files, and this view says so. Local Time Machine snapshots (`tmutil listlocalsnapshots /`) are listed with dates; their
+sizes need root, so they show as unknown. Below that, **known space hogs**: app caches, logs, the Trash, old downloads,
+iPhone/iPad backups, Xcode DerivedData, archives, device support and previews, simulator devices and runtimes (`simctl`
+from the selected Xcode, never the `xcrun` shim, which can pop up an install dialog), Docker/OrbStack/Colima disk images,
+the Homebrew cache (`brew --cache`), npm/Yarn/pnpm/pip/Cargo/Gradle caches, Mail downloads, Messages attachments, the
+Photos library (size only), `Install macOS*.app` installers and Parallels/UTM/VMware VMs. Each says where it is, whether
+it's safe to remove and what happens if you do. Nothing is measured until you press **Analyze** (with progress and
+Cancel), because reading Downloads, Pictures, Mail, Messages, the Trash or other apps' containers makes macOS ask for
+access; refused folders show as "not readable", never 0. Sizes are allocated bytes (`totalFileAllocatedSizeKey`).
+Cleanups are only the safe ones: move a category's own items to the Trash (with a confirmation listing every item and
+the total), Empty Trash via Finder, `simctl delete unavailable`, and `brew cleanup` after showing `brew cleanup -n`.
+FlightDeck never deletes anything itself, never needs root and refuses any path outside the category's folders, outside
+your home and /Applications, behind a symlink or SIP-protected. Afterwards it re-measures and reports before and after.
+Personal data (backups, archives, Messages, Photos, VMs, container images) gets advice, not a button. Demo mode shows an
+invented disk and never runs a cleanup. Code: `Sources/FlightDeckCore/StorageBreakdown*.swift`, `SpaceHog*.swift`,
+`DirectorySizer.swift`, `CleanupPlanner.swift`; views in `Sources/FlightDeck/Views/StorageModel.swift` and friends.
+
 ## Measurement principles
 
 - **No invented zeros.** Every value is `Measured<T>`, either `.value` or `.unavailable(reason)`. Unmeasured

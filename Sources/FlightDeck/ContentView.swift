@@ -61,7 +61,7 @@ enum SidebarSection: String, CaseIterable, Identifiable {
         case .overview: [.summary, .stressMap, .flightLog, .trends, .checkup]
         case .activity: [.performance, .processes, .launches, .console]
         case .power: [.power, .sleep]
-        case .network: [.network, .connections, .upnp, .unifi]
+        case .network: [.network, .internet, .connections, .upnp, .unifi]
         case .storage: [.diskSpace]
         case .system: [.systemInfo, .peripherals, .apps, .startup, .services, .users]
         case .tools: [.rules, .benchmarks]
