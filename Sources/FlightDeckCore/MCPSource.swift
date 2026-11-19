@@ -28,12 +28,16 @@ public protocol MCPDataSource: AnyObject, Sendable {
     func checkup() async -> [CheckResult]
     /// Session thermal state (per-sensor statistics, throttling, fan health), or nil when there is none (standalone).
     func thermal() async -> (status: ThermalStatus, history: SensorHistory)?
+    /// Camera & Mic: the live state (nil if it isn't being watched) and the session history, or nil if unavailable.
+    func cameraMic() async -> (live: CameraMicLive?, store: CameraMicStore)?
 }
 
 extension MCPDataSource {
     /// Sources without a session (the standalone CLI, tests) have no thermal history; `temperatures` then reports the
     /// latest snapshot only.
     public func thermal() async -> (status: ThermalStatus, history: SensorHistory)? { nil }
+    /// Sources without the app's watch (tests) have no camera and microphone data.
+    public func cameraMic() async -> (live: CameraMicLive?, store: CameraMicStore)? { nil }
     /// Checkup with the swap trend taken from the black box's coarse tier, as the Checkup view does.
     public func runCheckup() async -> [CheckResult] {
         let trace = await blackBox(.coarse, from: Date().addingTimeInterval(-86_400), to: Date())
@@ -109,4 +113,13 @@ public final class StandaloneMCPSource: MCPDataSource, @unchecked Sendable {
     }
 
     public func checkup() async -> [CheckResult] { await runCheckup() }
+
+    /// The app's Camera & Mic history, read-only, and which devices are in use right now (one reading of the device
+    /// state; no listeners, and without the app's indicator log stream, so the current app isn't named).
+    public func cameraMic() async -> (live: CameraMicLive?, store: CameraMicStore)? {
+        let dir = dailyDir
+        return await Task.detached(priority: .userInitiated) {
+            (CameraMicWatch.reading(), CameraMicStore(dir: dir, readOnly: true))
+        }.value
+    }
 }
