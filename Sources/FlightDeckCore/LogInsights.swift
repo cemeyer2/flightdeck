@@ -4,9 +4,10 @@ import Foundation
 // (`LogAggregator`), and runs the `log` tool itself (`LogReader`). Parsing and grouping are pure and tested on captured
 // lines; only `LogReader` touches the system. Everything here runs off the main thread.
 
-/// One error or fault from the unified log.
+/// One message from the unified log: an error or fault for the Console page; `process_logs` (ProcessLogs.swift) also
+/// reads default and info messages.
 public struct LogEntry: Sendable, Hashable {
-    public enum Level: String, Sendable, Hashable { case error = "Error", fault = "Fault" }
+    public enum Level: String, Sendable, Hashable { case error = "Error", fault = "Fault", `default` = "Default", info = "Info" }
     public var time: Date
     public var level: Level
     /// Executable name (last path component of processImagePath); "pid N" if the log didn't give a path.
@@ -32,14 +33,17 @@ public enum LogParser {
     /// Messages can be many kilobytes (dumped plists, stack text); only the start is useful for grouping and display.
     public static let maxMessageLength = 1000
 
-    public static func parse(_ line: String) -> LogEntry? { parse(Data(line.utf8)) }
+    /// The Console reads errors and faults only; other levels are skipped unless asked for.
+    public static let errorLevels: Set<LogEntry.Level> = [.error, .fault]
 
-    public static func parse(_ data: Data) -> LogEntry? {
+    public static func parse(_ line: String, levels: Set<LogEntry.Level> = errorLevels) -> LogEntry? { parse(Data(line.utf8), levels: levels) }
+
+    public static func parse(_ data: Data, levels: Set<LogEntry.Level> = errorLevels) -> LogEntry? {
         // Cheap pre-check: every event line starts with "{"; this skips the banner without invoking the JSON parser.
         guard data.first == UInt8(ascii: "{"),
               let o = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
               (o["eventType"] as? String) == "logEvent",
-              let level = (o["messageType"] as? String).flatMap(LogEntry.Level.init(rawValue:)),
+              let level = (o["messageType"] as? String).flatMap(LogEntry.Level.init(rawValue:)), levels.contains(level),
               let ts = o["timestamp"] as? String, let time = parseTimestamp(ts) else { return nil }
         let pid = (o["processID"] as? NSNumber)?.int32Value ?? -1
         let path = o["processImagePath"] as? String ?? ""
@@ -267,7 +271,7 @@ public final class LogReader: @unchecked Sendable {
     /// Runs `log` with `args`, calling `onEntry` for each parsed entry. `onEntry` returns false to stop early.
     /// Blocks the calling thread until `log` exits, is cancelled, or is stopped.
     @discardableResult
-    func run(_ args: [String], onEntry: (LogEntry) -> Bool) -> Outcome {
+    func run(_ args: [String], levels: Set<LogEntry.Level> = LogParser.errorLevels, onEntry: (LogEntry) -> Bool) -> Outcome {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/bin/log"); p.arguments = args
         let out = Pipe(), err = Pipe()
@@ -292,7 +296,7 @@ public final class LogReader: @unchecked Sendable {
             buffer.append(chunk)
             var start = buffer.startIndex
             while let nl = buffer[start...].firstIndex(of: 0x0A) {
-                if let e = LogParser.parse(Data(buffer[start..<nl])), !onEntry(e) { stopped = true; p.terminate(); break }
+                if let e = LogParser.parse(Data(buffer[start..<nl]), levels: levels), !onEntry(e) { stopped = true; p.terminate(); break }
                 start = buffer.index(after: nl)
             }
             buffer.removeSubrange(buffer.startIndex..<start)

@@ -1,7 +1,8 @@
 import Foundation
 // The FlightDeck MCP tools: their schemas (what `tools/list` shows a model) and the argument handling around them.
-// The output of each tool is built in MCPToolOutput.swift. Every tool only reads; the one that does more than read
-// state, `sample_stacks`, runs Apple's `sample` on one of the user's own processes for at most 5 seconds.
+// The output of each tool is built in MCPToolOutput.swift (and the files it names). Every tool reads the Mac without
+// changing it. `sample_stacks` runs Apple's `sample` on one of the user's own processes for at most 5 seconds, and
+// `mark` writes one thing: FlightDeck's own marks file (Marks.swift), so a coding agent can measure its work later.
 //
 // Output conventions, chosen for models reading it: compact JSON, summary first and details after; sizes and rates as
 // short human strings ("1.2 GB", "3.4 MB/s"); percentages as numbers rounded to 0.1. A value FlightDeck could not
@@ -18,6 +19,10 @@ public struct MCPTools: MCPToolProvider {
     var batteryCondition: @Sendable () -> String? = {
         Shell.run("/usr/sbin/system_profiler", ["-json", "SPPowerDataType"], timeout: 20).flatMap { CheckupParse.battery(Data($0.utf8))?.condition }
     }
+    /// Where `mark` stores marks (FlightDeck's own file, shared by the app and `--mcp`); tests use a temporary one.
+    var marks = MarkStore()
+    /// Runs `log show` for `process_logs`; tests replay captured ndjson instead.
+    var logRunner: @Sendable (ProcessLogs.Query) -> ProcessLogs.Result = { ProcessLogs.read($0) }
 
     public init(source: MCPDataSource) { self.source = source }
 
@@ -31,7 +36,10 @@ public struct MCPTools: MCPToolProvider {
     camera_mic (which apps used the camera or microphone, and when), network_destinations (which hosts each app talked to), \
     battery (health forecast and what's wearing the battery), restarts (boots, how each previous session ended, \
     boot and login time) and panics (kernel panic reports with the likely culprit). \
-    All tools are read-only. Values FlightDeck could not measure are marked "unavailable", never reported as 0.
+    To measure your own work (a build, a test run, a benchmark): call mark before and after it, then measure between \
+    the two marks, optionally with process or app for that process tree's cost and compare_to for a baseline run \
+    (see the measure_change prompt). query_metrics returns raw black-box time series; process_logs returns a process's \
+    unified-log messages. All tools are read-only except mark, which only adds to FlightDeck's own marks file. Values FlightDeck could not measure are marked "unavailable", never reported as 0.
     """
 
     struct ArgError: Error { var message: String }
@@ -94,6 +102,11 @@ public struct MCPTools: MCPToolProvider {
             case "network_destinations": out = try await networkDestinations(a)
             case "restarts": out = try await restarts(a)
             case "panics": out = try await panics(a)
+            case "mark": out = try await mark(a)
+            case "marks": out = try await listMarks(a)
+            case "measure": out = try await measure(a)
+            case "query_metrics": out = try await queryMetrics(a)
+            case "process_logs": out = try await processLogs(a)
             default: return .error("Unknown tool \(name)")
             }
             return MCPToolResult(text: out.text)
@@ -202,7 +215,7 @@ public struct MCPTools: MCPToolProvider {
             MCPToolSpec(name: "panics", title: "Kernel panics",
                         description: "Kernel panic reports from /Library/Logs/DiagnosticReports and its Retired folder, newest first: time, plain-English culprit (third-party driver, hung app or service, system hang, sleep/wake, hardware, memory, graphics, kernel), what to do, the panic string, panicked task and the kernel extensions in the backtrace.",
                         inputSchema: Self.schema([("days", Self.int("Days to look back.", 1, 90, 90))])),
-        ]
+        ] + Self.agentSpecs
     }
 }
 

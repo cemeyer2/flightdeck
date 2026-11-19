@@ -40,6 +40,12 @@ enum UIBench {
         out("restarts", height: 2600, RestartsView(model: restartsLive))
         if ProcessInfo.processInfo.environment["FD_RENDER_ONLY"] == "restarts" { exit(0) }   // quick iteration on this page
         out("flightlog", FlightLogView())
+        // The timeline with demo buckets and marks (as a coding agent's `mark` calls would leave them), handed in
+        // because ImageRenderer doesn't run the panel's loading task.
+        if let template = e.current {
+            let now = Date()
+            out("timeline-marks", height: 260, TimelinePanel(preview: Demo.timeline(template: template, now: now), previewMarks: Demo.marks(now: now)))
+        }
         out("cpu", VStack { CPUPerf() })
         out("memory", height: 1900, VStack { MemoryPerf() })
         out("gpu", height: 2200, VStack { GPUPerf() })

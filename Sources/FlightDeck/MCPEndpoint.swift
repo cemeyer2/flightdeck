@@ -173,7 +173,7 @@ struct MCPSection: View {
                 command("Claude Code, as a command (no token needed; also works with the app closed)", stdioCommand)
             }
             Text(Demo.isEnabled ? "Not available in demo mode."
-                 : "Off by default. When on, MCP clients such as Claude Code and Codex can ask FlightDeck about this Mac: status and findings, processes, stack samples of your own apps, the Flight Log, crash reports, black-box history, Checkup and Trends. Read-only: no tool can quit, change or slow anything. Only this Mac can connect, and only with the token. It does no work between requests.")
+                 : "Off by default. When on, MCP clients such as Claude Code and Codex can ask FlightDeck about this Mac: status and findings, processes, stack samples of your own apps, the Flight Log, crash reports, black-box history, Checkup and Trends. Read-only: no tool can quit, change or slow anything (the one that writes, mark, only saves its own timestamps for the timeline). Only this Mac can connect, and only with the token. It does no work between requests.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
         .onChange(of: enabled) { endpoint.apply() }

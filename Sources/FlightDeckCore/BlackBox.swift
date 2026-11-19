@@ -142,8 +142,13 @@ public final class BlackBox: @unchecked Sendable {
         var host = Host.current().localizedName ?? "Mac", model = ""
         var os: String?
         // 1 s slack on the segment's bounds: file names hold millisecond-truncated times.
-        for s in segments() where s.tier == tier && s.end.addingTimeInterval(1) >= from && s.start.addingTimeInterval(-1) <= to {
-            guard let t = try? Trace.read(from: s.url) else { continue }
+        let wanted = segments().filter { s in s.tier == tier && s.end.addingTimeInterval(1) >= from && s.start.addingTimeInterval(-1) <= to }
+        // Decoding is nearly all of the cost of a long read (24 h of coarse segments is ~150 files of JSON), and the
+        // segments are independent, so they are decoded in parallel; results are merged in file order afterwards.
+        let decoded = SegmentSlots(count: wanted.count)
+        DispatchQueue.concurrentPerform(iterations: wanted.count) { i in decoded.set(i, try? Trace.read(from: wanted[i].url)) }
+        for t in decoded.all() {
+            guard let t else { continue }
             frames += t.frames.filter { $0.time >= from && $0.time <= to }
             interval = max(interval, t.interval); host = t.host; model = t.model; os = t.osVersion ?? os
         }
@@ -156,4 +161,13 @@ public final class BlackBox: @unchecked Sendable {
         if let os { result.osVersion = os }   // the version that recorded the segments (macOS may have updated since)
         return result
     }
+}
+
+/// Result slots filled concurrently by `BlackBox.trace`'s parallel segment decode.
+private final class SegmentSlots: @unchecked Sendable {
+    private let lock = NSLock()
+    private var slots: [Trace?]
+    init(count: Int) { slots = Array(repeating: nil, count: count) }
+    func set(_ i: Int, _ t: Trace?) { lock.lock(); slots[i] = t; lock.unlock() }
+    func all() -> [Trace?] { lock.lock(); defer { lock.unlock() }; return slots }
 }

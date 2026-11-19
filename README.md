@@ -8,16 +8,59 @@ by showing which process and which subsystem is responsible.
 - [Screenshots](#screenshots)
 - [Build & run](#build--run)
 - [Pages](#pages)
-  - [Overview](#overview): [Drill down from Summary](#drill-down-from-summary) · [Customizable cockpit](#customizable-cockpit) · [Annunciator panel](#annunciator-panel) · [Ambient mode](#ambient-mode) · [Stress Map](#stress-map) · [Diagnosis and Flight Log](#diagnosis-and-flight-log) · [Trends](#trends) · [Checkup](#checkup) · [Restarts & Crashes](#restarts--crashes) · [Boot and login time](#boot-and-login-time)
-  - [Activity](#activity): [Performance](#performance) · [Processes](#processes) · [Process inspector](#process-inspector) · [Connection quality](#connection-quality) · [Energy and storage health](#energy-and-storage-health) · [Charging insights](#charging-insights) · [Battery health forecast](#battery-health-forecast) · [Why is the fan loud?](#why-is-the-fan-loud) · [Thermals](#thermals) · [GPU](#gpu) · [Launches](#launches) · [Console](#console) · [Camera & Mic](#camera--mic)
-  - [Power](#power): [Power & Freq](#power--freq) · [Sleep & Wake](#sleep--wake)
-  - [Network](#network): [Network map](#network-map) · [Wi-Fi](#wi-fi) · [Internet](#internet) · [Destinations](#destinations) · [Connections](#connections) · [UPnP](#upnp) · [UniFi](#unifi)
-  - [Storage](#storage): [Disk Space › Folder Scanner](#disk-space--folder-scanner) · [Disk Space › What's Using My Disk](#disk-space--whats-using-my-disk)
-  - [System](#system): [System Info](#system-info) · [Installed Apps](#installed-apps) · [Startup Apps](#startup-apps) · [Peripherals](#peripherals) · [Services](#services) · [Users](#users)
-  - [Tools](#tools): [Rules](#rules) · [Developer](#developer) · [Benchmarks](#benchmarks)
-- [Recording and replay](#recording-and-replay): [Flight Recorder](#flight-recorder) · [Black box](#black-box) · [Export](#export) · [Compare recordings](#compare-recordings)
-- [Everywhere in the app](#everywhere-in-the-app): [Settings and appearance](#settings-and-appearance) · [Master caution](#master-caution) · [Live Dock icon](#live-dock-icon) · [Command palette](#command-palette) · [Capture Diagnostics…](#capture-diagnostics)
-- [Integrations](#integrations): [AI assistants (MCP)](#ai-assistants-mcp) · [Guided prompts](#guided-prompts) · [Prometheus endpoint](#prometheus-endpoint) · [Command line](#command-line)
+  - [Overview](#overview)
+    - [Drill down from Summary](#drill-down-from-summary)
+    - [Customizable cockpit](#customizable-cockpit)
+    - [Annunciator panel](#annunciator-panel)
+    - [Ambient mode](#ambient-mode)
+    - [Stress Map](#stress-map)
+    - [Diagnosis and Flight Log](#diagnosis-and-flight-log)
+    - [Trends](#trends)
+    - [Checkup](#checkup)
+    - [Restarts & Crashes](#restarts--crashes)
+    - [Boot and login time](#boot-and-login-time)
+  - [Activity](#activity)
+    - [Performance](#performance)
+    - [Processes](#processes)
+    - [Process inspector](#process-inspector)
+    - [Connection quality](#connection-quality)
+    - [Energy and storage health](#energy-and-storage-health)
+    - [Charging insights](#charging-insights)
+    - [Battery health forecast](#battery-health-forecast)
+    - [Why is the fan loud?](#why-is-the-fan-loud)
+    - [Thermals](#thermals)
+    - [GPU](#gpu)
+    - [Launches](#launches)
+    - [Console](#console)
+    - [Camera & Mic](#camera--mic)
+  - [Power](#power)
+    - [Power & Freq](#power--freq)
+    - [Sleep & Wake](#sleep--wake)
+  - [Network](#network)
+    - [Network map](#network-map)
+    - [Wi-Fi](#wi-fi)
+    - [Internet](#internet)
+    - [Destinations](#destinations)
+    - [Connections](#connections)
+    - [UPnP](#upnp)
+    - [UniFi](#unifi)
+  - [Storage](#storage)
+    - [Disk Space › Folder Scanner](#disk-space--folder-scanner)
+    - [Disk Space › What's Using My Disk](#disk-space--whats-using-my-disk)
+  - [System](#system)
+    - [System Info](#system-info)
+    - [Installed Apps](#installed-apps)
+    - [Startup Apps](#startup-apps)
+    - [Peripherals](#peripherals)
+    - [Services](#services)
+    - [Users](#users)
+  - [Tools](#tools)
+    - [Rules](#rules)
+    - [Developer](#developer)
+    - [Benchmarks](#benchmarks)
+- [Recording and replay](#recording-and-replay)
+- [Everywhere in the app](#everywhere-in-the-app)
+- [Integrations](#integrations)
 - [Measurement principles](#measurement-principles)
 - [Known limits](#known-limits)
 - [Layout](#layout)
@@ -723,7 +766,7 @@ errors. It may contain personal paths and names, so review it before sharing.
 
 *Settings › Integrations › AI assistants, off by default.* FlightDeck serves the
 [Model Context Protocol](https://modelcontextprotocol.io), so Claude Code, Codex and other MCP clients can answer
-"why is my Mac slow?" from FlightDeck's real data. Tools, all read-only:
+"why is my Mac slow?" from FlightDeck's real data. Tools, all read-only except `mark`, which only adds to FlightDeck's own marks file:
 
 | Tool | What it returns |
 |---|---|
@@ -743,13 +786,51 @@ errors. It may contain personal paths and names, so review it before sharing.
 | `network_destinations` | per app (optionally one app, or only destinations matching a host or IP), the remote hosts it talked to over 1–30 days: bytes in and out, connections, first and last seen, services, local or internet, name source, and new / unusual-volume flags |
 | `restarts` | every boot with how the session before it ended (clean / unexpected / kernel panic / unknown), the explanation, saved shutdown cause code with its certainty, evidence and an inferred flag; counts by cause; boot and login timing; recent app hangs; what the records can't tell. Never queries the unified log |
 | `panics` | kernel panic reports: time, culprit, what to do, panic string, panicked task, kexts in the backtrace |
+| `mark` | records a named timestamp (`label`) and returns its id and time, and whether the black box is recording. Writes only `~/Library/Application Support/Flightdeck/marks.json` (kept 48 h); marks show as flags on the Flight Log timeline |
+| `marks` | recent marks, newest first |
+| `measure` | what the Mac did between two marks, times, or a mark and now (within 24 h): CPU avg/p95/peak and CPU-seconds, memory and pressure, swap growth, disk and network totals, energy (Wh), hottest temperature and throttling, top processes and apps by CPU-seconds, peak memory, energy and disk. `process` or `app` gives that process tree's cost, children included; `compare_to` adds a baseline window, deltas and a verdict |
+| `query_metrics` | raw black-box series on a regular grid, columnar (`t` offsets plus one array per metric): `cpu`, `cpu_user`, `cpu_system`, `memory_used`, `memory_pressure`, `swap`, `disk_read`, `disk_write`, `net_in`, `net_out`, `watts`, `hottest_c`, `gpu`, `battery_pct`, `process:<pid or name>.cpu\|rss\|energy`. Automatic step (≤ 300 points), average or max per slot as stated, gaps as `null` |
+| `process_logs` | unified-log messages for an `app`, `pid` or `subsystem`, grouped (messages differing only in numbers or ids collapse) with counts, newest first; `level` error (default), fault, default or info; up to 24 h of errors or 60 min of default/info; 20 s and 20,000-message bounds; notes `<private>` redaction |
 
 ### Guided prompts
 
 *MCP prompts; Claude Code shows them as `/mcp__flightdeck__<name>`.* These run a whole investigation with
 those tools and report in plain English: `diagnose_slow_mac`, `investigate_app` (needs `app`), `battery_drain`,
-`thermal_check`, `crash_triage`, `health_checkup` and `since_update`. They only call the read-only tools and tell the
-assistant to suggest, not perform, any fix.
+`thermal_check`, `crash_triage`, `health_checkup`, `since_update` and `measure_change` (needs `command`; optional
+`process`). They only call FlightDeck's tools and tell the assistant to suggest, not perform, any fix; `measure_change`
+also runs the workload you name, twice (baseline and with your change), between marks.
+
+### Measuring your own work
+
+Coding agents can ask "did my change make the tests slower or hungrier?" and get numbers instead of impressions. The
+agent calls `mark` before and after a run, then `measure` between the marks; with `process` it gets that process tree's
+cost (a build tool and every compiler or test worker it spawned), and with `compare_to` a baseline run's figures, the
+change in % and a verdict. The FlightDeck app must be running, since its black box is what records; `FlightDeck --mcp`
+standalone still stores marks, and says plainly when there is nothing recorded to measure. Marks appear on the Flight
+Log timeline as labelled flags, so you can see what your agent measured.
+
+```text
+mark {"label": "baseline-start"}   … swift test …   mark {"label": "baseline-end"}
+mark {"label": "change-start"}     … swift test …   mark {"label": "change-end"}
+measure {"from": "change-start", "to": "change-end", "process": "swift-build",
+         "compare_to": {"from": "baseline-start", "to": "baseline-end"}}
+```
+
+Part of the answer (illustrative numbers):
+
+```json
+"summary": "Over 2 min, the swift-build process tree (214 recorded processes, 211 started in the window) used 812.4 CPU-seconds (6.8 cores on average), peaked at 5.1 GB of memory, drew 1.10 Wh and did 1.4 GB of disk I/O.",
+"comparison": {
+  "verdict": "Compared with the baseline, the swift-build process tree was slower and hungrier: it took 18% longer, CPU time 23% higher, peak memory 9% higher.",
+  "rows": [["duration_s", 141.2, 119.6, 18.1, "18% higher"], ["cpu_seconds", 812.4, 660.3, 23.0, "23% higher"], …]
+}
+```
+
+Process costs come from each process's cumulative CPU time, energy and disk counters, so a child seen once in the black
+box is counted in full up to that sighting. Processes that live less than one sample interval (1 s in the last hour,
+10 s beyond) or never rank among the 25 busiest per frame aren't seen, so tree totals are lower bounds; the answer says
+so. Differences under 5 % (or tiny in absolute terms) are called "about the same". With a filter, a `whole_mac` block
+compares the rest of the Mac too, so a busy browser or thermal throttling during one run is visible.
 
 No tool can quit, kill, renice or change anything. Unmeasured values are marked "unavailable", never 0, and every
 answer is capped at 48 KB. Two ways to connect:

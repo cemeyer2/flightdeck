@@ -443,6 +443,8 @@ final class Engine: ObservableObject {
     /// Used by UIBench (no timers): bypasses the queue, analysis and visibility staging entirely.
     /// Demo mode only: timeline buckets and a sleep history to show instead of reading the black box / power log.
     @Published var demoTimeline: (buckets: [TimelineBucket], range: (Date, Date))?
+    /// Demo mode only: marks to show on the timeline instead of reading the marks file.
+    @Published var demoMarks: [Mark]?
     @Published var demoSleep: SleepReport?
 
     /// Headless only: show the given state (for demo screenshots). Nothing is persisted.

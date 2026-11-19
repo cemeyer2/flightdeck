@@ -68,7 +68,7 @@ struct FlightLogView: View {
         // review), where a ScrollView would come out empty.
         MaybeScroll {
             VStack(alignment: .leading, spacing: 12) {
-                TimelinePanel(preview: e.demoTimeline)
+                TimelinePanel(preview: e.demoTimeline, previewMarks: e.demoMarks)
                 Panel(title: "Right now", trailing: e.mode == .replay ? "at the replayed moment" : nil) {
                     if e.findings.isEmpty {
                         Label("All systems normal.", systemImage: "checkmark.seal").foregroundStyle(p.text)
@@ -148,12 +148,16 @@ struct TimelinePanel: View {
     @State private var buckets: [TimelineBucket] = []
     /// The window the buckets cover; updated together with `buckets` after each load.
     @State private var range: (Date, Date) = (Date(), Date())
+    /// Marks set by coding agents (the MCP `mark` tool, Marks.swift) inside the range, re-read from FlightDeck's marks
+    /// file with each load. They may come from `FlightDeck --mcp` running in another process, hence the file.
+    @State private var marks: [Mark] = []
     /// Precomputed buckets (demo screenshots): shown as-is instead of loading from the black box.
     var preview: (buckets: [TimelineBucket], range: (Date, Date))? = nil
 
-    init(preview: (buckets: [TimelineBucket], range: (Date, Date))? = nil) {
+    init(preview: (buckets: [TimelineBucket], range: (Date, Date))? = nil, previewMarks: [Mark]? = nil) {
         self.preview = preview
         if let preview { _buckets = State(initialValue: preview.buckets); _range = State(initialValue: preview.range) }
+        if let previewMarks { _marks = State(initialValue: previewMarks) }
     }
     /// Index of the bucket under the pointer, shared by all strips so they highlight the same column.
     @State private var hover: Int?
@@ -171,6 +175,7 @@ struct TimelinePanel: View {
                     strip("MEM PRESSURE", top: 100) { $0.pressure }
                     strip("HOTTEST " + TemperatureUnit.current.symbol, top: 110) { $0.hottest }
                     incidentsStrip
+                    if !marks.isEmpty { marksStrip }
                 }
                 HStack {
                     Text(range.0.formatted(date: .omitted, time: .shortened)); Spacer()
@@ -199,11 +204,12 @@ struct TimelinePanel: View {
     func load() async {
         let box = e.blackBox, h = hours, n = n
         let to = Date(), from = to.addingTimeInterval(-Double(h) * 3600)
-        let b = await Task.detached(priority: .utility) { () -> [TimelineBucket] in
+        let (b, m) = await Task.detached(priority: .utility) { () -> ([TimelineBucket], [Mark]) in
             let t = box.trace(h <= 1 ? .fine : .coarse, from: from, to: to)
-            return Timeline.build(t?.frames ?? [], from: from, to: to, buckets: n)
+            let marks = MarkStore().all(now: to).filter { $0.time >= from && $0.time <= to }
+            return (Timeline.build(t?.frames ?? [], from: from, to: to, buckets: n), marks)
         }.value
-        buckets = b; range = (from, to)
+        buckets = b; range = (from, to); marks = m
     }
 
     /// Maps a date into the strip's x coordinate for width `w` (used by the incidents strip).
@@ -267,6 +273,53 @@ struct TimelinePanel: View {
                     }
                 }.frame(maxHeight: .infinity)
             }.frame(height: 12)
+        }
+    }
+}
+
+extension TimelinePanel {
+    /// Where each mark's label goes: one of two rows, at an x offset, or nil when neither row has room (the hover
+    /// tooltip still names every flag). Greedy, left to right: a label sits right of its flag, or left of it when it
+    /// would run past the strip's end, in the first row where it doesn't overlap the previous label. Two rows let a
+    /// start/end pair set minutes apart both keep their labels on a 24 h axis.
+    static func markLabelLayout(xs: [CGFloat], widths: [CGFloat], width: CGFloat) -> [(row: Int, x: CGFloat)?] {
+        var rowEnd: [CGFloat] = [-.infinity, -.infinity]
+        return zip(xs, widths).map { x, w in
+            let start = x + 8 + w <= width ? x + 8 : x - w - 2
+            guard start >= 0, let row = rowEnd.indices.first(where: { start >= rowEnd[$0] + 4 }) else { return nil }
+            rowEnd[row] = start + w
+            return (row, start)
+        }
+    }
+
+    /// Marks as small flags on the same time axis, with their labels (see `markLabelLayout`). Clicking a flag replays
+    /// two minutes either side of it. A label may cross a neighbouring flag's pole; its backing keeps it readable.
+    var marksStrip: some View {
+        HStack(spacing: 6) {
+            Text("MARKS").font(.system(size: 8, weight: .bold, design: .monospaced)).foregroundStyle(p.dim).frame(width: 74, alignment: .leading)
+            GeometryReader { g in
+                let shown = Array(marks.suffix(60))
+                let xs = shown.map { min(max(x($0.time, g.size.width), 0), g.size.width - 1) }
+                // 8 pt monospaced digits and letters are about 4.9 pt wide; labels are capped at 140 pt.
+                let widths = shown.map { min(CGFloat($0.label.count) * 4.9 + 2, 140) }
+                let layout = Self.markLabelLayout(xs: xs, widths: widths, width: g.size.width)
+                ZStack(alignment: .topLeading) {
+                    ForEach(Array(shown.enumerated()), id: \.element.id) { i, m in
+                        VStack(alignment: .leading, spacing: 0) {
+                            Rectangle().fill(p.accent).frame(width: 6, height: 4)
+                            Rectangle().fill(p.accent).frame(width: 1, height: 18)
+                        }
+                        .offset(x: xs[i])
+                        .help("\(m.time.formatted(date: .omitted, time: .standard)) · \(m.label) (\(m.id))")
+                        .onTapGesture { e.replayBlackBox(from: m.time.addingTimeInterval(-120), to: m.time.addingTimeInterval(120)) }
+                        if let l = layout[i] {
+                            Text(m.label).font(.system(size: 8, design: .monospaced)).foregroundStyle(p.text)
+                                .lineLimit(1).frame(width: widths[i], alignment: .leading).background(p.panel.opacity(0.85))
+                                .offset(x: l.x, y: CGFloat(l.row) * 11 - 2)
+                        }
+                    }
+                }
+            }.frame(height: 22)
         }
     }
 }

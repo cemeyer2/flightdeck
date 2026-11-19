@@ -9,7 +9,7 @@ import Foundation
 //   • modern (2026-07-28 and later): no handshake; every request carries its version and client capabilities in
 //     `params._meta["io.modelcontextprotocol/…"]`, and results carry `resultType`.
 // This server is "dual-era": it answers `initialize` for legacy clients and serves modern requests statelessly. It
-// keeps no per-session state at all (every tool is read-only and argument-driven), so a legacy client that skips
+// keeps no per-session state at all (every tool is argument-driven; the one that writes, `mark`, keeps its marks in a file), so a legacy client that skips
 // `initialize`, or a stdio proxy that switches between the app and standalone mode mid-session, still works.
 
 /// One tool as listed by `tools/list`.
@@ -19,8 +19,11 @@ public struct MCPToolSpec: Sendable {
     public var description: String
     /// JSON Schema (2020-12) of the `arguments` object.
     public var inputSchema: JSON
-    public init(name: String, title: String, description: String, inputSchema: JSON) {
-        self.name = name; self.title = title; self.description = description; self.inputSchema = inputSchema
+    /// False only for `mark`, which writes FlightDeck's own marks file (never anything else on the Mac). Clients use
+    /// the annotations to decide whether to ask before calling.
+    public var readOnly: Bool
+    public init(name: String, title: String, description: String, inputSchema: JSON, readOnly: Bool = true) {
+        self.name = name; self.title = title; self.description = description; self.inputSchema = inputSchema; self.readOnly = readOnly
     }
 }
 
@@ -117,8 +120,10 @@ public final class MCPServer: Sendable {
         case "tools/list":
             let list: [JSON] = tools.specs.map { t in
                 ["name": .str(t.name), "title": .str(t.title), "description": .str(t.description), "inputSchema": t.inputSchema,
-                 // Every FlightDeck tool only reads; clients use these hints to skip confirmation prompts.
-                 "annotations": ["title": .str(t.title), "readOnlyHint": true, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false]]
+                 // Every FlightDeck tool but `mark` only reads; clients use these hints to skip confirmation prompts. `mark`
+                 // adds to FlightDeck's own marks file: not read-only, but not destructive, and each call adds a new mark.
+                 "annotations": ["title": .str(t.title), "readOnlyHint": .bool(t.readOnly), "destructiveHint": false,
+                                 "idempotentHint": .bool(t.readOnly), "openWorldHint": false]]
             }
             return ok(id, ["tools": .array(list)], modern: modern)
         case "tools/call":
