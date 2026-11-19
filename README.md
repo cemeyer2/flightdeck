@@ -8,7 +8,7 @@ by showing which process and which subsystem is responsible.
 - [Screenshots](#screenshots)
 - [Build & run](#build--run)
 - [Pages](#pages)
-  - [Overview](#overview): [Drill down from Summary](#drill-down-from-summary) · [Customizable cockpit](#customizable-cockpit) · [Annunciator panel](#annunciator-panel) · [Ambient mode](#ambient-mode) · [Stress Map](#stress-map) · [Diagnosis and Flight Log](#diagnosis-and-flight-log) · [Trends](#trends) · [Checkup](#checkup)
+  - [Overview](#overview): [Drill down from Summary](#drill-down-from-summary) · [Customizable cockpit](#customizable-cockpit) · [Annunciator panel](#annunciator-panel) · [Ambient mode](#ambient-mode) · [Stress Map](#stress-map) · [Diagnosis and Flight Log](#diagnosis-and-flight-log) · [Trends](#trends) · [Checkup](#checkup) · [Restarts & Crashes](#restarts--crashes) · [Boot and login time](#boot-and-login-time)
   - [Activity](#activity): [Performance](#performance) · [Processes](#processes) · [Process inspector](#process-inspector) · [Connection quality](#connection-quality) · [Energy and storage health](#energy-and-storage-health) · [Charging insights](#charging-insights) · [Why is the fan loud?](#why-is-the-fan-loud) · [Thermals](#thermals) · [GPU](#gpu) · [Launches](#launches) · [Console](#console) · [Camera & Mic](#camera--mic)
   - [Power](#power): [Power & Freq](#power--freq) · [Sleep & Wake](#sleep--wake)
   - [Network](#network): [Network map](#network-map) · [Wi-Fi](#wi-fi) · [Internet](#internet) · [Connections](#connections) · [UPnP](#upnp) · [UniFi](#unifi)
@@ -65,7 +65,7 @@ build is ad-hoc signed and the release notes explain how to open it past Gatekee
 The sidebar groups the pages as below (sections fold away; ⌘1–⌘9 jump to the first nine). Every page also has a
 demo-data version for screenshots (see Demo mode at the end).
 
-- **Overview:** Summary (the cockpit) · Stress Map · Flight Log · Trends · Checkup
+- **Overview:** Summary (the cockpit) · Stress Map · Flight Log · Trends · Checkup · Restarts & Crashes
 - **Activity:** Performance (CPU, Memory, Disk, Network, Energy, Thermals, GPU) · Processes · Launches · Console · Camera & Mic
 - **Power:** Power & Freq · Sleep & Wake
 - **Network:** Network · Wi-Fi · Internet · Connections · UPnP · UniFi
@@ -148,6 +148,45 @@ Checkup is a one-page health and security checklist: SIP, FileVault, Gatekeeper,
 automatic and pending updates (the network check runs only when you press Check Now), Time Machine, free space, drive
 and battery health, crashes and hangs this week, uptime, swap trend, login and background items, third-party kernel and
 system extensions. Each row is OK, needs attention or unknown (with the reason), and links to the setting that fixes it.
+
+#### Restarts & Crashes
+
+Why the Mac restarted, froze or shut down, in plain English with what to do. Every boot is listed (and drawn on a
+timeline) with how the session before it ended: **clean**, **unexpected**, **kernel panic** or **unknown**, then
+grouped by cause. Each verdict names its evidence, strongest first, all readable without root:
+
+- a **kernel panic report** for that session (`/Library/Logs/DiagnosticReports`, and its `Retired` folder): the old
+  `.panic` text and the newer `.ips` JSON (bug type 210). FlightDeck pulls out the panic message, the panicked task
+  and the kernel extensions in the backtrace, and names the likely culprit: "Kernel panic in com.example.driver: a
+  third-party driver crashed the system; update or remove it", "WindowServer stopped responding, so the watchdog
+  restarted the Mac", a whole-system hang ("no checkins from watchdogd"), sleep/wake, hardware, memory or graphics;
+- the kernel's **shutdown cause code** ("Previous shutdown cause: −3"), read from the unified log with a query a few
+  minutes wide around each boot (about a second each). The codes are explained (5 normal, 3 forced, 0 power lost,
+  −3/−71/−74 overheating, −60 disk, −61/−62 watchdog, −128 power button…). Apple documents none of them, so each says
+  whether its meaning is widely reported or only reported, and any other code is shown as "undocumented", never
+  guessed;
+- an **orderly-shutdown marker**: logd writes "All buffers flushed" to `/var/db/diagnostics/shutdown.log` when macOS
+  shuts down properly, and wtmp gets a shutdown record; the power log adds shutdown, restart and wake-from-hibernation
+  entries;
+- otherwise, where the shutdown log reaches back over that session, a missing marker means the Mac stopped without
+  shutting down (power loss, holding the power button, a freeze). That verdict is labelled *inferred*.
+
+A Freezes panel lists app hangs from macOS's hang reports. When an unexpected shutdown or a panic happened since
+FlightDeck last checked, it raises a finding once, about 30 s after launch, and never repeats it.
+
+The unified log keeps only days (rotated by size) and the power log about a week, so FlightDeck saves each cause and
+verdict it learns in `~/Library/Application Support/Flightdeck/boots.json` (90 days). The page says how far back each
+source reaches. Log queries run only when the page opens, on Refresh, and once at launch for the current boot.
+
+#### Boot and login time
+
+The current boot split into phases, measured from launch times the kernel keeps: kernel start (`kern.boottime`) to
+loginwindow, time at the login window (including typing the password), login (wtmp's console record) to the desktop
+(Dock, Finder and the menu bar launched), and the login-items phase (until the last third-party process started within
+3 minutes of login). These are to the second and say when each step *started*, not when it was ready. It lists the
+login and background items that started during login, and the busiest processes in the first 5 minutes from the
+black box when FlightDeck was itself running then (otherwise their CPU time since start, but only within an hour of
+login). Each boot's timing is saved for 90 days for the trend chart; boot-to-login comes from wtmp for every boot.
 
 ### Activity
 
@@ -625,8 +664,9 @@ errors. It may contain personal paths and names, so review it before sharing.
 | `trends` | daily rollups (or one app's days) and before/after comparisons of updates |
 | `temperatures` | every sensor by group with now/min/avg/max since launch, the hottest per group, fans with target/min/max and problems, and throttling (pmset limits, thermal state, GPU heat cap, time throttled) |
 | `wifi` | the Wi-Fi link with health ratings and low-rate reasons, and a summary of the last scan run in the app (networks per band, busiest channels, strongest networks, a channel recommendation). Never scans; SSIDs and BSSIDs only with Location permission |
-
 | `camera_mic` | whether a camera or microphone is in use now and by which app, recent sessions (device, app, times, duration) with how each app was identified (confirmed / likely / unknown), first use, unusual-hour and locked/idle flags, and per-app totals |
+| `restarts` | every boot with how the session before it ended (clean / unexpected / kernel panic / unknown), the explanation, saved shutdown cause code with its certainty, evidence and an inferred flag; counts by cause; boot and login timing; recent app hangs; what the records can't tell. Never queries the unified log |
+| `panics` | kernel panic reports: time, culprit, what to do, panic string, panicked task, kexts in the backtrace |
 
 ### Guided prompts
 
@@ -758,4 +798,6 @@ processes, run cleanups, start or stop services, or contact the network. The pag
 Checkup and Peripherals, which show a placeholder) are synthetic. System Info, Connections, Installed Apps, Startup
 Apps, Services, Users, the GPU tab and the process inspector still read this Mac, so don't screenshot those in demo mode. On Thermals every sensor (names and values), fan and pmset limit is invented, catalogued with the generic
 Apple-silicon table so nothing depends on this Mac's chip. Camera & Mic shows invented sessions (Zoom, FaceTime, a
-first use, an unknown app at 3 a.m. while locked) with no device listeners and nothing written.
+first use, an unknown app at 3 a.m. while locked) with no device listeners and nothing written. Restarts & Crashes shows
+two invented months of boots with a thermal shutdown, a WindowServer watchdog panic and a slow login caused by an
+invented sync app; it reads no records and writes no history.
