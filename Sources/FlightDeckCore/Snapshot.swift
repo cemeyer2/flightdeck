@@ -61,9 +61,19 @@ public final class Sampler: @unchecked Sendable {
         netLock.unlock()
         netQueue.async { [self] in
             let r = processNetwork.sample()
-            netLock.lock(); latestNet = r; latestNetTime = Date(); netRunning = false; netLock.unlock()
+            netLock.lock(); latestNet = r; latestNetTime = Date(); netRunning = false; let procs = destinationProcs; netLock.unlock()
+            // Destinations reuse this run's per-flow deltas: no second nettop, O(active flows) of extra work.
+            if let destinations, r != nil {
+                destinations.ingest(processNetwork.lastFlows, procs: procs, now: Date(), lookups: destinationLookups)
+            }
         }
     }
+    /// Per-app destinations (DestinationTracker). Set once before the first sample; nil = not collected.
+    public var destinations: DestinationTracker?
+    /// Whether the tracker may look names up by reverse DNS (Settings). Read on the nettop queue.
+    public var destinationLookups = true
+    /// The latest process list, for the tracker's PID → app mapping. Guarded by netLock.
+    private var destinationProcs: [ProcessSample] = []
 
     /// The latest per-process network result, or nil if nettop is unavailable or the result is stale (> 15 s old).
     private func currentNetwork() -> [Int32: ProcessNetwork]? {
@@ -97,7 +107,7 @@ public final class Sampler: @unchecked Sendable {
         // time), the old process's running totals must not carry over to it.
         for p in procs where pidStarts[p.pid].map({ $0 != p.identity.startTime }) == true {
             let pid = p.pid
-            netQueue.async { [processNetwork] in processNetwork.forget(pid: pid) }
+            netQueue.async { [processNetwork, destinations] in processNetwork.forget(pid: pid); destinations?.forget(pid: pid) }
             gpuSampler.forget(pid: pid)
         }
         pidStarts = Dictionary(procs.map { ($0.pid, $0.identity.startTime) }, uniquingKeysWith: { a, _ in a })
@@ -123,6 +133,8 @@ public final class Sampler: @unchecked Sendable {
         // Per-process GPU % (already folded per PID by GPUSampler; summing duplicates just keeps the dictionary build safe).
         let gpuByPID = Dictionary(gd.clients.map { ($0.pid, $0.percent) }, uniquingKeysWith: +)
         for i in procs.indices { procs[i].gpu = gpuByPID[procs[i].pid] }
+        // After the last mutation of `procs`, so sharing its buffer never forces a copy (the snapshot shares it too).
+        if destinations != nil { netLock.lock(); destinationProcs = procs; netLock.unlock() }
         // Empty optional collections are stored as nil, which keeps recorded frames small and means "none".
         let lat = probe.results
         return Snapshot(time: Date(), cpu: cpu.sample(), memory: memory.sample(), disk: disk.sample(),

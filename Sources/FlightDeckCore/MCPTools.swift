@@ -24,7 +24,7 @@ public struct MCPTools: MCPToolProvider {
     down with list_processes, get_process and sample_stacks (why a process of the user's is busy or hung), history (the \
     black box: statistics over the last minutes or hours), recent_incidents (the Flight Log), diagnostic_reports (crashes \
     and hangs), checkup (health and security checklist), temperatures (every sensor, fans, throttling), wifi (the Wi-Fi link's health and the last nearby-network scan), trends (daily history, before/after app and macOS updates) and \
-    camera_mic (which apps used the camera or microphone, and when). \
+    camera_mic (which apps used the camera or microphone, and when) and network_destinations (which hosts each app talked to). \
     All tools are read-only. Values FlightDeck could not measure are marked "unavailable", never reported as 0.
     """
 
@@ -84,6 +84,7 @@ public struct MCPTools: MCPToolProvider {
             case "temperatures": out = try await temperatures()
             case "wifi": out = try await wifi()
             case "camera_mic": out = try await cameraMic(a)
+            case "network_destinations": out = try await networkDestinations(a)
             default: return .error("Unknown tool \(name)")
             }
             return MCPToolResult(text: out.text)
@@ -174,6 +175,14 @@ public struct MCPTools: MCPToolProvider {
                         inputSchema: Self.schema([
                             ("days", Self.int("Days of history to include, ending now.", 1, 90, 7)),
                             ("limit", Self.int("Most sessions to list.", 1, 500, 50)),
+                        ])),
+            MCPToolSpec(name: "network_destinations", title: "Network destinations per app",
+                        description: "Who each app talks to: per app, the remote hosts it exchanged traffic with over the last N days (busiest first), grouped by registrable domain of the reverse-DNS name (or by IP when there is none), with bytes in and out, connection count, first and last seen, ports/services, local-network vs internet, and flags for a destination new to the app in the last 24 h or unusual volume today. Name sources are labelled; traffic between nettop samples is missed. Recorded only while the FlightDeck app runs, on this Mac.",
+                        inputSchema: Self.schema([
+                            ("app", ["type": "string", "description": "Only apps whose name (or bundle path) contains this, case-insensitive."]),
+                            ("destination", ["type": "string", "description": "Only destinations whose domain, host name or IP contains this (which apps talked to X)."]),
+                            ("days", Self.int("Days to include, ending today.", 1, 30, 7)),
+                            ("limit", Self.int("Most apps, and most destinations per app, to list.", 1, 200, 20)),
                         ])),
         ]
     }
