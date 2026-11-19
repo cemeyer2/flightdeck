@@ -31,6 +31,21 @@ public final class ProcessNetworkSampler {
     private var lastTime: Date?
     /// Set when nettop couldn't be run or produced unexpected output; nil after a good snapshot.
     public private(set) var lastError: String?
+    /// One flow's movement in the last interval, for Destinations (DestinationTracker). Only flows that moved bytes or
+    /// are new are listed; idle ones are left out so consumers do O(active flows) work.
+    public struct FlowDelta: Sendable {
+        public var pid: Int32
+        /// nettop's flow text, "tcp4 local<->remote".
+        public var flow: Substring
+        public var bytesIn: UInt64, bytesOut: UInt64
+        /// Not in the previous snapshot (opened this interval), or present in the first snapshot after a warm-up.
+        public var opened: Bool
+    }
+    /// The flows of the latest `sample()` that returned rates; [] after a warm-up or failure. Same queue as `sample()`.
+    public private(set) var lastFlows: [FlowDelta] = []
+    /// The first delta run after a warm-up reports every flow as opened: the warm-up snapshot only set baselines, and
+    /// the connections it saw were never reported to anyone.
+    private var flowsPrimed = false
     public init() {}
 
     /// Parses `nettop -L 1 -x -n -J bytes_in,bytes_out` output into per-connection counters.
@@ -59,29 +74,41 @@ public final class ProcessNetworkSampler {
     /// nettop always prints the ",bytes_in" header first; anything else (missing binary, timeout, sandbox denial) is a
     /// failure. Dropping `prev` then makes the next good snapshot a fresh warm-up instead of diffing across a gap.
     public func sample() -> [Int32: ProcessNetwork]? {
-        guard let out = Shell.run("/usr/bin/nettop", ["-L", "1", "-x", "-n", "-J", "bytes_in,bytes_out"], timeout: 3),
-              out.hasPrefix(",bytes_in") else {
-            lastError = "nettop unavailable"; prev = [:]; lastTime = nil
+        ingest(Shell.run("/usr/bin/nettop", ["-L", "1", "-x", "-n", "-J", "bytes_in,bytes_out"], timeout: 3), now: Date())
+    }
+
+    /// One nettop snapshot (`out`; nil if nettop couldn't run) taken at `now`. Split from `sample()` so tests can feed
+    /// synthetic output.
+    func ingest(_ out: String?, now: Date) -> [Int32: ProcessNetwork]? {
+        guard let out, out.hasPrefix(",bytes_in") else {
+            lastError = "nettop unavailable"; prev = [:]; lastTime = nil; lastFlows = []; flowsPrimed = false
             return nil
         }
         lastError = nil
-        let now = Date()
         let cur = Self.parse(out)
         // The first good snapshot only primes `prev`: without a baseline there are no rates, so nil, never zeros.
         defer { prev = cur; lastTime = now }
-        guard let lastTime, !prev.isEmpty else { return nil }
+        guard let lastTime, !prev.isEmpty else { lastFlows = []; flowsPrimed = false; return nil }
         let dt = max(now.timeIntervalSince(lastTime), 0.001)
         var delta: [Int32: (UInt64, UInt64, Int)] = [:]
+        var flows: [FlowDelta] = []
+        let allOpened = !flowsPrimed
+        flowsPrimed = true
         for (k, v) in cur {
             var d = v
             // A flow absent from `prev` opened during this interval, so all of its bytes count toward this interval.
-            if let p = prev[k] {
+            let p = prev[k]
+            if let p {
                 // counters only grow for a live connection; a smaller value means the tuple was reused
                 d = (v.0 >= p.0 ? v.0 - p.0 : v.0, v.1 >= p.1 ? v.1 - p.1 : v.1)
             }
             let e = delta[k.pid] ?? (0, 0, 0)
             delta[k.pid] = (e.0 + d.0, e.1 + d.1, e.2 + 1)
+            if d.0 > 0 || d.1 > 0 || p == nil || allOpened {
+                flows.append(FlowDelta(pid: k.pid, flow: k.flow, bytesIn: d.0, bytesOut: d.1, opened: p == nil || allOpened))
+            }
         }
+        lastFlows = flows
         var result: [Int32: ProcessNetwork] = [:]
         for (pid, d) in delta {
             let t = totals[pid] ?? (0, 0)

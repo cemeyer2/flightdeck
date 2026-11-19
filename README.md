@@ -11,7 +11,7 @@ by showing which process and which subsystem is responsible.
   - [Overview](#overview): [Drill down from Summary](#drill-down-from-summary) · [Customizable cockpit](#customizable-cockpit) · [Annunciator panel](#annunciator-panel) · [Ambient mode](#ambient-mode) · [Stress Map](#stress-map) · [Diagnosis and Flight Log](#diagnosis-and-flight-log) · [Trends](#trends) · [Checkup](#checkup)
   - [Activity](#activity): [Performance](#performance) · [Processes](#processes) · [Process inspector](#process-inspector) · [Connection quality](#connection-quality) · [Energy and storage health](#energy-and-storage-health) · [Charging insights](#charging-insights) · [Battery health forecast](#battery-health-forecast) · [Why is the fan loud?](#why-is-the-fan-loud) · [Thermals](#thermals) · [GPU](#gpu) · [Launches](#launches) · [Console](#console) · [Camera & Mic](#camera--mic)
   - [Power](#power): [Power & Freq](#power--freq) · [Sleep & Wake](#sleep--wake)
-  - [Network](#network): [Network map](#network-map) · [Wi-Fi](#wi-fi) · [Internet](#internet) · [Connections](#connections) · [UPnP](#upnp) · [UniFi](#unifi)
+  - [Network](#network): [Network map](#network-map) · [Wi-Fi](#wi-fi) · [Internet](#internet) · [Destinations](#destinations) · [Connections](#connections) · [UPnP](#upnp) · [UniFi](#unifi)
   - [Storage](#storage): [Disk Space › Folder Scanner](#disk-space--folder-scanner) · [Disk Space › What's Using My Disk](#disk-space--whats-using-my-disk)
   - [System](#system): [System Info](#system-info) · [Installed Apps](#installed-apps) · [Startup Apps](#startup-apps) · [Peripherals](#peripherals) · [Services](#services) · [Users](#users)
   - [Tools](#tools): [Rules](#rules) · [Developer](#developer) · [Benchmarks](#benchmarks)
@@ -68,7 +68,7 @@ demo-data version for screenshots (see Demo mode at the end).
 - **Overview:** Summary (the cockpit) · Stress Map · Flight Log · Trends · Checkup
 - **Activity:** Performance (CPU, Memory, Disk, Network, Energy, Thermals, GPU) · Processes · Launches · Console · Camera & Mic
 - **Power:** Power & Freq · Sleep & Wake
-- **Network:** Network · Wi-Fi · Internet · Connections · UPnP · UniFi
+- **Network:** Network · Wi-Fi · Internet · Destinations · Connections · UPnP · UniFi
 - **Storage:** Disk Space
 - **System:** System Info · Peripherals · Installed Apps · Startup Apps · Services · Users
 - **Tools:** Rules · Developer · Benchmarks
@@ -420,6 +420,45 @@ daily log's 10 s per-app pass (no extra sampling; a restarted process starts a n
 daily log (`DayRecord.dataUsage`, optional so older logs still load). Only traffic while FlightDeck runs is counted;
 days it didn't run are gaps. Demo mode shows invented tests and usage and never runs networkQuality.
 
+#### Destinations
+
+*Who each app talks to.* Per app, the remote hosts it exchanged traffic with: bytes today, over 7 and over 30 days (in
+and out on hover), connection count, first and last seen, the ports and services (HTTPS 443, QUIC, DNS 53, SMB 445…),
+and whether the host is on the internet or local (private LAN, carrier-grade NAT 100.64/10, IPv6 ULA, link-local,
+multicast, loopback). A destination the app first contacted in the last 24 hours (and not in the 30 days before) is
+badged **NEW**; today's volume at 5× or more of its typical day (and at least 50 MB, with 3 earlier days to compare)
+is badged **UNUSUAL**; both are listed at the top. The search field answers "which apps talked to X" (domain, host
+name or IP). The process inspector's Network tab shows the same list for the inspected app.
+
+- *Collection:* no extra sampling. The per-connection deltas the nettop run already computes for Network by app are
+  folded into per-app, per-IP rows on nettop's own queue: O(active connections) per run, about 0.2 ms for 100 active
+  flows in a release build. At most 300 IPs per app per day are kept; the rest are counted in an "other destinations"
+  row. Like all nettop data, connections that open and close between two samples, and bytes after the last sample
+  before a connection closes, are missed. Unconnected UDP sockets have no remote address, so DNS traffic (sent by
+  mDNSResponder on apps' behalf) isn't attributed to the app that asked.
+- *Names:* reverse DNS (PTR records) for new remote IPs, looked up in the background through `dns_sd`. Lookups are
+  rate-limited (4 at once, 10 a second), time out after 5 s and are cached (names 6 h, "no name" 1 h). Sampling never
+  waits for them. Every name is labelled with its source: **reverse DNS** (published by whoever runs the IP, often a
+  hosting or CDN provider, and not verified; names of known providers such as AWS, Akamai or Google are marked as
+  the provider), **no name** (no PTR record), or **not looked up**. macOS doesn't let an unprivileged app see which
+  name another app looked up (that would need a DNS-proxy or content-filter network extension), so FlightDeck never
+  claims one. Internet hosts are grouped by registrable domain (`api.notion.com` → `notion.com`) using an embedded
+  subset of the Public Suffix List; local hosts keep their full name, and unnamed ones their IP. Reverse DNS can be
+  turned off in Settings › Alerts; destinations are then grouped by IP.
+- *No country or ASN:* the free offline databases that could be bundled (DB-IP Lite under CC BY 4.0, IPtoASN
+  in the public domain) are 7–25 MB uncompressed and go stale within weeks, and FlightDeck has no update channel for
+  them. An outdated table would give confident wrong answers, so FlightDeck shows none, and it never asks an online
+  geolocation service.
+- *Alerts:* opt-in in Settings › Alerts: "an app contacted a destination it hasn't contacted in 30 days". An app is
+  learned for a day first. Each app notifies at most once an hour (later new destinations join that finding). Web
+  browsers and local-network devices are ignored by default.
+- *Privacy and storage:* everything stays on this Mac, in `~/Library/Application Support/Flightdeck/Destinations/`:
+  one JSON file per day plus `known.json` (the destinations each app contacted in the last 30 days), kept for 30 days.
+  The open day is written every 5 minutes and at quit. The page can clear it all. The only network traffic this
+  feature adds is the reverse-DNS queries to your configured DNS server. The `network_destinations` MCP tool reads the
+  same data. Demo mode shows invented apps and destinations (Slack → slack.com, a "Mystery Helper" talking to
+  unnamed documentation-range IPs) and collects nothing.
+
 #### Connections
 
 Your processes' network sockets as a sortable, filterable table (process, PID, protocol, local and remote address,
@@ -662,6 +701,7 @@ errors. It may contain personal paths and names, so review it before sharing.
 | `wifi` | the Wi-Fi link with health ratings and low-rate reasons, and a summary of the last scan run in the app (networks per band, busiest channels, strongest networks, a channel recommendation). Never scans; SSIDs and BSSIDs only with Location permission |
 | `camera_mic` | whether a camera or microphone is in use now and by which app, recent sessions (device, app, times, duration) with how each app was identified (confirmed / likely / unknown), first use, unusual-hour and locked/idle flags, and per-app totals |
 | `battery` | battery facts (health, cycles against the design count, capacities, temperature, condition, the gauge's lifetime extremes), service status, the 80% forecast with its 95% range or exactly what data is missing, and the wear factors with tips |
+| `network_destinations` | per app (optionally one app, or only destinations matching a host or IP), the remote hosts it talked to over 1–30 days: bytes in and out, connections, first and last seen, services, local or internet, name source, and new / unusual-volume flags |
 
 ### Guided prompts
 

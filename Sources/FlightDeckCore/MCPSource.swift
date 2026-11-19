@@ -34,6 +34,8 @@ public protocol MCPDataSource: AnyObject, Sendable {
     func cameraMic() async -> (live: CameraMicLive?, store: CameraMicStore)?
     /// The battery's long-term history (BatteryHistory.swift) and the gauge's lifetime figures, or nil if unavailable.
     func batteryHistory() async -> (days: [BatteryDay], lifetime: BatteryLifetime?)?
+    /// Destinations: the last 30 days (stored days plus the open one) and the known-destination list, or nil.
+    func destinations() async -> (days: [DestinationDay], known: KnownDestinations)?
 }
 
 extension MCPDataSource {
@@ -51,6 +53,8 @@ extension MCPDataSource {
         guard let h = await dailyHistory() else { return nil }
         return (h.days.compactMap(BatteryDay.init), nil)
     }
+    /// Sources without the app's tracker (tests) have no destinations.
+    public func destinations() async -> (days: [DestinationDay], known: KnownDestinations)? { nil }
     /// Checkup with the swap trend taken from the black box's coarse tier, as the Checkup view does.
     public func runCheckup() async -> [CheckResult] {
         let trace = await blackBox(.coarse, from: Date().addingTimeInterval(-86_400), to: Date())
@@ -139,6 +143,16 @@ public final class StandaloneMCPSource: MCPDataSource, @unchecked Sendable {
         let dir = dailyDir
         return await Task.detached(priority: .userInitiated) {
             (CameraMicWatch.reading(), CameraMicStore(dir: dir, readOnly: true))
+        }.value
+    }
+
+    /// The app's saved destination days, read-only. The open day is as the app last wrote it (every 5 minutes).
+    public func destinations() async -> (days: [DestinationDay], known: KnownDestinations)? {
+        let dir = dailyDir.appendingPathComponent("Destinations")
+        return await Task.detached(priority: .userInitiated) {
+            let store = DestinationStore(dir: dir, readOnly: true)
+            return (store.days(from: Date().addingTimeInterval(-Double(DestinationStore.retentionDays) * 86_400), to: Date()),
+                    store.loadKnown() ?? KnownDestinations())
         }.value
     }
 }

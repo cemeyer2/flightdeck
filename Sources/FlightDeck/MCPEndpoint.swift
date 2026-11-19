@@ -129,6 +129,15 @@ final class EngineMCPSource: MCPDataSource, @unchecked Sendable {
     func cameraMic() async -> (live: CameraMicLive?, store: CameraMicStore)? {
         CameraMicService.watch.map { ($0.live, $0.store) }
     }
+    /// The live tracker's open day plus its saved days (none in demo mode).
+    func destinations() async -> (days: [DestinationDay], known: KnownDestinations)? {
+        guard let t = DestinationService.tracker, let store = t.store else { return nil }
+        return await Task.detached(priority: .userInitiated) {
+            let today = t.today()
+            let saved = store.days(from: Date().addingTimeInterval(-Double(DestinationStore.retentionDays) * 86_400), to: Date())
+            return (saved.filter { $0.start != today.start } + [today], t.known())
+        }.value
+    }
 }
 
 /// Settings section for the MCP server, kept here so SettingsView only gains one line.

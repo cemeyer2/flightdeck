@@ -75,7 +75,7 @@ final class MCPTests: XCTestCase {
     func testRealToolSchemas() throws {
         let specs = MCPTools(source: FakeSource()).specs
         XCTAssertEqual(Set(specs.map(\.name)), ["get_status", "list_processes", "get_process", "sample_stacks", "recent_incidents",
-                                                "diagnostic_reports", "history", "checkup", "trends", "temperatures", "wifi", "camera_mic", "battery"])
+                                                "diagnostic_reports", "history", "checkup", "trends", "temperatures", "wifi", "camera_mic", "battery", "network_destinations"])
         for s in specs {
             XCTAssertFalse(s.description.isEmpty)
             XCTAssertEqual(s.inputSchema["type"]?.string, "object")
@@ -159,7 +159,7 @@ final class MCPPromptTests: XCTestCase {
         XCTAssertEqual(msgs.first?["role"]?.string, "user")
         XCTAssertTrue(text.contains("\"Safari\""))
         // Every tool a prompt mentions must exist, so an assistant following it never calls something unknown.
-        let toolNames = ["get_status", "list_processes", "get_process", "sample_stacks", "recent_incidents", "diagnostic_reports", "history", "checkup", "trends", "temperatures", "wifi", "camera_mic"]
+        let toolNames = ["get_status", "list_processes", "get_process", "sample_stacks", "recent_incidents", "diagnostic_reports", "history", "checkup", "trends", "temperatures", "wifi", "camera_mic", "network_destinations"]
         for p in MCPPrompts.all {
             let body = p.render(["app": "X", "minutes": "30", "hours": "3", "days": "7"])
             let mentioned = body.split(whereSeparator: { !$0.isLetter && $0 != "_" }).map(String.init).filter { $0.contains("_") && $0 == $0.lowercased() }
