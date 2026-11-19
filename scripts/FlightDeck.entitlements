@@ -3,4 +3,6 @@
 <plist version="1.0"><dict>
   <!-- Startup Apps reads Login Items from System Events -->
   <key>com.apple.security.automation.apple-events</key><true/>
+  <!-- Wi-Fi page: SSIDs and BSSIDs need Location Services; under the hardened runtime this lets macOS ask -->
+  <key>com.apple.security.personal-information.location</key><true/>
 </dict></plist>
