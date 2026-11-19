@@ -236,6 +236,7 @@ struct SettingsView: View {
                     }
                 }
                 TemperatureAlertsSection()
+                CameraMicAlertsSection()
             }
             .tabItem { Label("Alerts", systemImage: "bell.badge") }
             tab {

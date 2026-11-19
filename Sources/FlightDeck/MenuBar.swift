@@ -123,6 +123,7 @@ struct MenuBarPanel: View {
                 Spacer()
                 if e.recording { Label("REC", systemImage: "record.circle.fill").foregroundStyle(.red).font(.caption.bold()) }
             }
+            CameraMicMenuBarRow()   // camera / microphone in use, and by which app (only while active)
             HStack(spacing: 14) {
                 MiniGauge(label: "CPU", value: s?.cpu.total.value.map { $0 / 100 }, text: s?.cpu.total.value.map { String(format: "%.0f%%", $0) })
                 MiniGauge(label: "MEM", value: s.flatMap { $0.memory.isMeasured ? Double($0.memory.used) / Double(max($0.memory.total, 1)) : nil },

@@ -31,7 +31,7 @@ final class Alerts: NSObject, UNUserNotificationCenterDelegate {
     /// Readable names for kinds, for "Mute all … alerts".
     static func kindName(_ k: String) -> String {
         ["cpu": "busy-app", "gpu": "GPU-hog", "hang": "not-responding", "awake": "keeping-awake", "leak": "memory-growth",
-         "wakeups": "wake-up", "report": "repeated crash/hang", "drive": "drive-health", "rule": "rule"][k] ?? k
+         "wakeups": "wake-up", "report": "repeated crash/hang", "drive": "drive-health", "rule": "rule", "privacy": "camera & mic"][k] ?? k
     }
 
     /// Muted findings don't notify and don't light the annunciator, menu bar or Dock lamp.
@@ -76,7 +76,9 @@ final class Alerts: NSObject, UNUserNotificationCenterDelegate {
         notifiedSince = notifiedSince.filter { ids.contains($0.key) }
         guard enabled, let center else { return }
         pruneMutes(seen: ids, now: now)
-        for f in findings where f.severity.rawValue >= minSeverity && now.timeIntervalSince(f.since) >= after && !isMuted(f) {
+        // Camera & mic alerts ("privacy:…") are events the user opted into one by one, not sustained problems: they
+        // notify at once, whatever the severity floor and the "after it lasts" delay (a 10-second use would never last).
+        for f in findings where (Self.kind(of: f.id) == "privacy" || f.severity.rawValue >= minSeverity && now.timeIntervalSince(f.since) >= after) && !isMuted(f) {
             // Mark the occurrence as handled before the cooldown check: an occurrence suppressed by the cooldown is not
             // notified later, even once the cooldown has passed.
             guard notifiedSince[f.id] != f.since else { continue }
@@ -87,7 +89,7 @@ final class Alerts: NSObject, UNUserNotificationCenterDelegate {
             let c = UNMutableNotificationContent()
             c.title = f.severity == .warning ? "Warning" : "Caution"
             c.subtitle = f.title
-            c.body = (f.detail ?? "") + " (for \(shortDuration(now.timeIntervalSince(f.since))))"
+            c.body = (f.detail ?? "") + (Self.kind(of: f.id) == "privacy" ? "" : " (for \(shortDuration(now.timeIntervalSince(f.since))))")
             c.userInfo = ["destination": f.destination ?? ""]
             c.threadIdentifier = f.id
             // The identifier includes the occurrence start, so a repeat of the same occurrence replaces rather than stacks.

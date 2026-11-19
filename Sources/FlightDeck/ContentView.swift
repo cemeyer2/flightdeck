@@ -15,6 +15,7 @@ enum Destination: String, CaseIterable, Identifiable, Hashable {
          upnp = "UPnP", network = "Network", unifi = "UniFi"
     case internet = "Internet"
     case developer = "Developer"
+    case cameraMic = "Camera & Mic"
     var id: String { rawValue }
     var icon: String {
         switch self {
@@ -44,6 +45,7 @@ enum Destination: String, CaseIterable, Identifiable, Hashable {
         case .unifi: "antenna.radiowaves.left.and.right"
         case .internet: "globe"
         case .developer: "hammer"
+        case .cameraMic: "web.camera"
         }
     }
 }
@@ -61,7 +63,7 @@ enum SidebarSection: String, CaseIterable, Identifiable {
     var members: [Destination] {
         switch self {
         case .overview: [.summary, .stressMap, .flightLog, .trends, .checkup]
-        case .activity: [.performance, .processes, .launches, .console]
+        case .activity: [.performance, .processes, .launches, .console, .cameraMic]
         case .power: [.power, .sleep]
         case .network: [.network, .internet, .connections, .upnp, .unifi]
         case .storage: [.diskSpace]
@@ -189,6 +191,7 @@ struct ContentView: View {
         case .unifi: UniFiView()
         case .internet: InternetView()
         case .developer: DeveloperView()
+        case .cameraMic: CameraMicView()
         }
     }
 

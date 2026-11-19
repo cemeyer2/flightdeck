@@ -119,6 +119,10 @@ final class EngineMCPSource: MCPDataSource, @unchecked Sendable {
         guard let w = await MainActor.run(body: { engine?.thermal }) else { return nil }
         return (w.status(), w.history)
     }
+    /// The app's live Camera & Mic watch (none in demo mode).
+    func cameraMic() async -> (live: CameraMicLive?, store: CameraMicStore)? {
+        CameraMicService.watch.map { ($0.live, $0.store) }
+    }
 }
 
 /// Settings section for the MCP server, kept here so SettingsView only gains one line.

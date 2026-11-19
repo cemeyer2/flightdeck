@@ -184,6 +184,7 @@ final class Engine: ObservableObject {
         applyProbe()
         MetricsEndpoint.shared.configure(engine: self)   // Prometheus endpoint, if turned on in Settings
         MCPEndpoint.shared.configure(engine: self)       // MCP server for AI assistants, if turned on in Settings
+        CameraMicService.start()   // camera & microphone listeners (event-driven; nothing in demo mode)
         let r = rules; queue.async { [ruleEngine] in ruleEngine.rules = r }
         startVisibilityTracking()
         // Sleep findings: at launch, after every wake, and every 30 minutes (so they expire 12 h after waking).
@@ -412,6 +413,7 @@ final class Engine: ObservableObject {
             // Respawn loops and baseline findings ("3× its usual memory") join the Analyzer's, so they reach the banner,
             // alerts and the Flight Log the same way.
             let found = analyzer.ingest(s) + dailyLog.ingest(s) + self.launchLog.findings(now: s.time) + self.thermal.ingest(s)
+                + CameraMicService.findings(now: s.time)   // opt-in camera & mic alerts
             self.chargeCurve.ingest(s)
             ruleEngine.frontmostPID = front
             let firings = ruleEngine.evaluate(s)

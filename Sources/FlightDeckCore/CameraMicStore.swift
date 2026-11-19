@@ -45,7 +45,9 @@ public final class CameraMicStore: @unchecked Sendable {
             guard s.end == nil else { return s }
             var s = s; s.end = s.lastSeen; s.endObserved = false; return s
         }.sorted { $0.start < $1.start }
-        prune(now: now)
+        // Expired sessions are dropped in memory only; loading never writes (the next change saves the pruned list).
+        let cutoff = now.addingTimeInterval(-Double(Self.retentionDays) * 86_400)
+        sessions.removeAll { ($0.end ?? .distantFuture) < cutoff }
     }
 
     /// In-memory store holding the given sessions (demo mode, previews, tests).
