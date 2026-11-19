@@ -34,6 +34,12 @@ enum UIBench {
         out("welcome", height: 640, WelcomeView())
         out("sleep", height: 1500, SleepPreview())
         out("flightlog", FlightLogView())
+        // The timeline with demo buckets and marks (as a coding agent's `mark` calls would leave them), handed in
+        // because ImageRenderer doesn't run the panel's loading task.
+        if let template = e.current {
+            let now = Date()
+            out("timeline-marks", height: 260, TimelinePanel(preview: Demo.timeline(template: template, now: now), previewMarks: Demo.marks(now: now)))
+        }
         out("cpu", VStack { CPUPerf() })
         out("memory", height: 1900, VStack { MemoryPerf() })
         out("gpu", height: 2200, VStack { GPUPerf() })

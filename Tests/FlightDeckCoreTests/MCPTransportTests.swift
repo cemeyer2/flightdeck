@@ -121,7 +121,7 @@ final class MCPTransportTests: XCTestCase {
         XCTAssertEqual(lines.count, 3, "one line per request, none for the notification, nothing else on stdout")
         let replies = try lines.map { try JSON.parse(Data($0.utf8)) }
         XCTAssertEqual(replies.map { $0["id"]?.int }, [1, 2, 3])
-        XCTAssertEqual(replies[1]["result"]?["tools"]?.array?.count, 12)
+        XCTAssertEqual(replies[1]["result"]?["tools"]?.array?.count, 17)
         let text = try XCTUnwrap(replies[2]["result"]?["content"]?.array?.first?["text"]?.string)
         XCTAssertEqual(try JSON.parse(Data(text.utf8))["source"]?.string, "standalone")
     }

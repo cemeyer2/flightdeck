@@ -114,6 +114,31 @@ public enum MCPPrompts {
                 Name each update that changed things, what changed (CPU, energy, memory, crashes, hangs) and by how much. If there isn't enough history yet, say how many more days are needed.
                 """ + reporting
         },
+        MCPPrompt(name: "measure_change", title: "Did my change make it slower or hungrier?",
+                  description: "Measures a workload (build, tests, benchmark) before and after a change with marks, and compares the two runs.",
+                  arguments: [.init(name: "command", description: "The workload to run, e.g. `swift test` or `npm run build`", required: true),
+                              .init(name: "process", description: "Process name to attribute cost to, e.g. swift-build or node (optional; default the whole Mac)", required: false)]) { a in
+            let cmd = a["command"] ?? ""
+            let filter = a["process"].map { ", with process \"\($0)\"" } ?? ""
+            // Unlike the other prompts, this one runs the user's own workload: the user asked for exactly that by
+            // choosing it. FlightDeck itself still only reads (and writes its marks).
+            return """
+                Measure whether my change makes `\(cmd)` slower or hungrier, using FlightDeck's marks. FlightDeck's black box must be \
+                recording (the app running); if mark says it isn't, stop and tell me.
+                1. Baseline, without the change (ask me how to get the code without it if that isn't obvious, and tell me what you \
+                did): call mark with label "baseline-start", run `\(cmd)`, then call mark with label "baseline-end".
+                2. With the change applied: call mark with label "change-start", run `\(cmd)` again the same way, then call mark \
+                with label "change-end".
+                3. Call measure from "change-start" to "change-end"\(filter), with compare_to {"from": "baseline-start", "to": "baseline-end"}.
+                4. If the verdict says slower or hungrier, call measure on each window without a filter to see whether something \
+                else on the Mac (indexing, a browser, thermal throttling) was busy during one run but not the other, and \
+                process_logs for the workload's process if it printed errors.
+                Report: the verdict first, then a small table of duration, CPU-seconds, peak memory, energy and disk for both runs \
+                with the change in %. Say which differences are within the noise band and whether background activity or \
+                throttling makes the comparison unfair (if so, suggest re-running). One run each is a small sample: say so when \
+                the differences are small. Leave my code as you found it.
+                """ + reporting
+        },
     ]
 
     static func find(_ name: String) -> MCPPrompt? { all.first { $0.name == name } }

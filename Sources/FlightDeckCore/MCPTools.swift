@@ -1,7 +1,8 @@
 import Foundation
 // The FlightDeck MCP tools: their schemas (what `tools/list` shows a model) and the argument handling around them.
-// The output of each tool is built in MCPToolOutput.swift. Every tool only reads; the one that does more than read
-// state, `sample_stacks`, runs Apple's `sample` on one of the user's own processes for at most 5 seconds.
+// The output of each tool is built in MCPToolOutput.swift (and the files it names). Every tool reads the Mac without
+// changing it. `sample_stacks` runs Apple's `sample` on one of the user's own processes for at most 5 seconds, and
+// `mark` writes one thing: FlightDeck's own marks file (Marks.swift), so a coding agent can measure its work later.
 //
 // Output conventions, chosen for models reading it: compact JSON, summary first and details after; sizes and rates as
 // short human strings ("1.2 GB", "3.4 MB/s"); percentages as numbers rounded to 0.1. A value FlightDeck could not
@@ -14,6 +15,10 @@ public struct MCPTools: MCPToolProvider {
     var stackSampler: @Sendable (Int32, Int) -> String = { ProcessInspector.sampleStacks(pid: $0, seconds: $1) }
     var inspector: @Sendable (Int32, String) -> ProcessDetails = { ProcessInspector.details(pid: $0, path: $1) }
     var ownUID: UInt32 = getuid()
+    /// Where `mark` stores marks (FlightDeck's own file, shared by the app and `--mcp`); tests use a temporary one.
+    var marks = MarkStore()
+    /// Runs `log show` for `process_logs`; tests replay captured ndjson instead.
+    var logRunner: @Sendable (ProcessLogs.Query) -> ProcessLogs.Result = { ProcessLogs.read($0) }
 
     public init(source: MCPDataSource) { self.source = source }
 
@@ -25,7 +30,10 @@ public struct MCPTools: MCPToolProvider {
     black box: statistics over the last minutes or hours), recent_incidents (the Flight Log), diagnostic_reports (crashes \
     and hangs), checkup (health and security checklist), temperatures (every sensor, fans, throttling), wifi (the Wi-Fi link's health and the last nearby-network scan), trends (daily history, before/after app and macOS updates) and \
     camera_mic (which apps used the camera or microphone, and when). \
-    All tools are read-only. Values FlightDeck could not measure are marked "unavailable", never reported as 0.
+    To measure your own work (a build, a test run, a benchmark): call mark before and after it, then measure between \
+    the two marks, optionally with process or app for that process tree's cost and compare_to for a baseline run \
+    (see the measure_change prompt). query_metrics returns raw black-box time series; process_logs returns a process's \
+    unified-log messages. All tools are read-only except mark, which only adds to FlightDeck's own marks file. Values FlightDeck could not measure are marked "unavailable", never reported as 0.
     """
 
     struct ArgError: Error { var message: String }
@@ -84,6 +92,11 @@ public struct MCPTools: MCPToolProvider {
             case "temperatures": out = try await temperatures()
             case "wifi": out = try await wifi()
             case "camera_mic": out = try await cameraMic(a)
+            case "mark": out = try await mark(a)
+            case "marks": out = try await listMarks(a)
+            case "measure": out = try await measure(a)
+            case "query_metrics": out = try await queryMetrics(a)
+            case "process_logs": out = try await processLogs(a)
             default: return .error("Unknown tool \(name)")
             }
             return MCPToolResult(text: out.text)
@@ -175,7 +188,7 @@ public struct MCPTools: MCPToolProvider {
                             ("days", Self.int("Days of history to include, ending now.", 1, 90, 7)),
                             ("limit", Self.int("Most sessions to list.", 1, 500, 50)),
                         ])),
-        ]
+        ] + Self.agentSpecs
     }
 }
 

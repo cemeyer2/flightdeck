@@ -150,6 +150,7 @@ enum Demo {
         for f in frames(template: template, count: 120) { e.feed(f, findings: analyzer.ingest(f)) }
         e.demoInject(incidents: incidents(now), reports: reports(now), rules: demoRules, ruleLog: demoRuleLog(now))
         e.demoTimeline = timeline(template: template, now: now)
+        e.demoMarks = marks(now: now)
         e.demoSleep = sleepReport(now: now)
         e.dailyLog.replaceForDemo(days: trendDays(now: now), charge: chargeStatus(now: now))   // Trends (in memory only)
         var i = 120
@@ -241,6 +242,14 @@ enum Demo {
             frames.append(s)
         }
         return (Timeline.build(frames, from: from, to: now, buckets: 240), (from, now))
+    }
+
+    /// Marks a coding agent might have set: a baseline test run and the run with its change, during the busy
+    /// spells of the demo timeline.
+    static func marks(now: Date) -> [Mark] {
+        [("baseline-start", 4.55), ("baseline-end", 4.1), ("change-start", 0.65), ("change-end", 0.2)].enumerated().map { i, m in
+            Mark(id: "m-demo\(i)", label: m.0, time: now.addingTimeInterval(-m.1 * 3600), source: "mcp")
+        }
     }
 
     /// A restless night, as power-log lines run through the real parser.
