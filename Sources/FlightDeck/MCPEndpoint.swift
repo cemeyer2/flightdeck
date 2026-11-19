@@ -119,6 +119,8 @@ final class EngineMCPSource: MCPDataSource, @unchecked Sendable {
         guard let w = await MainActor.run(body: { engine?.thermal }) else { return nil }
         return (w.status(), w.history)
     }
+    /// The Wi-Fi page's last scan (memory only; nil until the user scans). Demo scans are never served.
+    func wifiScan() async -> WiFiScanResult? { await MainActor.run { WiFiModel.shared.demo ? nil : WiFiModel.shared.scan } }
 }
 
 /// Settings section for the MCP server, kept here so SettingsView only gains one line.

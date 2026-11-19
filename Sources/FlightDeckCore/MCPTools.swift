@@ -23,7 +23,7 @@ public struct MCPTools: MCPToolProvider {
     returns plain-English findings, the system's numbers, the top apps and which apps strain which subsystem. Then drill \
     down with list_processes, get_process and sample_stacks (why a process of the user's is busy or hung), history (the \
     black box: statistics over the last minutes or hours), recent_incidents (the Flight Log), diagnostic_reports (crashes \
-    and hangs), checkup (health and security checklist), temperatures (every sensor, fans, throttling) and trends (daily history, before/after app and macOS updates). \
+    and hangs), checkup (health and security checklist), temperatures (every sensor, fans, throttling), wifi (the Wi-Fi link's health and the last nearby-network scan) and trends (daily history, before/after app and macOS updates). \
     All tools are read-only. Values FlightDeck could not measure are marked "unavailable", never reported as 0.
     """
 
@@ -81,6 +81,7 @@ public struct MCPTools: MCPToolProvider {
             case "checkup": out = try await checkup()
             case "trends": out = try await trends(a)
             case "temperatures": out = try await temperatures()
+            case "wifi": out = try await wifi()
             default: return .error("Unknown tool \(name)")
             }
             return MCPToolResult(text: out.text)
@@ -162,6 +163,9 @@ public struct MCPTools: MCPToolProvider {
                         ])),
             MCPToolSpec(name: "temperatures", title: "Temperatures, fans and throttling",
                         description: "Every temperature sensor with a friendly name, grouped (CPU performance/efficiency cores, GPU, SoC, SSD, battery, Wi-Fi, palm rest, airflow…), each with now/min/average/max since FlightDeck started; the hottest sensor per group; fans with RPM against target, min and max and any fan problem; and whether macOS is slowing the Mac down for heat (pmset CPU speed limit, thermal pressure, GPU heat cap) with time spent throttled. Temperatures in °C.",
+                        inputSchema: Self.schema([])),
+            MCPToolSpec(name: "wifi", title: "Wi-Fi link and nearby networks",
+                        description: "The current Wi-Fi link (signal, noise, SNR, link rate against the maximum for its standard and width, band, channel, width, security) with plain-English health ratings and reasons a link rate may be low; and a summary of the last nearby-network scan the user ran in the app (networks per band, busiest channels, the strongest networks, a channel recommendation). Never scans. SSIDs and BSSIDs only with Location Services permission.",
                         inputSchema: Self.schema([])),
         ]
     }

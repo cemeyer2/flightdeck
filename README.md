@@ -244,6 +244,27 @@ for **Local Network** permission the first time; without it, macOS 27 returns an
 the view says so. The Wi-Fi name and BSSID need Location Services permission. In demo mode the view shows an invented
 network.
 
+**Wi-Fi** is a Wi-Fi analyzer. *Your connection*: signal, noise, SNR and link rate, each of signal, signal-to-noise,
+interference and channel width rated in plain English, the link rate against the maximum for its standard and width
+(assuming two spatial streams, as most Macs have) and the likely reasons it's low (weak signal, noise, 2.4 GHz, a narrow
+channel, an older standard, crowded airtime). *Link over time*: RSSI and noise, SNR and link rate while the page is
+open, from the readings the sampler already takes every 5 s (nothing extra is read), with roams (the BSSID changed),
+band and channel changes and drops marked. **Walk test** shows one big RSSI number and a quality bar for walking around
+to find dead spots. *Nearby networks*: **Scan** runs one CoreWLAN scan and lists every network (SSID, BSSID, vendor
+from the BSSID's prefix, signal, noise, band, channel, width, security, standard); the real width and position of wide
+channels (up to 320 MHz) come from the beacons' HT/VHT/HE/EHT elements when macOS provides them. *Channel congestion*:
+per band, the networks on each 20 MHz channel weighted by signal, with wide networks counted on every channel they cover
+and your own network highlighted, plus a recommendation such as "Your network is on 5 GHz channel 36 (80 MHz) with
+6 strong neighbours overlapping it; channel 149 looks clearer", always hedged as what this Mac hears from where it is.
+With a UniFi console set up, its access points' own radio utilization is shown too (measured airtime, which is better
+than a scan) and feeds the interference rating. A scan takes the radio off its channel for a moment, so FlightDeck scans
+only when you press Scan or, if you tick the box, every 45 s while the page is open; never in the background. Scans and
+link history are kept in memory only. SSIDs and BSSIDs need Location Services permission: without it macOS hides them
+(and the beacon details), the page explains this and offers **Allow Location Access…**, which is the only place
+FlightDeck asks. Channels, signal and congestion still work without it; your own access point is then picked out by its
+channel and signal, and a roam can't be told apart from a channel change. In demo mode the page shows an invented
+neighbourhood and link history.
+
 **Internet** (speed test only on request or on the opt-in schedule): runs macOS's own `networkQuality` (Apple's
 test servers) and shows download and upload in Mbps, responsiveness in RPM (round trips per minute under load, with
 Low < 200 · Medium < 800 · High as FlightDeck's bands), idle latency and the loaded latency derived from RPM, then
@@ -429,6 +450,7 @@ errors. It may contain personal paths and names, so review it before sharing.
 | `checkup` | the Checkup list, items needing attention first |
 | `trends` | daily rollups (or one app's days) and before/after comparisons of updates |
 | `temperatures` | every sensor by group with now/min/avg/max since launch, the hottest per group, fans with target/min/max and problems, and throttling (pmset limits, thermal state, GPU heat cap, time throttled) |
+| `wifi` | the Wi-Fi link with health ratings and low-rate reasons, and a summary of the last scan run in the app (networks per band, busiest channels, strongest networks, a channel recommendation). Never scans; SSIDs and BSSIDs only with Location permission |
 
 **Guided prompts** (MCP prompts; Claude Code shows them as `/mcp__flightdeck__<name>`) run a whole investigation with
 those tools and report in plain English: `diagnose_slow_mac`, `investigate_app` (needs `app`), `battery_drain`,
@@ -522,6 +544,11 @@ Six themes: Light, Dark, Green, Amber, Blue, Mono.
 - The Network, UPnP and Internet pages need macOS's Local Network permission. macOS ties that permission to the app's
   signature, and an ad-hoc-signed build gets a new one each time it's rebuilt, so a rebuilt copy may need to be allowed
   again (System Settings › Privacy & Security › Local Network). Without it the ARP table and Bonjour come back empty.
+- Wi-Fi: congestion comes from one scan from this Mac's position: it sees which networks exist and how loud they are,
+  not how busy they are, and the router may hear different neighbours. Without Location permission macOS also withholds
+  beacon details, so wide channels are placed on the standard grid (2.4 GHz 40 MHz is assumed to extend away from the
+  band edge, and 6 GHz 320 MHz is drawn on the 320-1 grid). macOS refreshes the link reading every 5 s, which sets the
+  walk test's pace.
 - No Mac can see which switch port or access point another device uses; the network map gets that only from a UniFi
   console.
 - Thermal sensors refresh every 4 s, because reading all HID sensors costs about 70 ms. SMC keys outside the per-chip

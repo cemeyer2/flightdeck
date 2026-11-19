@@ -130,6 +130,15 @@ enum UIBench {
         let bonjour = ProcessInfo.processInfo.environment["FD_RENDER_BONJOUR"] != nil ? BonjourBrowser.browse() : []
         let live = NetworkDiscovery.survey(services: bonjour, knownNames: [:], seen: [:], hops: []).0
         out("network", height: 1250, NetworkMapView(model: NetworkMapModel(survey: live)))
+        // Wi-Fi: the invented neighbourhood and link history (no scan), with walk test on; then this Mac's real link
+        // from the samples above, without a scan (scanning disrupts Wi-Fi), so the page's pre-scan state is reviewed.
+        // Models are built before the views (see `ready`).
+        let wifiDemo = WiFiModel(demo: true); wifiDemo.walkTest = true
+        out("wifi-demo", height: 2900, WiFiView(model: wifiDemo))
+        let wifiLive = WiFiModel(preview: nil, history: e.frames.compactMap { f in f?.wifi.map { WiFiLinkPoint($0, time: f!.time) } },
+                                 link: e.current?.wifi.map { w in WiFiLinkNow(ssid: w.ssid, phy: w.phy, security: w.security, point: WiFiLinkPoint(w, time: Date())) },
+                                 permission: WiFiPermission.status(), demo: false)
+        out("wifi", height: 1300, WiFiView(model: wifiLive))
         // Developer: invented data (no tool is run), then this Mac's real dev servers, containers, services and
         // toolchains. Read-only: loading never starts, stops or restarts anything.
         out("developer-demo", height: 1900, DeveloperView(model: DeveloperModel(demo: true)))

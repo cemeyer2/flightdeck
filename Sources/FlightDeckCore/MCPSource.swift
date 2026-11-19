@@ -28,12 +28,18 @@ public protocol MCPDataSource: AnyObject, Sendable {
     func checkup() async -> [CheckResult]
     /// Session thermal state (per-sensor statistics, throttling, fan health), or nil when there is none (standalone).
     func thermal() async -> (status: ThermalStatus, history: SensorHistory)?
+    func wifiScan() async -> WiFiScanResult?
+    func wifiPermission() async -> WiFiPermission.Status
 }
 
 extension MCPDataSource {
     /// Sources without a session (the standalone CLI, tests) have no thermal history; `temperatures` then reports the
     /// latest snapshot only.
     public func thermal() async -> (status: ThermalStatus, history: SensorHistory)? { nil }
+    /// The last Wi-Fi scan the user ran in the app (memory only); sources without the app have none.
+    public func wifiScan() async -> WiFiScanResult? { nil }
+    /// Location Services permission, which gates SSIDs and BSSIDs. Read without prompting.
+    public func wifiPermission() async -> WiFiPermission.Status { WiFiPermission.status() }
     /// Checkup with the swap trend taken from the black box's coarse tier, as the Checkup view does.
     public func runCheckup() async -> [CheckResult] {
         let trace = await blackBox(.coarse, from: Date().addingTimeInterval(-86_400), to: Date())

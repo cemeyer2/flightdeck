@@ -16,6 +16,11 @@ public struct WiFiInfo: Codable, Sendable, Hashable {
     public var width: String?           // 20/40/80/160 MHz
     public var phy: String?             // 802.11ax ...
     public var security: String?
+    /// The access point's BSSID (lowercase, colon-separated), for roam detection on the Wi-Fi page. Like the SSID it
+    /// needs Location Services permission. Memory only: it is left out of `CodingKeys`, so it never reaches recordings,
+    /// the black box or MCP snapshots.
+    public var bssid: String? = nil
+    enum CodingKeys: String, CodingKey { case interface, ssid, rssi, noise, txRate, channel, band, width, phy, security }
     /// Signal-to-noise ratio in dB.
     public var snr: Int { rssi - noise }
     /// Plain-English signal quality.
@@ -43,7 +48,7 @@ public struct WiFiInfo: Codable, Sendable, Hashable {
         let phy: String? = {
             switch i.activePHYMode() {
             case .mode11a: "802.11a"; case .mode11b: "802.11b"; case .mode11g: "802.11g"; case .mode11n: "802.11n (Wi-Fi 4)"
-            case .mode11ac: "802.11ac (Wi-Fi 5)"; case .mode11ax: "802.11ax (Wi-Fi 6/6E)"
+            case .mode11ac: "802.11ac (Wi-Fi 5)"; case .mode11ax: "802.11ax (Wi-Fi 6/6E)"; case .mode11be: "802.11be (Wi-Fi 7)"
             default: nil
             }
         }()
@@ -56,7 +61,8 @@ public struct WiFiInfo: Codable, Sendable, Hashable {
             }
         }()
         return WiFiInfo(interface: i.interfaceName ?? "en0", ssid: i.ssid(), rssi: i.rssiValue(), noise: i.noiseMeasurement(),
-                        txRate: i.transmitRate(), channel: ch?.channelNumber, band: band, width: width, phy: phy, security: sec)
+                        txRate: i.transmitRate(), channel: ch?.channelNumber, band: band, width: width, phy: phy, security: sec,
+                        bssid: i.bssid().flatMap(MAC.normalize))
     }
 }
 
