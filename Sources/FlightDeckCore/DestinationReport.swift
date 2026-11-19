@@ -103,15 +103,17 @@ public enum DestinationReport {
                 apps[r.app] = app
             }
         }
-        return apps.map { id, app in
-            let dests = app.dests.values.map { a -> DestinationSummary in
+        return apps.map { (id, app) -> AppDestinations in
+            let dests: [DestinationSummary] = app.dests.values.map { a -> DestinationSummary in
                 var s = a.s
                 s.ipCount = a.ipSet.count
                 s.provider = s.hosts.lazy.compactMap(DomainName.provider).first
                 s.priorDays = a.prior.count
                 s.typicalDay = a.prior.isEmpty ? 0 : a.prior.values.reduce(0, +) / UInt64(a.prior.count)
-                s.unusual = s.priorDays >= thresholds.unusualMinDays && s.today >= thresholds.unusualMinBytes
-                    && Double(s.today) >= thresholds.unusualFactor * Double(max(s.typicalDay, 1))
+                let enoughHistory = s.priorDays >= thresholds.unusualMinDays
+                let bigEnough = s.today >= thresholds.unusualMinBytes
+                let typical = Double(max(s.typicalDay, 1))
+                s.unusual = enoughHistory && bigEnough && Double(s.today) >= thresholds.unusualFactor * typical
                 s.isNew = !s.isOther && known.isNew(app: id, dest: s.id, now: now)
                 return s
             }.sorted { $0.month != $1.month ? $0.month > $1.month : $0.id < $1.id }

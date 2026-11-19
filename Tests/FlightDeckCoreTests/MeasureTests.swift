@@ -61,8 +61,13 @@ final class MeasureTests: XCTestCase {
     func testSystemTotalsAndGaps() throws {
         let t = { (s: Double) in X.t0.addingTimeInterval(s) }
         // 1 Hz for 10 s, a 21 s gap, 1 Hz for 10 s. Disk counter +1 MB/s throughout (it keeps counting in the gap).
-        let frames = (Array(0..<10) + Array(30..<40)).map { i in
-            X.frame(t(Double(i)), [], cpu: 40, watts: 36, hottest: i >= 30 ? 90 : 60, diskTotal: UInt64(i) * 1_000_000, netTotal: UInt64(i) * 4000, thermal: i >= 30 ? 2 : 0)
+        let seconds: [Int] = Array(0..<10) + Array(30..<40)
+        var frames: [Snapshot] = []
+        for i in seconds {
+            let late = i >= 30
+            let hot: Double = late ? 90 : 60
+            let disk = UInt64(i) * 1_000_000, net = UInt64(i) * 4000
+            frames.append(X.frame(t(Double(i)), [], cpu: 40, watts: 36, hottest: hot, diskTotal: disk, netTotal: net, thermal: late ? 2 : 0))
         }
         let m = WindowMeasurement.compute(frames, interval: 1, from: t(0), to: t(39))
         XCTAssertEqual(m.frames, 20)
@@ -76,7 +81,7 @@ final class MeasureTests: XCTestCase {
         XCTAssertEqual(m.hottest?.peak, 90)
         XCTAssertEqual(m.worstThermalState, 2)
         XCTAssertEqual(m.throttledSeconds, 10, accuracy: 0.01)
-        let none = WindowMeasurement.compute(frames.map { var f = $0; f.power.systemWatts = .unavailable("no sensor"); return f },
+        let none = WindowMeasurement.compute(frames.map { (f: Snapshot) -> Snapshot in var f = f; f.power.systemWatts = Measured<Double>.unavailable("no sensor"); return f },
                                              interval: 1, from: t(0), to: t(39))
         XCTAssertNil(none.energyWh, "unmeasured power is nil, never 0 Wh")
         let empty = WindowMeasurement.compute([], interval: 1, from: t(0), to: t(39))
