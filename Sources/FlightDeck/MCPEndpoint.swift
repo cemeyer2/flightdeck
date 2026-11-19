@@ -114,6 +114,10 @@ final class EngineMCPSource: MCPDataSource, @unchecked Sendable {
         let log = dailyLog
         return await Task.detached(priority: .userInitiated) { log.history() }.value
     }
+    func batteryHistory() async -> (days: [BatteryDay], lifetime: BatteryLifetime?)? {
+        let log = dailyLog
+        return await Task.detached(priority: .userInitiated) { log.batteryHistory() }.value
+    }
     func checkup() async -> [CheckResult] { await runCheckup() }
     func thermal() async -> (status: ThermalStatus, history: SensorHistory)? {
         guard let w = await MainActor.run(body: { engine?.thermal }) else { return nil }

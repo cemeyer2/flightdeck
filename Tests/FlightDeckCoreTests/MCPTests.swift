@@ -75,7 +75,7 @@ final class MCPTests: XCTestCase {
     func testRealToolSchemas() throws {
         let specs = MCPTools(source: FakeSource()).specs
         XCTAssertEqual(Set(specs.map(\.name)), ["get_status", "list_processes", "get_process", "sample_stacks", "recent_incidents",
-                                                "diagnostic_reports", "history", "checkup", "trends", "temperatures", "wifi", "camera_mic"])
+                                                "diagnostic_reports", "history", "checkup", "trends", "temperatures", "wifi", "camera_mic", "battery"])
         for s in specs {
             XCTAssertFalse(s.description.isEmpty)
             XCTAssertEqual(s.inputSchema["type"]?.string, "object")

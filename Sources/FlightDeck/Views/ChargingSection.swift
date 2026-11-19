@@ -20,6 +20,8 @@ struct ChargingInputs {
     /// Desktops: what IOPSCopyExternalPowerAdapterDetails reports, if anything.
     var desktopAdapter: AdapterReport?
     var now = Date()
+    /// The Battery health panel's forecast and wear factors (BatteryHealthPanel.swift); nil until loaded.
+    var report: BatteryReport? = nil
 
     var flow: ChargeFlow? { ChargeFlow.compute(battery: battery, telemetry: details?.telemetry) }
     var state: ChargeState { ChargeState.assess(battery: battery, details: details, pmset: pmset) }
@@ -30,10 +32,12 @@ struct ChargingExtras: Sendable {
     var pmset: PmsetBattery?
     var condition: String?
     var desktopAdapter: AdapterReport?
+    var report: BatteryReport?
 
     /// `pmset -g batt` (a process launch) runs only while plugged in and not charging, the one case where its
     /// "not charging" / "on hold" wording adds evidence. system_profiler (~1 s) runs once, for the condition.
-    static func load(battery: BatteryInfo?, previous: ChargingExtras?) -> ChargingExtras {
+    /// The battery report (forecast and wear) is rebuilt from the daily log on each load: O(days), no sampling.
+    static func load(battery: BatteryInfo?, facts: BatteryFacts?, log: DailyLog, previous: ChargingExtras?) -> ChargingExtras {
         var x = ChargingExtras()
         if let b = battery, b.externalConnected, !b.isCharging {
             x.pmset = Shell.run("/usr/bin/pmset", ["-g", "batt"]).flatMap(PmsetBattery.parse)
@@ -45,6 +49,8 @@ struct ChargingExtras: Sendable {
             let a = AdapterReport.parse(d)
             x.desktopAdapter = a.watts == nil && a.name == nil ? nil : a
         }
+        let h = battery == nil ? nil : log.batteryHistory()
+        x.report = BatteryReport(battery: battery, facts: facts, condition: x.condition, history: h?.days ?? [], lifetime: h?.lifetime)
         return x
     }
 }
@@ -61,8 +67,8 @@ struct ChargingSection: View {
             .task(id: preview == nil) {
                 guard preview == nil, !Demo.isEnabled else { return }
                 while !Task.isCancelled {
-                    let b = e.current?.power.battery, prev = extras
-                    extras = await Task.detached(priority: .utility) { ChargingExtras.load(battery: b, previous: prev) }.value
+                    let b = e.current?.power.battery, facts = e.current?.power.charging?.facts, prev = extras, log = e.dailyLog
+                    extras = await Task.detached(priority: .utility) { ChargingExtras.load(battery: b, facts: facts, log: log, previous: prev) }.value
                     try? await Task.sleep(for: .seconds(60))
                 }
             }
@@ -73,7 +79,7 @@ struct ChargingSection: View {
         let st = e.chargeCurve.state
         return ChargingInputs(battery: e.current?.power.battery, details: e.current?.power.charging, session: st.session,
                               peakSystemW: st.peakSystemW, pmset: extras?.pmset, condition: extras?.condition,
-                              desktopAdapter: extras?.desktopAdapter)
+                              desktopAdapter: extras?.desktopAdapter, report: extras?.report)
     }
 }
 
@@ -86,11 +92,15 @@ struct ChargingContent: View {
         VStack(spacing: 12) {
             if inputs.battery == nil {
                 NoBatteryPanel(adapter: inputs.desktopAdapter)
+                Panel(title: "Battery health", trailing: "no battery") {
+                    Text("This Mac has no battery, so there is no health to forecast or wear to measure.").foregroundStyle(p.dim)
+                }
             } else {
                 ChargerPanel(inputs: inputs)
                 ChargeFlowPanel(inputs: inputs)
                 ChargeSessionPanel(inputs: inputs)
                 BatteryFactsPanel(inputs: inputs)
+                BatteryHealthPanel(report: inputs.report)
             }
         }
     }

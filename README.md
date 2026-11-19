@@ -9,7 +9,7 @@ by showing which process and which subsystem is responsible.
 - [Build & run](#build--run)
 - [Pages](#pages)
   - [Overview](#overview): [Drill down from Summary](#drill-down-from-summary) · [Customizable cockpit](#customizable-cockpit) · [Annunciator panel](#annunciator-panel) · [Ambient mode](#ambient-mode) · [Stress Map](#stress-map) · [Diagnosis and Flight Log](#diagnosis-and-flight-log) · [Trends](#trends) · [Checkup](#checkup)
-  - [Activity](#activity): [Performance](#performance) · [Processes](#processes) · [Process inspector](#process-inspector) · [Connection quality](#connection-quality) · [Energy and storage health](#energy-and-storage-health) · [Charging insights](#charging-insights) · [Why is the fan loud?](#why-is-the-fan-loud) · [Thermals](#thermals) · [GPU](#gpu) · [Launches](#launches) · [Console](#console) · [Camera & Mic](#camera--mic)
+  - [Activity](#activity): [Performance](#performance) · [Processes](#processes) · [Process inspector](#process-inspector) · [Connection quality](#connection-quality) · [Energy and storage health](#energy-and-storage-health) · [Charging insights](#charging-insights) · [Battery health forecast](#battery-health-forecast) · [Why is the fan loud?](#why-is-the-fan-loud) · [Thermals](#thermals) · [GPU](#gpu) · [Launches](#launches) · [Console](#console) · [Camera & Mic](#camera--mic)
   - [Power](#power): [Power & Freq](#power--freq) · [Sleep & Wake](#sleep--wake)
   - [Network](#network): [Network map](#network-map) · [Wi-Fi](#wi-fi) · [Internet](#internet) · [Connections](#connections) · [UPnP](#upnp) · [UniFi](#unifi)
   - [Storage](#storage): [Disk Space › Folder Scanner](#disk-space--folder-scanner) · [Disk Space › What's Using My Disk](#disk-space--whats-using-my-disk)
@@ -207,6 +207,41 @@ only: macOS's slow-charging flag, the battery draining while plugged in, or a ch
 has drawn since launch. **Battery facts** add cycles vs design cycles, design vs full-charge capacity, temperature,
 cell voltages, condition and the manufacture date where decodable, with a link to the health history in Trends.
 Anything a Mac doesn't publish shows as "not reported by this Mac"; desktops get a "no battery" note.
+
+#### Battery health forecast
+
+![Battery health forecast (demo data)](docs/screenshots/battery-health.jpg)
+
+*Performance › Energy, under Battery facts.* When will the battery reach 80% health, the usual service threshold, and
+what is wearing it? It sits in Energy rather than Trends because it is about this battery's live facts and condition,
+and its history reaches past Trends' 90 days.
+
+- **History.** FlightDeck's daily log records health (nominal ÷ design capacity) and cycle count each day, and keeps
+  these points for five years. The days just before FlightDeck started are seeded from macOS's own power log
+  (`/private/var/db/powerlog`, world-readable, no root). It holds about ten days of the gauge's cycle count and
+  capacity, plus lifetime figures: the hottest and coldest temperature the gauge has recorded, and its operating
+  hours. AppleSmartBattery, IOPowerSources, `system_profiler` and `pmset -g log` were checked as well; they hold
+  current values only. Seeded days show as hollow dots and never replace a day FlightDeck measured.
+- **Forecast.** A Theil–Sen line runs through health against time, and another against cycles. Theil–Sen is the
+  median of all pairwise slopes, so it is robust to the 1% steps, the day-to-day wobble and the jumps when the gauge
+  recalibrates. Histories over 120 days are thinned to weekly medians. The chart shows the history, the trend and a
+  95% band from Sen's slope interval. Below it are the 80% date and its range, the cycles at 80%, the cycles left
+  before the design count, and the cycles per week. With fewer than 14 days or less than a 2% change in health, it
+  doesn't forecast. Instead it says what is missing, for example "needs about 3 more weeks", or "no measurable
+  decline yet". A battery replacement (the cycle count going down) starts the history over.
+- **What's wearing it.** These are the known ageing factors, measured from the samples FlightDeck already takes,
+  with O(1) work per sample:
+  - time at 95% charge or more while plugged in;
+  - heat: average battery temperature, and time above 35 °C and 40 °C;
+  - deep discharges below 20% and 10%;
+  - cycles per week;
+  - how often Optimized Charging or a charge limit holds the charge (the existing hold detection).
+
+  Each factor has a level and a plain-English tip. They are presented as contributors, not as a diagnosis.
+- **Condition and service.** macOS's condition (from `system_profiler`), health against 80%, and cycles against the
+  design count.
+
+Desktops show "no battery". Demo mode shows an invented 400-day history.
 
 #### Why is the fan loud?
 
@@ -625,8 +660,8 @@ errors. It may contain personal paths and names, so review it before sharing.
 | `trends` | daily rollups (or one app's days) and before/after comparisons of updates |
 | `temperatures` | every sensor by group with now/min/avg/max since launch, the hottest per group, fans with target/min/max and problems, and throttling (pmset limits, thermal state, GPU heat cap, time throttled) |
 | `wifi` | the Wi-Fi link with health ratings and low-rate reasons, and a summary of the last scan run in the app (networks per band, busiest channels, strongest networks, a channel recommendation). Never scans; SSIDs and BSSIDs only with Location permission |
-
 | `camera_mic` | whether a camera or microphone is in use now and by which app, recent sessions (device, app, times, duration) with how each app was identified (confirmed / likely / unknown), first use, unusual-hour and locked/idle flags, and per-app totals |
+| `battery` | battery facts (health, cycles against the design count, capacities, temperature, condition, the gauge's lifetime extremes), service status, the 80% forecast with its 95% range or exactly what data is missing, and the wear factors with tips |
 
 ### Guided prompts
 

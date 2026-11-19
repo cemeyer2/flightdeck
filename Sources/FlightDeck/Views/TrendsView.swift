@@ -225,7 +225,7 @@ struct TrendsContent: View, Equatable {
             Panel(title: "Battery health", trailing: cycles.last.map { "\($0) cycles" + (cycles.count > 1 ? " (+\($0 - cycles[0]) in this period)" : "") }) {
                 DayChart(values: health, labels: data.labels, maxValue: 100, format: { String(format: "%.0f%%", $0) },
                          markers: data.markers, selectedMarker: markerFor).frame(height: 90)
-                Text("Maximum capacity (full charge ÷ design), one point per day.").font(.caption).foregroundStyle(p.dim)
+                Text("Maximum capacity (full charge ÷ design), one point per day. The forecast to 80% and what's wearing the battery: Performance › Energy › Battery health.").font(.caption).foregroundStyle(p.dim)
             }
         }
     }

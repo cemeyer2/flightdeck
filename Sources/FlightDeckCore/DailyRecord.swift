@@ -91,6 +91,9 @@ public struct DayRecord: Codable, Sendable, Identifiable, Hashable {
     /// Per-app internet data usage (DataUsage.swift). nil = not counted that day (nettop unavailable, FlightDeck not
     /// running, or a record from before this was added: optional, so older files still decode).
     public var dataUsage: DataUsageDay? = nil
+    /// Battery-wear tallies: time at high charge, heat, deep discharges, holds (BatteryWear.swift). nil on Macs
+    /// without a battery and in records from before this was added (optional, so older files still decode).
+    public var batteryWear: BatteryWearDay? = nil
     /// Present only while the day is still being accumulated.
     var sums: DaySums? = nil
 

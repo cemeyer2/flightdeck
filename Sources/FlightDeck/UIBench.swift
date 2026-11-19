@@ -66,6 +66,18 @@ enum UIBench {
         // Charging insights: this Mac's live readings, then the invented demo session (96 W USB-C PD at 20 V).
         out("charging", height: 1400, ChargingSection())
         out("charging-demo", height: 1400, ChargingSection(preview: DemoCharging.inputs()))
+        // Battery health: this Mac's saved history (read-only: a log that never ingests never writes) with macOS's
+        // power-log seed merged in memory, then the demo's 400 invented days, then a desktop. Reports are built before
+        // the views (see `ready` below for why loads never run inside a view argument).
+        let liveB = e.current?.power.battery, liveFacts = e.current?.power.charging?.facts
+        let saved = DailyLog(dir: DailyLog.defaultDirectory).batteryHistory()
+        let seed = liveB == nil ? nil : PowerLogBattery.read(designCapacity: liveFacts?.designCapacity ?? liveB?.designCapacity)
+        let liveReport = BatteryReport(battery: liveB, facts: liveFacts, condition: nil, history: BatteryHistory.merge(seed?.days ?? [], saved.days),
+                                       lifetime: saved.lifetime ?? seed?.lifetime)
+        out("battery-health", height: 1100, BatteryHealthPanel(report: liveReport))
+        let demoReport = DemoCharging.inputs().report
+        out("battery-health-demo", height: 1100, BatteryHealthPanel(report: demoReport))
+        out("battery-health-desktop", height: 400, ChargingContent(inputs: ChargingInputs()))
         // UniFi: the invented demo network (no console is contacted), with a client selected in the detail pane.
         UniFiModel.shared.renderDemo(ticks: 12)
         out("unifi", height: 2300, UniFiView())

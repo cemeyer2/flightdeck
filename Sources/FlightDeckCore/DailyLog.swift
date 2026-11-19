@@ -25,6 +25,9 @@ public final class DailyLog: @unchecked Sendable {
         /// A step between snapshots longer than this is a gap (sleep, pause, FlightDeck not running): nothing measured.
         public var gap: TimeInterval = 30
         public var baseline = AppBaseline.Rules()
+        /// Seed battery history from macOS's power log (PowerLogBattery.swift), at most daily. Only for a persisted
+        /// log: an in-memory one (tests, headless renders) never reads the machine's files.
+        public var seedBatteryFromPowerLog = true
         public init() {}
     }
 
@@ -70,6 +73,13 @@ public final class DailyLog: @unchecked Sendable {
     /// App versions read from bundles: path → (version, when read). Read on `io`, at most hourly per app.
     private var versions: [String: (String?, Date)] = [:]
     private var versionsInFlight = false
+    /// Battery wear (BatteryWear.swift): the deep-discharge hysteresis between snapshots.
+    private var wearCounter = BatteryWearCounter()
+    /// The long-term battery points (BatteryHistory.swift), oldest first, kept for `BatteryHistory.retentionDays`;
+    /// the gauge's lifetime figures from the power log; and when the power log was last read.
+    private var longBattery: [BatteryDay] = []
+    private var batteryLifetime: BatteryLifetime?
+    private var lastBatterySeed: Date?
 
     public init(dir: URL?, config: Config = Config(), calendar: Calendar = .current,
                 osVersion: String? = DailyLog.currentOSVersion, osBuild: String? = Sysctl.string("kern.osversion")) {
@@ -133,6 +143,8 @@ public final class DailyLog: @unchecked Sendable {
         if let b = s.power.battery {
             if let h = b.health { d.batteryHealth = h }
             if let c = b.cycleCount { d.cycleCount = c }
+            wearCounter.ingest(s, dt: dt, into: &d.batteryWear)
+            seedBatteryIfDue(designCapacity: s.power.charging?.facts.designCapacity ?? b.designCapacity, at: s.time)
         }
         d.osVersion = osVersion; d.osBuild = osBuild
         d.sums = sums
@@ -266,6 +278,8 @@ public final class DailyLog: @unchecked Sendable {
         if d.observedSeconds > 0 || !d.apps.isEmpty || d.dataUsage != nil {
             closed.append(d); closed.sort { $0.start < $1.start }
         }
+        // The battery point outlives the 90-day record.
+        if let b = BatteryDay(d) { longBattery = BatteryHistory.trim(BatteryHistory.merge(longBattery, [b]), now: d.start) }
         closedDirty = true
         today = nil; todayApps = [:]
     }
@@ -293,7 +307,12 @@ public final class DailyLog: @unchecked Sendable {
     // its running sums, and the battery sessions; small, rewritten every `flushInterval`).
 
     struct OpenState: Codable { var version = 1; var today: DayRecord?; var session: ChargeSession?; var lastSession: ChargeSession? }
-    struct ClosedState: Codable { var version = 1; var days: [DayRecord] }
+    struct ClosedState: Codable {
+        var version = 1; var days: [DayRecord]
+        /// Long-term battery points and gauge lifetime figures; absent in files from before they existed.
+        var battery: [BatteryDay]? = nil
+        var batteryLifetime: BatteryLifetime? = nil
+    }
     var closedURL: URL? { dir?.appendingPathComponent("daily-log.json") }
     var openURL: URL? { dir?.appendingPathComponent("daily-today.json") }
     private static func encoder() -> JSONEncoder { let e = JSONEncoder(); e.dateEncodingStrategy = .secondsSince1970; return e }
@@ -303,7 +322,10 @@ public final class DailyLog: @unchecked Sendable {
     /// The saved open day is continued if it's still today (checked on the first `ingest`, which rolls it over otherwise).
     private func load() {
         guard let c = closedURL, let o = openURL else { return }
-        if let d = try? Data(contentsOf: c), let st = try? Self.decoder().decode(ClosedState.self, from: d) { closed = st.days.sorted { $0.start < $1.start } }
+        if let d = try? Data(contentsOf: c), let st = try? Self.decoder().decode(ClosedState.self, from: d) {
+            closed = st.days.sorted { $0.start < $1.start }
+            longBattery = (st.battery ?? []).sorted { $0.start < $1.start }; batteryLifetime = st.batteryLifetime
+        }
         if let d = try? Data(contentsOf: o), let st = try? Self.decoder().decode(OpenState.self, from: d) {
             today = st.today
             if today != nil && today!.sums == nil { today!.sums = DaySums() }
@@ -325,7 +347,7 @@ public final class DailyLog: @unchecked Sendable {
         // Keep the open day's full app list on disk: it is trimmed when the day closes, not before.
         t?.sums = today?.sums
         let open = try? Self.encoder().encode(OpenState(today: t, session: session, lastSession: lastSession))
-        let closedData = closedDirty ? try? Self.encoder().encode(ClosedState(days: closed)) : nil
+        let closedData = closedDirty ? try? Self.encoder().encode(ClosedState(days: closed, battery: longBattery, batteryLifetime: batteryLifetime)) : nil
         closedDirty = false
         return {
             try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -400,6 +422,36 @@ public final class DailyLog: @unchecked Sendable {
         return ChargeStatus(current: session, last: lastSession)
     }
 
+    /// The battery's history for the forecast: the long-term points, the 90-day records and today, merged by day
+    /// (FlightDeck's own readings win over seeded ones), plus the gauge's lifetime figures. O(days); call on demand.
+    public func batteryHistory() -> (days: [BatteryDay], lifetime: BatteryLifetime?) {
+        lock.lock(); defer { lock.unlock() }
+        var recent = closed.compactMap(BatteryDay.init)
+        if let t = today.flatMap(BatteryDay.init) { recent.append(t) }
+        return (BatteryHistory.merge(longBattery, recent), batteryLifetime)
+    }
+
+    /// Adds seeded points (macOS's power log) for days FlightDeck has no battery reading of, and the lifetime figures.
+    public func seedBattery(_ seed: PowerLogSeed) {
+        lock.lock(); defer { lock.unlock() }
+        var known = Set(longBattery.map(\.day))
+        for r in closed where r.batteryHealth != nil || r.cycleCount != nil { known.insert(r.day) }
+        if let t = today, t.batteryHealth != nil || t.cycleCount != nil { known.insert(t.day) }
+        let fresh = seed.days.filter { !known.contains($0.day) }
+        if !fresh.isEmpty { longBattery = BatteryHistory.merge(longBattery, fresh) }
+        if let l = seed.lifetime { batteryLifetime = l }
+        closedDirty = true
+    }
+
+    /// From `system` (caller holds `lock`): reads the power log on `io` at launch and then daily, for a persisted log.
+    private func seedBatteryIfDue(designCapacity: Int?, at t: Date) {
+        guard dir != nil, config.seedBatteryFromPowerLog, lastBatterySeed.map({ t.timeIntervalSince($0) >= 86_400 || t < $0 }) ?? true else { return }
+        lastBatterySeed = t
+        io.async { [weak self] in
+            if let seed = PowerLogBattery.read(designCapacity: designCapacity) { self?.seedBattery(seed) }
+        }
+    }
+
     /// The current baseline findings (what the last `ingest` returned).
     public var findings: [Finding] { lock.lock(); defer { lock.unlock() }; return watch.findings }
 
@@ -450,9 +502,10 @@ public final class DailyLog: @unchecked Sendable {
     }
 
     /// Demo mode / previews only: replaces the in-memory history. Refused for a persisted log.
-    public func replaceForDemo(days: [DayRecord], charge: ChargeStatus) {
+    public func replaceForDemo(days: [DayRecord], charge: ChargeStatus, battery: [BatteryDay] = []) {
         guard dir == nil else { return }
         lock.lock(); defer { lock.unlock() }
+        longBattery = battery; batteryLifetime = nil
         closed = days.sorted { $0.start < $1.start }; today = nil; todayApps = [:]; todayNet = DataUsageTally()
         session = charge.current; lastSession = charge.last
         baselines = AppBaseline.build(from: closed, now: closed.last.map { $0.start.addingTimeInterval(86_400) } ?? Date(), rules: config.baseline)

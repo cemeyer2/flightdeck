@@ -32,6 +32,8 @@ public protocol MCPDataSource: AnyObject, Sendable {
     func wifiPermission() async -> WiFiPermission.Status
     /// Camera & Mic: the live state (nil if it isn't being watched) and the session history, or nil if unavailable.
     func cameraMic() async -> (live: CameraMicLive?, store: CameraMicStore)?
+    /// The battery's long-term history (BatteryHistory.swift) and the gauge's lifetime figures, or nil if unavailable.
+    func batteryHistory() async -> (days: [BatteryDay], lifetime: BatteryLifetime?)?
 }
 
 extension MCPDataSource {
@@ -44,6 +46,11 @@ extension MCPDataSource {
     public func wifiPermission() async -> WiFiPermission.Status { WiFiPermission.status() }
     /// Sources without the app's watch (tests) have no camera and microphone data.
     public func cameraMic() async -> (live: CameraMicLive?, store: CameraMicStore)? { nil }
+    /// By default, the battery points of the Trends history (90 days, no long-term or seeded points, no lifetime).
+    public func batteryHistory() async -> (days: [BatteryDay], lifetime: BatteryLifetime?)? {
+        guard let h = await dailyHistory() else { return nil }
+        return (h.days.compactMap(BatteryDay.init), nil)
+    }
     /// Checkup with the swap trend taken from the black box's coarse tier, as the Checkup view does.
     public func runCheckup() async -> [CheckResult] {
         let trace = await blackBox(.coarse, from: Date().addingTimeInterval(-86_400), to: Date())
@@ -116,6 +123,12 @@ public final class StandaloneMCPSource: MCPDataSource, @unchecked Sendable {
         // Loading only reads the saved days; nothing is ingested, so `flush` (the only writer) has nothing to write.
         let dir = dailyDir
         return await Task.detached(priority: .userInitiated) { DailyLog(dir: dir).history() }.value
+    }
+
+    /// The app's saved battery history, read-only (a log that never ingests never seeds or writes).
+    public func batteryHistory() async -> (days: [BatteryDay], lifetime: BatteryLifetime?)? {
+        let dir = dailyDir
+        return await Task.detached(priority: .userInitiated) { DailyLog(dir: dir).batteryHistory() }.value
     }
 
     public func checkup() async -> [CheckResult] { await runCheckup() }

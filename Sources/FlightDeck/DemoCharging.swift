@@ -16,7 +16,8 @@ enum DemoCharging {
         let details = ChargingDetails.parse(registry)
         let battery = try? JSONDecoder().decode(BatteryInfo.self, from: Data(batteryJSON.utf8))
         return ChargingInputs(battery: battery, details: details, session: ChargeSessionCurve(start: start, points: points),
-                              peakSystemW: 41, pmset: nil, condition: "Good", desktopAdapter: nil, now: now)
+                              peakSystemW: 41, pmset: nil, condition: "Good", desktopAdapter: nil, now: now,
+                              report: DemoBattery.report(battery: battery, facts: details.facts, now: now))   // 400 invented days
     }
 
     /// The invented battery (percent, charging state, capacities, temperature, 12.48 V × 3.92 A ≈ 48.9 W in).

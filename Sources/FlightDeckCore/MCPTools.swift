@@ -14,6 +14,10 @@ public struct MCPTools: MCPToolProvider {
     var stackSampler: @Sendable (Int32, Int) -> String = { ProcessInspector.sampleStacks(pid: $0, seconds: $1) }
     var inspector: @Sendable (Int32, String) -> ProcessDetails = { ProcessInspector.details(pid: $0, path: $1) }
     var ownUID: UInt32 = getuid()
+    /// The battery's condition from system_profiler (~1 s); tests replace it so they never read the machine.
+    var batteryCondition: @Sendable () -> String? = {
+        Shell.run("/usr/sbin/system_profiler", ["-json", "SPPowerDataType"], timeout: 20).flatMap { CheckupParse.battery(Data($0.utf8))?.condition }
+    }
 
     public init(source: MCPDataSource) { self.source = source }
 
@@ -24,7 +28,7 @@ public struct MCPTools: MCPToolProvider {
     down with list_processes, get_process and sample_stacks (why a process of the user's is busy or hung), history (the \
     black box: statistics over the last minutes or hours), recent_incidents (the Flight Log), diagnostic_reports (crashes \
     and hangs), checkup (health and security checklist), temperatures (every sensor, fans, throttling), wifi (the Wi-Fi link's health and the last nearby-network scan), trends (daily history, before/after app and macOS updates) and \
-    camera_mic (which apps used the camera or microphone, and when). \
+    camera_mic (which apps used the camera or microphone, and when) and battery (health forecast and what's wearing the battery). \
     All tools are read-only. Values FlightDeck could not measure are marked "unavailable", never reported as 0.
     """
 
@@ -84,6 +88,7 @@ public struct MCPTools: MCPToolProvider {
             case "temperatures": out = try await temperatures()
             case "wifi": out = try await wifi()
             case "camera_mic": out = try await cameraMic(a)
+            case "battery": out = try await battery()
             default: return .error("Unknown tool \(name)")
             }
             return MCPToolResult(text: out.text)
@@ -175,6 +180,9 @@ public struct MCPTools: MCPToolProvider {
                             ("days", Self.int("Days of history to include, ending now.", 1, 90, 7)),
                             ("limit", Self.int("Most sessions to list.", 1, 500, 50)),
                         ])),
+            MCPToolSpec(name: "battery", title: "Battery health forecast and wear",
+                        description: "The battery's facts now (charge, health %, cycles against the design count, capacities, temperature, condition, the gauge's lifetime extremes), a service status, a forecast of when health reaches 80% (Theil–Sen trend with a 95% range, from FlightDeck's daily history and up to ~10 days seeded from macOS's power log) or exactly what data is missing, and the known ageing factors measured from FlightDeck's samples: time at high charge while plugged in, heat, deep discharges, cycles per week and charge-limit / Optimized Charging holds, each with a tip. Desktops report no battery.",
+                        inputSchema: Self.schema([])),
         ]
     }
 }
