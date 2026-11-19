@@ -3,21 +3,41 @@
 A native macOS task manager and system monitor (Swift, SwiftUI + AppKit). It answers "why is my Mac slow?"
 by showing which process and which subsystem is responsible.
 
+## Contents
+
+- [Screenshots](#screenshots)
+- [Build & run](#build--run)
+- [Pages](#pages)
+  - [Overview](#overview): [Drill down from Summary](#drill-down-from-summary) · [Customizable cockpit](#customizable-cockpit) · [Annunciator panel](#annunciator-panel) · [Ambient mode](#ambient-mode) · [Stress Map](#stress-map) · [Diagnosis and Flight Log](#diagnosis-and-flight-log) · [Trends](#trends) · [Checkup](#checkup)
+  - [Activity](#activity): [Performance](#performance) · [Processes](#processes) · [Process inspector](#process-inspector) · [Connection quality](#connection-quality) · [Energy and storage health](#energy-and-storage-health) · [Charging insights](#charging-insights) · [Why is the fan loud?](#why-is-the-fan-loud) · [Thermals](#thermals) · [GPU](#gpu) · [Launches](#launches) · [Console](#console) · [Camera & Mic](#camera--mic)
+  - [Power](#power): [Power & Freq](#power--freq) · [Sleep & Wake](#sleep--wake)
+  - [Network](#network): [Network map](#network-map) · [Wi-Fi](#wi-fi) · [Internet](#internet) · [Connections](#connections) · [UPnP](#upnp) · [UniFi](#unifi)
+  - [Storage](#storage): [Disk Space › Folder Scanner](#disk-space--folder-scanner) · [Disk Space › What's Using My Disk](#disk-space--whats-using-my-disk)
+  - [System](#system): [System Info](#system-info) · [Installed Apps](#installed-apps) · [Startup Apps](#startup-apps) · [Peripherals](#peripherals) · [Services](#services) · [Users](#users)
+  - [Tools](#tools): [Rules](#rules) · [Developer](#developer) · [Benchmarks](#benchmarks)
+- [Recording and replay](#recording-and-replay): [Flight Recorder](#flight-recorder) · [Black box](#black-box) · [Export](#export) · [Compare recordings](#compare-recordings)
+- [Everywhere in the app](#everywhere-in-the-app): [Settings and appearance](#settings-and-appearance) · [Master caution](#master-caution) · [Live Dock icon](#live-dock-icon) · [Command palette](#command-palette) · [Capture Diagnostics…](#capture-diagnostics)
+- [Integrations](#integrations): [AI assistants (MCP)](#ai-assistants-mcp) · [Guided prompts](#guided-prompts) · [Prometheus endpoint](#prometheus-endpoint) · [Command line](#command-line)
+- [Measurement principles](#measurement-principles)
+- [Known limits](#known-limits)
+- [Layout](#layout)
+
 ## Screenshots
 
 These are taken in demo mode, which feeds the real UI invented data (a busy "Demo Mac" on an invented network), so nothing here describes a real machine.
 
 | | |
 |---|---|
-| ![Summary](docs/screenshots/summary.jpg) **Summary:** a customisable cockpit of instruments, the annunciator panel and what's wrong right now | ![Stress Map](docs/screenshots/stress-map.jpg) **Stress Map:** which apps are straining which parts of the Mac, animated between samples |
+| ![Summary](docs/screenshots/summary.jpg) **Summary:** a customisable cockpit of instruments; click any one for its detailed view | ![Stress Map](docs/screenshots/stress-map.jpg) **Stress Map:** which apps are straining which parts of the Mac, animated between samples |
 | ![Flight Log](docs/screenshots/flight-log.jpg) **Flight Log:** a 24 h timeline, past incidents with stack evidence, and macOS crash/hang reports | ![Trends](docs/screenshots/trends.jpg) **Trends:** 90 days of daily history, with before/after comparisons around updates |
-| ![Processes](docs/screenshots/processes.jpg) **Processes:** grouped by app, with GPU, disk, network and energy per process | ![Performance › CPU](docs/screenshots/cpu.jpg) **Performance › CPU:** per-cluster load and clocks, coloured by performance/efficiency core |
+| ![Processes](docs/screenshots/processes.jpg) **Processes:** grouped by app, with GPU, disk, network and energy per process | ![Camera & Mic](docs/screenshots/camera-mic.jpg) **Camera & Mic:** which app used the camera or microphone, and when |
+| ![Performance › CPU](docs/screenshots/cpu.jpg) **Performance › CPU:** per-cluster load and clocks, coloured by performance/efficiency core | ![Performance › Thermals](docs/screenshots/thermals.jpg) **Performance › Thermals:** every sensor by component, throttling, fan health and "why is the fan loud?" |
 | ![Performance › Energy](docs/screenshots/charging.jpg) **Performance › Energy:** what the charger negotiated and where the power goes | ![Sleep & Wake](docs/screenshots/sleep-wake.jpg) **Sleep & Wake:** dark wakes, overnight drain, and who kept the Mac awake |
-| ![Network](docs/screenshots/network.jpg) **Network:** the devices on the local network, from this Mac to the internet | ![Internet](docs/screenshots/internet.jpg) **Internet:** speed and responsiveness tests explained, and data usage per app |
-| ![UPnP](docs/screenshots/upnp.jpg) **UPnP:** UPnP devices and the port mappings apps opened on the router | ![UniFi](docs/screenshots/unifi.jpg) **UniFi:** a UniFi console's real topology: which AP or switch port each client is on |
-| ![Disk Space](docs/screenshots/disk-space.jpg) **Disk Space:** what is using the disk, "System Data" explained, and safe cleanups | ![Developer](docs/screenshots/developer.jpg) **Developer:** dev servers, containers, Homebrew services, builds and toolchains |
-| ![Rules](docs/screenshots/rules.jpg) **Rules:** automatic responses to sustained problems | ![Cockpit editing](docs/screenshots/cockpit-edit.jpg) **Cockpit editing:** add, remove, reorder and resize instruments; save layouts |
-| ![Ambient mode](docs/screenshots/ambient.jpg) **Ambient mode:** a dim full-screen instrument panel for a second display |  |
+| ![Network](docs/screenshots/network.jpg) **Network:** the devices on the local network, from this Mac to the internet | ![Wi-Fi](docs/screenshots/wifi.jpg) **Wi-Fi:** your link over time, roams, channel congestion and a channel suggestion |
+| ![Internet](docs/screenshots/internet.jpg) **Internet:** speed and responsiveness tests explained, and data usage per app | ![UPnP](docs/screenshots/upnp.jpg) **UPnP:** UPnP devices and the port mappings apps opened on the router |
+| ![UniFi](docs/screenshots/unifi.jpg) **UniFi:** a UniFi console's real topology: which AP or switch port each client is on | ![Disk Space](docs/screenshots/disk-space.jpg) **Disk Space:** what is using the disk, "System Data" explained, and safe cleanups |
+| ![Developer](docs/screenshots/developer.jpg) **Developer:** dev servers, containers, Homebrew services, builds and toolchains | ![Rules](docs/screenshots/rules.jpg) **Rules:** automatic responses to sustained problems |
+| ![Cockpit editing](docs/screenshots/cockpit-edit.jpg) **Cockpit editing:** add, remove, reorder and resize instruments; save layouts | ![Ambient mode](docs/screenshots/ambient.jpg) **Ambient mode:** a dim full-screen instrument panel for a second display |
 
 ## Build & run
 
@@ -57,9 +77,13 @@ demo-data version for screenshots (see Demo mode at the end).
 
 Is my Mac OK, now and over time?
 
-**Drill down from Summary:** click any instrument (a "›" in its corner, a pointing-hand cursor and a tooltip show where it goes) to open the detailed view behind it: CPU and CPU Cores open Performance › CPU; Memory, Memory Pressure and Swap open Performance › Memory; Disk, Network and Wi-Fi Signal, GPU, Energy and Battery & Charge, and Thermals and Fans open their Performance tabs; Top Processes opens Processes; the mini Stress Map opens the Stress Map. The annunciator lights and each finding already open their own causes.
+#### Drill down from Summary
 
-**Customizable cockpit:** the Summary page is a grid of instruments you can arrange. Click **Edit** (⌥⌘E) to get a
+Click any instrument (a "›" in its corner, a pointing-hand cursor and a tooltip show where it goes) to open the detailed view behind it: CPU and CPU Cores open Performance › CPU; Memory, Memory Pressure and Swap open Performance › Memory; Disk, Network and Wi-Fi Signal, GPU, Energy and Battery & Charge, and Thermals and Fans open their Performance tabs; Top Processes opens Processes; the mini Stress Map opens the Stress Map. The annunciator lights and each finding already open their own causes.
+
+#### Customizable cockpit
+
+The Summary page is a grid of instruments you can arrange. Click **Edit** (⌥⌘E) to get a
 strip above each instrument with a drag handle, a size control (S = one column, M = two, L = the whole row), move
 buttons and a remove (×) button, plus an "Add instrument" palette. Drag instruments onto each other to reorder them;
 **Done** leaves edit mode. Besides the classic Summary cards (annunciator, findings, CPU, Memory, Disk, Network, Energy,
@@ -69,11 +93,15 @@ as JSON in user defaults (`cockpitLayouts`); the layout menu switches between th
 Ambient, plus your own via Duplicate Layout) and resets one or all of them. Nothing is saved until you edit, and the
 Default layout is the classic Summary page, so the page looks the same until you change it.
 
-**Annunciator panel:** across the top of Summary, a cockpit-style grid of labelled lights (CPU, MEM, SWAP, THERM,
+#### Annunciator panel
+
+Across the top of Summary, a cockpit-style grid of labelled lights (CPU, MEM, SWAP, THERM,
 DISK, STORAGE, NET, GPU, POWER, HANG, CRASH, AWAKE), each lit amber or red by the worst current finding in that
 subsystem. Hover to see why; click to jump to the cause.
 
-**Ambient mode:** View › Ambient Mode (⌃⌘A), or the Ambient menu on Summary, opens a separate full-screen instrument
+#### Ambient mode
+
+View › Ambient Mode (⌃⌘A), or the Ambient menu on Summary, opens a separate full-screen instrument
 panel, meant for a second display or an iPad via Sidecar (View › Ambient Mode on Display picks the screen; the last one
 used is remembered). It shows a big clock and uptime, the master caution light (lit with a steady glow while an
 unmuted caution or warning is active), large gauges for the gauge-type instruments of the Ambient layout (or another
@@ -82,7 +110,9 @@ default (right-click for brightness), the pointer hides when it rests, and Esc e
 panel moves by one point a minute around a 12-point square. Like the cockpit it redraws only once per sample (plus a
 once-a-minute tick for the clock), with no continuous animation.
 
-**Stress Map:** a graphical answer to "what is making my Mac miserable?". Subsystems (CPU, GPU, Thermal, Energy,
+#### Stress Map
+
+A graphical answer to "what is making my Mac miserable?". Subsystems (CPU, GPU, Thermal, Energy,
 Network, Disk, Memory) are hubs around a ring, coloured by how strained each one is; apps are bubbles sized by how much
 misery they cause and pulled toward the hubs they strain, with routes whose width shows how much they add there.
 Hover for an app's breakdown, click to inspect it. Misery = the app's share of a resource × how strained that resource
@@ -91,14 +121,18 @@ bubbles glide to each new sample's position, routes and hub gauges ease to their
 the routes toward the hubs. It's drawn with Core Animation, so the motion runs in macOS's render server and costs about
 the same CPU as a static map. Settings › General › "Animate the Stress Map" (or macOS's Reduce Motion) turns it off.
 
-**Diagnosis and Flight Log:** an analyzer turns the sample stream into plain-English findings on the Summary banner
+#### Diagnosis and Flight Log
+
+An analyzer turns the sample stream into plain-English findings on the Summary banner
 (click one to jump to where to look). It smooths over spikes and groups helper processes into their app. It detects
 apps hogging CPU, memory pressure and growing swap, apps whose memory grows steadily (likely leaks), thermal throttling (and explains kernel_task), measured CPU throttling (busy performance cores held well below their top clock while hot), heavy disk or network I/O, frequent wake-ups, a startup disk that will fill up within days,
 and anything unusual for *this* Mac, compared with a baseline built from the black box's 24 hours. Well-known
 background work (Spotlight, Time Machine, iCloud, Photos analysis, updates) is explained. Anything lasting 20 s or
 more goes into the **Flight Log** (kept 7 days) with a one-click replay of that moment from the black box. A **timeline** (1/6/24 h) of CPU, memory pressure and temperature with incident markers sits on top; click any moment to replay it. The Flight Log also lists **macOS reports** from the last 7 days (crashes with exception type, hangs, memory kills, CPU and disk-write limit violations), and an app that crashes or hangs repeatedly becomes a finding. When an app hangs or hogs the CPU or GPU, FlightDeck **captures its call stacks automatically** (3 s with `/usr/bin/sample`, at most one per problem every 10 minutes) and attaches them to the incident with a one-line summary such as "Main thread waiting in __psynch_mutexwait ← -[Model sortItems:]" (Settings to turn off; kept 7 days). Muting (right-click a finding) can target one finding or a whole kind (e.g. every not-responding alert); muted findings don't notify or light the caution lights and are listed as muted in the banner. Right-click a finding to inspect the responsible process, quit its app, or mute its alerts.
 
-**Trends** keeps one compact record per day for 90 days (`~/Library/Application Support/Flightdeck/daily-log.json`),
+#### Trends
+
+Trends keeps one compact record per day for 90 days (`~/Library/Application Support/Flightdeck/daily-log.json`),
 folded from the samples FlightDeck already takes: average and 95th-percentile CPU, memory pressure, peak swap, energy,
 hottest sensor, sleep, crashes, hangs and incidents, macOS version, battery health and cycles, and the top ~30 apps' CPU
 time, energy, peak memory and version. Charts cover 7, 30 or 90 days, with markers on days macOS or an app changed
@@ -108,7 +142,9 @@ it for 10 minutes ("Safari is using 3× its usual memory (usually ~1.8 GB)"). Pe
 **where this charge went**: each app's share of the energy since the Mac was unplugged. Days FlightDeck didn't run are
 gaps, never zeros.
 
-**Checkup** is a one-page health and security checklist: SIP, FileVault, Gatekeeper, firewall, Startup Security,
+#### Checkup
+
+Checkup is a one-page health and security checklist: SIP, FileVault, Gatekeeper, firewall, Startup Security,
 automatic and pending updates (the network check runs only when you press Check Now), Time Machine, free space, drive
 and battery health, crashes and hangs this week, uptime, swap trend, login and background items, third-party kernel and
 system extensions. Each row is OK, needs attention or unknown (with the reason), and links to the setting that fixes it.
@@ -117,11 +153,23 @@ system extensions. Each row is OK, needs attention or unknown (with the reason),
 
 What is running and what it costs. Performance has tabs for CPU, Memory, Disk, Network, Energy, Thermals and GPU.
 
-**Processes** can be shown as a parent/child **Tree**, grouped by **Apps** (every helper rolled into its app, with
+#### Performance
+
+One page with a tab per subsystem. **CPU**: total, user and system load, load averages, and per-core tiles coloured by
+performance/efficiency core (overall, logical-processor and cluster views, with live cluster clocks). **Memory**:
+composition (app, wired, compressed, cached, free), pressure, swap, paging and compression rates, and memory by app.
+**Disk**: read/write rates overall and per device, capacity per volume, top disk processes and drive health. **Network**:
+bandwidth, interfaces, per-app traffic and connection quality. **Energy**, **Thermals** and **GPU** are described below.
+
+#### Processes
+
+The process list can be shown as a parent/child **Tree**, grouped by **Apps** (every helper rolled into its app, with
 app-level Quit / Force Quit), or **Flat**. The filter understands queries: `cpu>50 mem>1g user:root app:chrome kind:intel gpu>0 wakeups>500 sleep hung` (terms combine; plain text matches name, path, user or PID). Right-click the column header to choose columns; layout persists. ⌘1–⌘9 jump between sections (Go menu). The **Kind** column shows Apple-silicon or Intel (Rosetta) binaries, and **Sleep** shows who is keeping the Mac or display awake (also a finding, with the reason the app gave). Apps the window server considers hung are marked **Not Responding** in red
 and raise a warning finding.
 
-**Process inspector:** double-click a process (or ⌘I, or Inspect… in its menu) to open it in its own window:
+#### Process inspector
+
+Double-click a process (or ⌘I, or Inspect… in its menu) to open it in its own window:
 CPU, memory, disk and network history (every process's last 300 samples are kept, not just the busiest), PID,
 parent and children, user, start time, CPU time, energy, wake-ups, arguments, working directory (the environment is shown only where macOS allows it), code signature
 (Apple, Developer ID, ad-hoc or invalid; team; hardened runtime), kernel statistics with rates (page faults, page-ins, Unix and Mach syscalls, context switches, Mach messages, resident/virtual and peak memory, instructions per cycle, logical writes), every open file descriptor, sockets with addresses
@@ -129,18 +177,24 @@ and TCP state, threads (CPU, state, priority, times), the environment, and call-
 `/usr/bin/sample` to see why it's busy or hung. Actions: quit, force quit, suspend, resume, lower priority (nice).
 Anything macOS doesn't let a normal user read for other users' processes is shown as unavailable.
 
-**Connection quality** (Performance › Network): Wi-Fi signal, noise, SNR, link rate, channel, band, width, PHY and
+#### Connection quality
+
+*Performance › Network.* Wi-Fi signal, noise, SNR, link rate, channel, band, width, PHY and
 security from CoreWLAN, plus router and DNS servers, all local. An opt-in probe (off by default) pings the router and
 an internet host every 10 s, so FlightDeck can tell "your Wi-Fi is the problem" from "your internet provider is".
 
-**Energy and storage health:** Performance › Energy has an **energy budget**: which apps used the most energy
+#### Energy and storage health
+
+Performance › Energy has an **energy budget**: which apps used the most energy
 (Wh and average W) over the last 1, 8 or 24 hours, how long the Mac ran on battery and how much charge that took,
 and a battery charge history, all from the black box. Battery health uses the same capacity figure as macOS
 (nominal ÷ design). Performance › Disk shows **drive health** from the SSD's NVMe SMART log (wear, spare,
 lifetime reads and writes, power-on hours, unsafe shutdowns, media errors) and how many days until the startup
 disk fills at the current rate. Unhealthy drives raise a warning.
 
-**Charging insights** (Performance › Energy): what the charger negotiated, read from AppleSmartBattery via IOKit in
+#### Charging insights
+
+*Performance › Energy.* What the charger negotiated, read from AppleSmartBattery via IOKit in
 the same read as the battery readings: rated watts, the USB-PD offers and the one in use ("this charger offers
 5/9/15/20 V; it's using 20 V × 4.7 A = 94 W", from `UsbHvcMenu`, or decoded from the USB-C port controller's PD
 capabilities), the adapter type and the port controller carrying the contract. A **flow diagram** shows adapter → Mac
@@ -154,12 +208,16 @@ has drawn since launch. **Battery facts** add cycles vs design cycles, design vs
 cell voltages, condition and the manufacture date where decodable, with a link to the health history in Trends.
 Anything a Mac doesn't publish shows as "not reported by this Mac"; desktops get a "no battery" note.
 
-**Why is the fan loud?** (Performance › Thermals): when fans spin above idle or thermal pressure rises, a card connects
+#### Why is the fan loud?
+
+*Performance › Thermals.* When fans spin above idle or thermal pressure rises, a card connects
 fan speed (against its minimum and maximum), the hottest sensor, whether macOS is holding the CPU/GPU back for heat, and
 which apps produce the heat, e.g. "Fan at 4,200 rpm (idle ~1,200) because the CPU is at 92 °C; Photos is responsible for
 ~60% of the power draw." On fanless Macs it explains throttling instead.
 
-**Thermals** (Performance › Thermals) is a full temperature monitor:
+#### Thermals
+
+*Performance › Thermals.* The Thermals tab is a full temperature monitor:
 
 - **Sensor catalog.** Both sources are read on the same 4 s cadence: the HID temperature sensors ("PMU tdie1",
   "pACC MTR Temp Sensor0", "gas gauge battery", "NAND CH0 temp") and the SMC temperature keys that have a known meaning
@@ -196,7 +254,9 @@ from the same map but haven't been checked on those chips. A base M1 gets no per
 already name the P and E clusters). Intel uses the classic keys every Intel Mac monitor reads. Chips the tables don't
 know (newer than M4) get the common keys only.
 
-**GPU** (Performance › GPU): utilisation (device, renderer, tiler), active residency, live average clock and a
+#### GPU
+
+*Performance › GPU.* Utilisation (device, renderer, tiler), active residency, live average clock and a
 per-P-state histogram, GPU power, GPU memory in use against Metal's recommended working set, driver
 **recoveries** (GPU hangs that macOS reset), thermal clock capping, per-app GPU share and total GPU time (also a
 GPU % column in Processes and a graph in the inspector), live CPU cluster clocks, and Metal and display details.
@@ -204,18 +264,24 @@ The data comes from the accelerator's statistics and IOReport, readable without 
 from normal users (CPU, ANE, DRAM) are shown as unavailable, not 0. Findings cover GPU hangs, thermal capping,
 GPU memory near its limit, and apps hogging the GPU.
 
-**Launches** lists process launches and exits seen between samples (name, PID, parent, user, lifetime), with
+#### Launches
+
+This page lists process launches and exits seen between samples (name, PID, parent, user, lifetime), with
 "launched N× in the last 10 minutes" grouping, and raises a finding when something respawns over and over. Processes that
 live less than one sample interval are missed. The inspector also gains a **Memory** tab that breaks a process's memory
 into heap, graphics, mapped files, code, stacks and so on (via `footprint`/`vmmap`; your own processes only).
 
-**Console:** errors and faults from the unified log over the last 5 minutes, hour or 24 hours, grouped by process and
+#### Console
+
+Errors and faults from the unified log over the last 5 minutes, hour or 24 hours, grouped by process and
 subsystem with counts and sparklines, the noisiest processes, sample messages per group, a filter, and a live tail
 (`log stream`, only while the window is visible). Keeps the newest 20,000 messages; 24 h queries are read newest-first in
 hourly chunks with progress and Cancel, and stop at 1 million messages. macOS redacts message details it considers
 private as `<private>`; the Console says how many are affected.
 
-**Camera & Mic** is a privacy watch. macOS lights a green or orange dot while the camera or microphone is in use, but
+#### Camera & Mic
+
+This page is a privacy watch. macOS lights a green or orange dot while the camera or microphone is in use, but
 keeps no history and doesn't always say which app. This page shows what's in use right now and by which app, a
 timeline (today, 7 or 30 days: one row per day, camera and microphone in separate lanes, midnight to 6 a.m. shaded)
 and every session (device, app, start, end, duration), filterable by app and device. Sessions at unusual hours, while
@@ -246,17 +312,23 @@ use is recorded, never audio or video, and the history stays on this Mac** (`cam
 
 ### Power
 
-Power & Freq shows clocks, power states and throttling.
+#### Power & Freq
 
-**Sleep & Wake** reads the power-management log (no root): every sleep session with why it slept, what woke it,
+The power state (source, battery, Low Power Mode, thermal pressure), the active power-management settings from
+`pmset`, and each CPU/GPU cluster's frequency table (the DVFS states the chip can run at), for reading alongside the
+live clocks in Performance.
+
+#### Sleep & Wake
+
+This page reads the power-management log (no root): every sleep session with why it slept, what woke it,
 each dark wake (screen-off wakes for network upkeep, Power Nap, Bluetooth) in plain English, battery used overnight,
 which processes scheduled wakes, and which apps kept the Mac awake and for how long.
 
 ### Network
 
-Connections lists this user's sockets, with the listening-ports panel on top.
+#### Network map
 
-**Network** is a map of the local network: this Mac, its interface (Wi-Fi with network name, access point BSSID and
+The Network page is a map of the local network: this Mac, its interface (Wi-Fi with network name, access point BSSID and
 channel), the subnet with every device seen on it, the gateway, and the path to the internet. Other interfaces (a VPN
 tunnel, a second Ethernet) are separate branches. Click a device for its details: IPv4 and IPv6 addresses, MAC,
 manufacturer (from a bundled table of ~13,000 MAC prefixes of common vendors, generated from the IEEE registry by
@@ -273,7 +345,9 @@ for **Local Network** permission the first time; without it, macOS 27 returns an
 the view says so. The Wi-Fi name and BSSID need Location Services permission. In demo mode the view shows an invented
 network.
 
-**Wi-Fi** is a Wi-Fi analyzer. *Your connection*: signal, noise, SNR and link rate, each of signal, signal-to-noise,
+#### Wi-Fi
+
+The Wi-Fi page is an analyzer. *Your connection*: signal, noise, SNR and link rate, each of signal, signal-to-noise,
 interference and channel width rated in plain English, the link rate against the maximum for its standard and width
 (assuming two spatial streams, as most Macs have) and the likely reasons it's low (weak signal, noise, 2.4 GHz, a narrow
 channel, an older standard, crowded airtime). *Link over time*: RSSI and noise, SNR and link rate while the page is
@@ -294,7 +368,9 @@ FlightDeck asks. Channels, signal and congestion still work without it; your own
 channel and signal, and a roam can't be told apart from a channel change. In demo mode the page shows an invented
 neighbourhood and link history.
 
-**Internet** (speed test only on request or on the opt-in schedule): runs macOS's own `networkQuality` (Apple's
+#### Internet
+
+*Speed test only on request or on the opt-in schedule.* The Internet page runs macOS's own `networkQuality` (Apple's
 test servers) and shows download and upload in Mbps, responsiveness in RPM (round trips per minute under load, with
 Low < 200 · Medium < 800 · High as FlightDeck's bands), idle latency and the loaded latency derived from RPM, then
 explains the result in plain English: what the speeds are good for, bufferbloat (how much a busy link adds to latency),
@@ -309,7 +385,14 @@ daily log's 10 s per-app pass (no extra sampling; a restarted process starts a n
 daily log (`DayRecord.dataUsage`, optional so older logs still load). Only traffic while FlightDeck runs is counted;
 days it didn't run are gaps. Demo mode shows invented tests and usage and never runs networkQuality.
 
-**UPnP:** the devices that answer UPnP discovery on the local network (an SSDP M-SEARCH, plus passive NOTIFY
+#### Connections
+
+Your processes' network sockets as a sortable, filterable table (process, PID, protocol, local and remote address,
+state), refreshed every few seconds, with the listening-ports panel on top (see Known limits for what it can see).
+
+#### UPnP
+
+The devices that answer UPnP discovery on the local network (an SSDP M-SEARCH, plus passive NOTIFY
 announcements while the page is open; nothing runs in the background), drawn as a map with the router at the centre and
 media renderers, media servers, printers and other devices around it. Click a device for its description: name,
 manufacturer, model, device type, its web page, services and embedded devices (serial numbers are hidden unless you ask).
@@ -319,7 +402,9 @@ IP and mappings to this Mac flagged, so it's clear which apps opened holes throu
 them; it never adds or removes a mapping. Descriptions are fetched only from the device that answered, with short
 timeouts and size caps. macOS may ask for Local Network access the first time.
 
-**UniFi** (Settings › Network › UniFi, off until configured): reads a UniFi network from a UniFi OS console (Dream Machine,
+#### UniFi
+
+*Settings › Network › UniFi, off until configured.* FlightDeck reads a UniFi network from a UniFi OS console (Dream Machine,
 Dream Router, Cloud Gateway, Cloud Key) or a self-hosted UniFi Network application, and shows the real topology (gateway →
 switches, with the port each device is on → access points → clients grouped under their AP or switch port, with link
 speeds), device health (CPU, memory, temperatures, firmware, uptime, ports with PoE, AP radios with channel, utilization
@@ -338,7 +423,9 @@ Anything the console doesn't report is shown as unknown. For other features, `Un
 
 ### Storage
 
-**Disk Space › Folder Scanner** measures the largest items in a folder you pick (or a whole volume), only when you
+#### Disk Space › Folder Scanner
+
+The folder scanner measures the largest items in a folder you pick (or a whole volume), only when you
 press Scan. While it runs, a progress strip shows the item being measured, how many of the folder's items are done,
 files examined, size so far and elapsed time; rows still waiting show as "measuring…" or "waiting", and Cancel stops
 it within milliseconds, even inside a huge folder. The scan keeps running if you switch to another page, and its
@@ -348,7 +435,9 @@ as each folder finishes so memory stays flat), so drilling in and going back up 
 still browsable after a relaunch, labelled with when it ran. Rescan refreshes a folder; Forget Saved Scans deletes the
 saved names and sizes. Only the latest scan of each folder (and five scans overall) is kept.
 
-**Disk Space › What's Using My Disk** (next to the folder scanner): the startup disk's APFS container as one stacked
+#### Disk Space › What's Using My Disk
+
+*Next to the folder scanner.* The startup disk's APFS container as one stacked
 bar, from `diskutil apfs list -plist` and `diskutil info -plist /` (no root): your data, purgeable space ("available
 for important usage" minus available), the sealed macOS volume, Preboot, Recovery, swap (VM), Update, APFS overhead and
 free, each explained. What Storage settings calls "System Data" is mostly the Data volume's caches, snapshots and app
@@ -371,24 +460,47 @@ invented disk and never runs a cleanup. Code: `Sources/FlightDeckCore/StorageBre
 
 ### System
 
-System Info, Installed Apps, Services (launchd) and Users are inventories of this Mac.
+#### System Info
 
-**Startup Apps** shows who signed every launch agent, daemon and login item, flags unsigned ones, and marks items
+This Mac's hardware and software at a glance: model, chip and cores, memory, macOS version and build, serial number and
+hardware UUID, security settings such as SIP, storage and uptime.
+
+#### Installed Apps
+
+Every app in the Applications folders with its version, vendor, architecture (Apple silicon, Intel or Universal),
+source (System, App Store or other), size (Compute Sizes measures them in the background), modification date and
+bundle ID. Every column sorts; filter by name or bundle ID, hide system apps, and open or reveal any app.
+
+#### Startup Apps
+
+This page shows who signed every launch agent, daemon and login item, flags unsigned ones, and marks items
 whose program no longer exists (leftovers from removed apps), with a summary at the top.
 
 After each wake, a restless or draining night (30+ dark wakes, or 10%+ battery lost while asleep) becomes a finding that names the main cause.
 
-**Peripherals**: the USB tree (speed, power drawn), Thunderbolt/USB4, displays (resolution, refresh, HDR), Bluetooth
+#### Peripherals
+
+The USB tree (speed, power drawn), Thunderbolt/USB4, displays (resolution, refresh, HDR), Bluetooth
 devices with battery levels, audio devices and the power adapter. **Connections** adds **listening ports**: which
 process listens on which port, flagging services open on all interfaces. It uses `netstat` (every process) when macOS
 gives the app the socket table, and otherwise falls back to `lsof` (your own processes only) and says so; on macOS 27,
 netstat launched from an app returns no Internet sockets even though it works in Terminal.
 
+#### Services
+
+The launchd jobs in your login session: label, PID, running or stopped, the last exit status (non-zero ones stand out)
+and domain, with a running-only filter and a Copy Label action.
+
+#### Users
+
+Who is logged in (console and remote sessions, with login times) and resource use by user. Other users' processes
+need root to measure, which the page says.
+
 ### Tools
 
-Benchmarks runs short CPU, memory and disk tests.
+#### Rules
 
-**Rules** automate responses: "when app *Chrome* has CPU % above 300 for 10 minutes, notify me / lower its priority /
+Rules automate responses: "when app *Chrome* has CPU % above 300 for 10 minutes, notify me / lower its priority /
 suspend / quit / force quit / run a command". Commands get `FD_RULE`, `FD_SUBJECT`, `FD_PIDS`, `FD_METRIC` and `FD_VALUE`
 in their environment (names are never spliced into the shell). Rules fire once per occurrence with a cooldown, signals
 are identity-checked, and every action posts a notification and lands in the Flight Log and a saved action log.
@@ -398,7 +510,9 @@ destructive rules always wait at least a minute, and a match-everything destruct
 suspended apps resume automatically (and when FlightDeck quits); commands time out after 60 s with their output logged.
 "Test Against the Last 24 Hours" dry-runs a rule on the black box before you save it.
 
-**Developer:** for people who code on this Mac. **Dev servers** lists your own processes listening on TCP ports that are
+#### Developer
+
+For people who code on this Mac. **Dev servers** lists your own processes listening on TCP ports that are
 recognised developer tools (Vite, Next.js, webpack dev server and other Node/Bun/Deno servers; uvicorn, gunicorn, Flask,
 Django runserver, Jupyter; Rails and Puma; Gradle, Spring Boot and other Java; `go run` and Cargo builds; PHP;
 Postgres, MySQL, Redis, MongoDB; Ollama and LM Studio; Docker, OrbStack and Lima port forwarders), identified from the
@@ -420,50 +534,81 @@ port, with a jump to the inspector. Nothing runs while the view is closed: dev s
 5 s while it is open, Homebrew and simulators every 30 s, toolchains on open and Refresh. Unknown values show "—" with
 the reason. In demo mode it shows an invented set of servers, containers and services and runs no actions.
 
+#### Benchmarks
+
+Short synthetic tests (CPU single-core and multi-core, memory bandwidth, disk sequential write and read), one at a
+time so they don't skew each other, with the best score on this Mac remembered.
+
 ## Recording and replay
 
-**Flight Recorder:** Record (⇧⌘R) captures every telemetry frame and saves it as a `.flightlog` file
+### Flight Recorder
+
+Record (⇧⌘R) captures every telemetry frame and saves it as a `.flightlog` file
 (zlib-compressed JSON). Open it (⌘O, or double-click in Finder) to scrub or replay it through the same views. Older `.mltrace` recordings from before the rename still open.
 
-**Black box:** an always-on rolling recorder (on by default; Settings › Recording turns it off or clears it). It keeps every sample
+### Black box
+
+An always-on rolling recorder (on by default; Settings › Recording turns it off or clears it). It keeps every sample
 for the last hour and one sample every 10 s for 24 hours, capped at 50 MB, in
 `~/Library/Application Support/Flightdeck/BlackBox` as ordinary `.flightlog` segments. Recorder › Save from Black Box
 saves the last 5 minutes to 24 hours after the fact; Recorder › Replay Black Box (⇧⌘B: last 10 minutes) replays it.
 
-**Export:** Recorder › Export writes a one-page **PDF flight report** (findings, average/95th/peak statistics,
+### Export
+
+Recorder › Export writes a one-page **PDF flight report** (findings, average/95th/peak statistics,
 top apps, graphs) or **CSV** (system metrics, or per-process) for the replayed recording, or the last hour of the
 black box when live. Unmeasured values are empty CSV cells, not zeros.
 
-**Compare recordings** (Recorder › Compare Recordings…): two `.flightlog` files side by side, for example before
+### Compare recordings
+
+*Recorder › Compare Recordings….* Two `.flightlog` files side by side, for example before
 and after an update. Shows average and 95th-percentile statistics with the change in each, overlaid graphs aligned by
 elapsed time, and which apps' CPU use changed.
 
 ## Everywhere in the app
 
-**Master caution:** a menu bar instrument strip (caution light, CPU and memory bars; or CPU % or the light alone)
+### Settings and appearance
+
+Settings has five tabs: **General** (theme, Dock icon, sample interval, temperature unit °C/°F, Stress Map animation,
+menu bar), **Alerts** (notifications, thresholds, mutes, temperature and camera/mic alerts), **Recording** (the black
+box), **Network** (latency probe, speed-test schedule, UniFi) and **Integrations** (Prometheus and MCP). Themes: Light,
+Dark, **System** (follows macOS's appearance and switches with it), and four single-hue phosphor looks (green, amber,
+blue, mono). FlightDeck › About shows the version.
+
+### Master caution
+
+A menu bar instrument strip (caution light, CPU and memory bars; or CPU % or the light alone)
 opens a panel with the caution status, gauges, findings, top apps and quick actions. With it on, closing the window
 keeps FlightDeck running, so the black box and alerts continue (Settings › General › Open at login). Sustained cautions and
 warnings also post a notification (after 2 minutes by default, once per occurrence, at most every 30 minutes per
 problem; click to jump to the right view), and light an amber or red caution lamp on the Dock icon.
 
-**Live Dock icon:** right-click the Dock icon (or use Monitor › Dock Icon, or Settings) to pick a mode:
+### Live Dock icon
+
+Right-click the Dock icon (or use Monitor › Dock Icon, or Settings) to pick a mode:
 CPU History (scrolling graph), CPU Cores (one VFD column per core, coloured by P/E), System Gauges (CPU, memory
 and temperature), or the static App Icon. It follows the current theme and shows a red tally light while the
 Flight Recorder is recording. The static `AppIcon.icns` is rendered by the same code at build time
 (`FlightDeck --render-iconset <dir>`); `--render-dock-previews <dir>` writes every mode × theme as a PNG.
 
-**Command palette** (⌘K, View › Command Palette…): type to jump to any view or Performance tab, find a running app or
+### Command palette
+
+*⌘K, View › Command Palette….* Type to jump to any view or Performance tab, find a running app or
 process (then inspect, sample its stacks, reveal it in Finder, quit or force quit, with the usual confirmations), or run a
 command (record, save or replay the black box, open a flight log, capture diagnostics, Settings).
 
-**Capture Diagnostics…** (Help menu, or the palette) writes one folder or zip for a bug report: the black box's last
+### Capture Diagnostics…
+
+*Help menu, or the palette.* This writes one folder or zip for a bug report: the black box's last
 10 minutes, a text summary (system, findings, top processes; no serial number or hardware UUID), macOS crash and hang
 reports from the last 24 hours, 2-second stack samples of the busiest and any hung app of yours, and recent unified-log
 errors. It may contain personal paths and names, so review it before sharing.
 
 ## Integrations
 
-**AI assistants (MCP)** (Settings › Integrations › AI assistants, off by default): FlightDeck serves the
+### AI assistants (MCP)
+
+*Settings › Integrations › AI assistants, off by default.* FlightDeck serves the
 [Model Context Protocol](https://modelcontextprotocol.io), so Claude Code, Codex and other MCP clients can answer
 "why is my Mac slow?" from FlightDeck's real data. Tools, all read-only:
 
@@ -483,7 +628,9 @@ errors. It may contain personal paths and names, so review it before sharing.
 
 | `camera_mic` | whether a camera or microphone is in use now and by which app, recent sessions (device, app, times, duration) with how each app was identified (confirmed / likely / unknown), first use, unusual-hour and locked/idle flags, and per-app totals |
 
-**Guided prompts** (MCP prompts; Claude Code shows them as `/mcp__flightdeck__<name>`) run a whole investigation with
+### Guided prompts
+
+*MCP prompts; Claude Code shows them as `/mcp__flightdeck__<name>`.* These run a whole investigation with
 those tools and report in plain English: `diagnose_slow_mac`, `investigate_app` (needs `app`), `battery_drain`,
 `thermal_check`, `crash_triage`, `health_checkup` and `since_update`. They only call the read-only tools and tell the
 assistant to suggest, not perform, any fix.
@@ -525,13 +672,17 @@ revision (per-request `_meta`, `server/discover`). It does no work between reque
 doesn't start (an assistant must not be handed invented data as facts about this Mac); `--mcp` then answers standalone
 from real samples.
 
-**Prometheus endpoint** (Settings › Integrations › Metrics export, off by default): serves the latest sample as Prometheus text on
+### Prometheus endpoint
+
+*Settings › Integrations › Metrics export, off by default.* FlightDeck serves the latest sample as Prometheus text on
 `http://127.0.0.1:9464/metrics` (port configurable, localhost only): CPU total/user/system and per core, memory,
 pressure, swap, disk and network rates, system watts, hottest temperature, thermal state, fan RPM, GPU %, battery %, and
 the top 20 processes by CPU (`name`, `pid` labels). Unmeasured values are omitted, never exported as 0. It does no work
 between scrapes.
 
-**Command line:** the app binary doubles as a CLI
+### Command line
+
+The app binary doubles as a CLI
 (`alias flightdeck=/Applications/FlightDeck.app/Contents/MacOS/FlightDeck`):
 
 ```sh
