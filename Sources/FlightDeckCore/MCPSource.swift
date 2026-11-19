@@ -30,6 +30,8 @@ public protocol MCPDataSource: AnyObject, Sendable {
     func thermal() async -> (status: ThermalStatus, history: SensorHistory)?
     func wifiScan() async -> WiFiScanResult?
     func wifiPermission() async -> WiFiPermission.Status
+    /// Camera & Mic: the live state (nil if it isn't being watched) and the session history, or nil if unavailable.
+    func cameraMic() async -> (live: CameraMicLive?, store: CameraMicStore)?
 }
 
 extension MCPDataSource {
@@ -40,6 +42,8 @@ extension MCPDataSource {
     public func wifiScan() async -> WiFiScanResult? { nil }
     /// Location Services permission, which gates SSIDs and BSSIDs. Read without prompting.
     public func wifiPermission() async -> WiFiPermission.Status { WiFiPermission.status() }
+    /// Sources without the app's watch (tests) have no camera and microphone data.
+    public func cameraMic() async -> (live: CameraMicLive?, store: CameraMicStore)? { nil }
     /// Checkup with the swap trend taken from the black box's coarse tier, as the Checkup view does.
     public func runCheckup() async -> [CheckResult] {
         let trace = await blackBox(.coarse, from: Date().addingTimeInterval(-86_400), to: Date())
@@ -115,4 +119,13 @@ public final class StandaloneMCPSource: MCPDataSource, @unchecked Sendable {
     }
 
     public func checkup() async -> [CheckResult] { await runCheckup() }
+
+    /// The app's Camera & Mic history, read-only, and which devices are in use right now (one reading of the device
+    /// state; no listeners, and without the app's indicator log stream, so the current app isn't named).
+    public func cameraMic() async -> (live: CameraMicLive?, store: CameraMicStore)? {
+        let dir = dailyDir
+        return await Task.detached(priority: .userInitiated) {
+            (CameraMicWatch.reading(), CameraMicStore(dir: dir, readOnly: true))
+        }.value
+    }
 }

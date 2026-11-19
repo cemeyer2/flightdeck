@@ -46,9 +46,9 @@ The sidebar groups the pages as below (sections fold away; ⌘1–⌘9 jump to t
 demo-data version for screenshots (see Demo mode at the end).
 
 - **Overview:** Summary (the cockpit) · Stress Map · Flight Log · Trends · Checkup
-- **Activity:** Performance (CPU, Memory, Disk, Network, Energy, Thermals, GPU) · Processes · Launches · Console
+- **Activity:** Performance (CPU, Memory, Disk, Network, Energy, Thermals, GPU) · Processes · Launches · Console · Camera & Mic
 - **Power:** Power & Freq · Sleep & Wake
-- **Network:** Network · Internet · Connections · UPnP · UniFi
+- **Network:** Network · Wi-Fi · Internet · Connections · UPnP · UniFi
 - **Storage:** Disk Space
 - **System:** System Info · Peripherals · Installed Apps · Startup Apps · Services · Users
 - **Tools:** Rules · Developer · Benchmarks
@@ -214,6 +214,35 @@ subsystem with counts and sparklines, the noisiest processes, sample messages pe
 (`log stream`, only while the window is visible). Keeps the newest 20,000 messages; 24 h queries are read newest-first in
 hourly chunks with progress and Cancel, and stop at 1 million messages. macOS redacts message details it considers
 private as `<private>`; the Console says how many are affected.
+
+**Camera & Mic** is a privacy watch. macOS lights a green or orange dot while the camera or microphone is in use, but
+keeps no history and doesn't always say which app. This page shows what's in use right now and by which app, a
+timeline (today, 7 or 30 days: one row per day, camera and microphone in separate lanes, midnight to 6 a.m. shaded)
+and every session (device, app, start, end, duration), filterable by app and device. Sessions at unusual hours, while
+the screen was locked or after 5 minutes without input, and an app's first use of a device are marked. **Only device
+use is recorded, never audio or video, and the history stays on this Mac** (`camera-mic.json` in Application Support,
+90 days; **Clear History** deletes it and the list of apps seen before).
+
+- *Is it in use:* CoreAudio and CoreMediaIO property listeners (no polling) on every input and video device's
+  "running somewhere" flag and on the device lists, so AirPods, a USB webcam or a Continuity Camera are picked up as
+  they appear. A headset playing music also reports "running", so a microphone counts only when a process is reading
+  it (CoreAudio's per-process input state, macOS 14.2+); a process tap (system-audio capture) isn't a microphone.
+- *Which app:* in order of trust: (1) macOS's own indicator, which Control Center logs with the bundle ID in public
+  text (`com.apple.controlcenter`, category `sensor-indicators`, "Active activity attributions changed to
+  [\"mic:…\", \"cam:…\"]"); FlightDeck follows that log with `log stream` **only while a device is in use**, plus a
+  one-off `log show` of the seconds before; (2) for the microphone, the CoreAudio process reading it, with its PID (an
+  Apple daemon recording for the named app, like avconferenced for FaceTime, is folded into that app); (3) otherwise
+  the session says **Unknown app**, or **likely X** when X was the frontmost app as the device came on. Guesses never
+  count as an app's first use, and every session shows how its app was identified.
+- *Cost:* with nothing in use it does no work (measured: 3 ms of CPU in 60 s idle). While a device is in use the
+  filtered log stream used no measurable CPU in 90 s; each session start runs one ~0.4 s CPU backfill.
+- *Alerts* (Settings › Alerts › Camera & Mic, both off by default): "an app uses the camera or microphone for the
+  first time" and "any use while the screen is locked or the Mac is idle". They are findings, so they reach
+  notifications (sent at once, not after the "sustained" delay), the menu bar and the Flight Log, and can be muted.
+  The menu bar panel shows the camera or microphone and the app's name while either is in use (optional).
+- *Limits:* sessions while FlightDeck wasn't running aren't seen; one already in use at launch is marked as
+  "started at or before". CoreMediaIO has no per-process state, so a camera's app is known only from the indicator
+  log; if a future macOS changes that message, cameras fall back to "unknown" or "likely" rather than a wrong name.
 
 ### Power
 
@@ -452,6 +481,8 @@ errors. It may contain personal paths and names, so review it before sharing.
 | `temperatures` | every sensor by group with now/min/avg/max since launch, the hottest per group, fans with target/min/max and problems, and throttling (pmset limits, thermal state, GPU heat cap, time throttled) |
 | `wifi` | the Wi-Fi link with health ratings and low-rate reasons, and a summary of the last scan run in the app (networks per band, busiest channels, strongest networks, a channel recommendation). Never scans; SSIDs and BSSIDs only with Location permission |
 
+| `camera_mic` | whether a camera or microphone is in use now and by which app, recent sessions (device, app, times, duration) with how each app was identified (confirmed / likely / unknown), first use, unusual-hour and locked/idle flags, and per-app totals |
+
 **Guided prompts** (MCP prompts; Claude Code shows them as `/mcp__flightdeck__<name>`) run a whole investigation with
 those tools and report in plain English: `diagnose_slow_mac`, `investigate_app` (needs `app`), `battery_drain`,
 `thermal_check`, `crash_triage`, `health_checkup` and `since_update`. They only call the read-only tools and tell the
@@ -529,7 +560,8 @@ Six themes: Light, Dark, Green, Amber, Blue, Mono.
 - **Identity-safe actions.** Signals are sent only if the PID still has the same start time (`ProcessIdentity`).
 - **Private by design.** FlightDeck sends no data anywhere. By default it makes no network requests at all; the only exception is the opt-in latency probe (Settings › Network › Network quality), which pings your router and one host you choose. The opt-in Prometheus and MCP servers only accept connections from this Mac.
 
-- **Private by design.** FlightDeck sends no data anywhere. By default it makes no network requests at all; the exceptions are the opt-in latency probe (Settings › Network › Network quality), which pings your router and one host you choose, and the UniFi view, which talks only to the console you configure (and, while nothing is configured, checks whether your router looks like one).
+- **Private by design.** FlightDeck sends no data anywhere. By default it makes no network requests at all; the exceptions are the opt-in latency probe (Settings › Network › Network quality), which pings your router and one host you choose, and the UniFi view, which talks only to the console you configure (and, while nothing is configured, checks whether your router looks like one). The Camera & Mic history records only that a device was in use, never audio
+or video, and never leaves this Mac.
 
 ## Known limits
 
@@ -574,4 +606,5 @@ Automation hooks: `open build/FlightDeck.app --args -destination "Processes" -th
 processes, run cleanups, start or stop services, or contact the network. The pages in the screenshots above (plus Console,
 Checkup and Peripherals, which show a placeholder) are synthetic. System Info, Connections, Installed Apps, Startup
 Apps, Services, Users, the GPU tab and the process inspector still read this Mac, so don't screenshot those in demo mode. On Thermals every sensor (names and values), fan and pmset limit is invented, catalogued with the generic
-Apple-silicon table so nothing depends on this Mac's chip.
+Apple-silicon table so nothing depends on this Mac's chip. Camera & Mic shows invented sessions (Zoom, FaceTime, a
+first use, an unknown app at 3 a.m. while locked) with no device listeners and nothing written.

@@ -23,7 +23,8 @@ public struct MCPTools: MCPToolProvider {
     returns plain-English findings, the system's numbers, the top apps and which apps strain which subsystem. Then drill \
     down with list_processes, get_process and sample_stacks (why a process of the user's is busy or hung), history (the \
     black box: statistics over the last minutes or hours), recent_incidents (the Flight Log), diagnostic_reports (crashes \
-    and hangs), checkup (health and security checklist), temperatures (every sensor, fans, throttling), wifi (the Wi-Fi link's health and the last nearby-network scan) and trends (daily history, before/after app and macOS updates). \
+    and hangs), checkup (health and security checklist), temperatures (every sensor, fans, throttling), wifi (the Wi-Fi link's health and the last nearby-network scan), trends (daily history, before/after app and macOS updates) and \
+    camera_mic (which apps used the camera or microphone, and when). \
     All tools are read-only. Values FlightDeck could not measure are marked "unavailable", never reported as 0.
     """
 
@@ -82,6 +83,7 @@ public struct MCPTools: MCPToolProvider {
             case "trends": out = try await trends(a)
             case "temperatures": out = try await temperatures()
             case "wifi": out = try await wifi()
+            case "camera_mic": out = try await cameraMic(a)
             default: return .error("Unknown tool \(name)")
             }
             return MCPToolResult(text: out.text)
@@ -167,6 +169,12 @@ public struct MCPTools: MCPToolProvider {
             MCPToolSpec(name: "wifi", title: "Wi-Fi link and nearby networks",
                         description: "The current Wi-Fi link (signal, noise, SNR, link rate against the maximum for its standard and width, band, channel, width, security) with plain-English health ratings and reasons a link rate may be low; and a summary of the last nearby-network scan the user ran in the app (networks per band, busiest channels, the strongest networks, a channel recommendation). Never scans. SSIDs and BSSIDs only with Location Services permission.",
                         inputSchema: Self.schema([])),
+            MCPToolSpec(name: "camera_mic", title: "Camera and microphone use",
+                        description: "Privacy watch: whether a camera or microphone is in use right now and by which app, then recent sessions (newest first) with device, app, start, end and duration, how the app was identified (confirmed / likely / unknown, never guessed silently), and flags for an app's first use, unusual hours (midnight to 6 a.m.) and use while the screen was locked or the Mac idle. Only device use is recorded, never audio or video.",
+                        inputSchema: Self.schema([
+                            ("days", Self.int("Days of history to include, ending now.", 1, 90, 7)),
+                            ("limit", Self.int("Most sessions to list.", 1, 500, 50)),
+                        ])),
         ]
     }
 }

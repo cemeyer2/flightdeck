@@ -121,6 +121,10 @@ final class EngineMCPSource: MCPDataSource, @unchecked Sendable {
     }
     /// The Wi-Fi page's last scan (memory only; nil until the user scans). Demo scans are never served.
     func wifiScan() async -> WiFiScanResult? { await MainActor.run { WiFiModel.shared.demo ? nil : WiFiModel.shared.scan } }
+    /// The app's live Camera & Mic watch (none in demo mode).
+    func cameraMic() async -> (live: CameraMicLive?, store: CameraMicStore)? {
+        CameraMicService.watch.map { ($0.live, $0.store) }
+    }
 }
 
 /// Settings section for the MCP server, kept here so SettingsView only gains one line.

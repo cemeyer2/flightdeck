@@ -160,6 +160,16 @@ enum UIBench {
             let mem = MemoryBreakdownReader.read(pid: getpid(), ownedByUser: true)
             out("inspector-memory", height: 900, MemoryBreakdownPanel(model: model, result: mem))
         }
+        // Camera & Mic: invented sessions (no listeners, nothing written) in each range, then this Mac: its saved history,
+        // read-only, and one reading of the devices (never opens a camera or microphone). Models are built first.
+        let cmDemo = CameraMicModel(preview: DemoCameraMic.sessions(now: Date()), live: DemoCameraMic.live(now: Date()))
+        out("cameramic-demo-today", height: 1700, CameraMicView(model: cmDemo, range: .today))
+        out("cameramic-demo", height: 2600, CameraMicView(model: cmDemo, range: .month))
+        let cmLive = CameraMicModel(preview: CameraMicStore(dir: DailyLog.defaultDirectory, readOnly: true).sessions(),
+                                    live: CameraMicWatch.reading(), demo: false)
+        out("cameramic", height: 1300, CameraMicView(model: cmLive, range: .week))
+        out("cameramic-settings", width: 700, height: 220, VStack(alignment: .leading) { CameraMicAlertsSection() })
+        out("cameramic-menubar", width: 360, height: 60, CameraMicMenuBarRow(model: cmDemo))
         // Power tools: Launches (real launches seen during the ~10 s of sampling above), the palette with a query, and
         // the diagnostic capture sheet before and after a (simulated) run.
         out("launches", height: 1100, LaunchesView())
