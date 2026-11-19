@@ -319,6 +319,7 @@ struct InspectorView: View {
                 }.frame(minHeight: 280)
             }
         } else if model.details != nil { unavailable("Sockets") } else { ProgressView() }
+        if let s { DestinationsInspectorPanel(process: s) }   // where this app's traffic went (DestinationsSettings.swift)
     }
 
     @ViewBuilder var threadsTab: some View {

@@ -159,6 +159,7 @@ final class Engine: ObservableObject {
         if headless { rules = []; return }   // never show the user's saved rules, rule log or incidents in a headless engine
         ruleLog = Engine.loadRuleLog()
         applyTemperatureAlerts()   // after the headless return: a headless engine never uses the user's alert settings
+        sampler.destinations = DestinationService.tracker; DestinationService.start()   // per-app destinations (nil in demo mode)
         // The first sample only establishes baselines for delta-based counters (CPU ticks, bytes); its result is discarded.
         queue.async { [sampler] in _ = sampler.sample() }   // prime deltas
         restartTimer()
@@ -414,6 +415,7 @@ final class Engine: ObservableObject {
             // alerts and the Flight Log the same way.
             let found = analyzer.ingest(s) + dailyLog.ingest(s) + self.launchLog.findings(now: s.time) + self.thermal.ingest(s)
                 + CameraMicService.findings(now: s.time)   // opt-in camera & mic alerts
+                + DestinationService.findings(now: s.time)   // opt-in "new destination" alerts
             self.chargeCurve.ingest(s)
             ruleEngine.frontmostPID = front
             let firings = ruleEngine.evaluate(s)

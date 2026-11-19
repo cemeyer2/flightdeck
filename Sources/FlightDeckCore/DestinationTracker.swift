@@ -49,8 +49,14 @@ public final class DestinationTracker: @unchecked Sendable {
     private var contacts: [NewContact] = []
     private var pidApps: [Int32: (key: String, name: String)] = [:]
     private var lastFlush: Date?
+    private var lookups = true
     /// Bumped on every change views care about, so they can skip re-reading.
     public private(set) var revision = 0
+    /// Whether new rows may be named by reverse DNS (Settings). Off: rows stay "not looked up" and group by IP.
+    public var lookupsEnabled: Bool {
+        get { lock.lock(); defer { lock.unlock() }; return lookups }
+        set { lock.lock(); lookups = newValue; lock.unlock() }
+    }
 
     struct RowKey: Hashable { var app: String; var ip: String }
 
@@ -68,8 +74,8 @@ public final class DestinationTracker: @unchecked Sendable {
 
     // MARK: Ingest
 
-    /// Folds one nettop run in. `procs` is the latest process list (for PID → app); `lookups` false skips reverse DNS.
-    public func ingest(_ flows: [ProcessNetworkSampler.FlowDelta], procs: [ProcessSample], now: Date, lookups: Bool = true) {
+    /// Folds one nettop run in. `procs` is the latest process list (for PID → app).
+    public func ingest(_ flows: [ProcessNetworkSampler.FlowDelta], procs: [ProcessSample], now: Date) {
         guard !flows.isEmpty else { return }
         lock.lock()
         if now >= dayEnds || now < day.start { rollOver(to: now) }

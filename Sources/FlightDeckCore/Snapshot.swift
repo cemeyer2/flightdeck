@@ -64,14 +64,12 @@ public final class Sampler: @unchecked Sendable {
             netLock.lock(); latestNet = r; latestNetTime = Date(); netRunning = false; let procs = destinationProcs; netLock.unlock()
             // Destinations reuse this run's per-flow deltas: no second nettop, O(active flows) of extra work.
             if let destinations, r != nil {
-                destinations.ingest(processNetwork.lastFlows, procs: procs, now: Date(), lookups: destinationLookups)
+                destinations.ingest(processNetwork.lastFlows, procs: procs, now: Date())
             }
         }
     }
     /// Per-app destinations (DestinationTracker). Set once before the first sample; nil = not collected.
     public var destinations: DestinationTracker?
-    /// Whether the tracker may look names up by reverse DNS (Settings). Read on the nettop queue.
-    public var destinationLookups = true
     /// The latest process list, for the tracker's PID → app mapping. Guarded by netLock.
     private var destinationProcs: [ProcessSample] = []
 

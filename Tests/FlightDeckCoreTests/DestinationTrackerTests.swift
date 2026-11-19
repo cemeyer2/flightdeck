@@ -161,3 +161,22 @@ final class DestinationTrackerTests: XCTestCase {
         XCTAssertEqual(tr.today().rows.map(\.ip), ["198.51.100.0"])
     }
 }
+
+/// Cost of the added per-sample work on this Mac's real connections: the flow-delta list in ProcessNetworkSampler plus
+/// one tracker ingest per nettop run (no reverse DNS). Printed as COST lines; skipped on CI.
+final class DestinationCostTests: XCTestCase {
+    func testIngestCost() throws {
+        if ProcessInfo.processInfo.environment["CI"] != nil { throw XCTSkip("timing only on a real Mac") }
+        guard let out = Shell.run("/usr/bin/nettop", ["-L", "1", "-x", "-n", "-J", "bytes_in,bytes_out"], timeout: 5) else { throw XCTSkip("nettop unavailable") }
+        let procs = ProcessSampler().sample()
+        let s = ProcessNetworkSampler(), tr = DestinationTracker(store: nil, namer: nil)
+        _ = s.ingest(out, now: Date()); _ = s.ingest(out, now: Date().addingTimeInterval(1))   // every flow "opened"
+        let flows = s.lastFlows
+        let n = 200
+        let t = Date()
+        for i in 0..<n { tr.ingest(flows, procs: procs, now: Date().addingTimeInterval(Double(i))) }
+        let us = Date().timeIntervalSince(t) / Double(n) * 1e6
+        print("COST destinations ingest", flows.count, "flows:", String(format: "%.1f µs per nettop run", us))
+        XCTAssertLessThan(us, 5000)
+    }
+}

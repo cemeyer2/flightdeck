@@ -170,6 +170,7 @@ enum UIBench {
         out("cameramic", height: 1300, CameraMicView(model: cmLive, range: .week))
         out("cameramic-settings", width: 700, height: 220, VStack(alignment: .leading) { CameraMicAlertsSection() })
         out("cameramic-menubar", width: 360, height: 60, CameraMicMenuBarRow(model: cmDemo))
+        for r in destinationRenders(template: e.current?.processes.first) { out(r.name, width: r.width, height: r.height, r.view) }   // DestinationsBench.swift; models load first
         // Power tools: Launches (real launches seen during the ~10 s of sampling above), the palette with a query, and
         // the diagnostic capture sheet before and after a (simulated) run.
         out("launches", height: 1100, LaunchesView())

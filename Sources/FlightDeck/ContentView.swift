@@ -17,6 +17,7 @@ enum Destination: String, CaseIterable, Identifiable, Hashable {
     case developer = "Developer"
     case wifi = "Wi-Fi"
     case cameraMic = "Camera & Mic"
+    case destinations = "Destinations"
     var id: String { rawValue }
     var icon: String {
         switch self {
@@ -48,6 +49,7 @@ enum Destination: String, CaseIterable, Identifiable, Hashable {
         case .developer: "hammer"
         case .wifi: "wifi"
         case .cameraMic: "web.camera"
+        case .destinations: "point.3.connected.trianglepath.dotted"
         }
     }
 }
@@ -67,7 +69,7 @@ enum SidebarSection: String, CaseIterable, Identifiable {
         case .overview: [.summary, .stressMap, .flightLog, .trends, .checkup]
         case .activity: [.performance, .processes, .launches, .console, .cameraMic]
         case .power: [.power, .sleep]
-        case .network: [.network, .wifi, .internet, .connections, .upnp, .unifi]
+        case .network: [.network, .wifi, .internet, .destinations, .connections, .upnp, .unifi]
         case .storage: [.diskSpace]
         case .system: [.systemInfo, .peripherals, .apps, .startup, .services, .users]
         case .tools: [.rules, .developer, .benchmarks]
@@ -195,6 +197,7 @@ struct ContentView: View {
         case .developer: DeveloperView()
         case .wifi: WiFiView()
         case .cameraMic: CameraMicView()
+        case .destinations: DestinationsView()
         }
     }
 
