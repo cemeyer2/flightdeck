@@ -190,6 +190,7 @@ final class Engine: ObservableObject {
         startVisibilityTracking()
         // Sleep findings: at launch, after every wake, and every 30 minutes (so they expire 12 h after waking).
         refreshSleepFindings()
+        RestartsModel.launchCheck()   // once, ~30 s after launch: unexpected shutdowns and panics since the last check
         NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
             // give powerd a moment to write the wake to the log
             DispatchQueue.main.asyncAfter(deadline: .now() + 20) { MainActor.assumeIsolated { self?.refreshSleepFindings() } }
@@ -416,6 +417,7 @@ final class Engine: ObservableObject {
             let found = analyzer.ingest(s) + dailyLog.ingest(s) + self.launchLog.findings(now: s.time) + self.thermal.ingest(s)
                 + CameraMicService.findings(now: s.time)   // opt-in camera & mic alerts
                 + DestinationService.findings(now: s.time)   // opt-in "new destination" alerts
+                + RestartWatch.shared.findings(now: s.time)   // one-shot: unexpected shutdown or panic since last launch
             self.chargeCurve.ingest(s)
             ruleEngine.frontmostPID = front
             let firings = ruleEngine.evaluate(s)

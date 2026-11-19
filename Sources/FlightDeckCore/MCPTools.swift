@@ -28,7 +28,9 @@ public struct MCPTools: MCPToolProvider {
     down with list_processes, get_process and sample_stacks (why a process of the user's is busy or hung), history (the \
     black box: statistics over the last minutes or hours), recent_incidents (the Flight Log), diagnostic_reports (crashes \
     and hangs), checkup (health and security checklist), temperatures (every sensor, fans, throttling), wifi (the Wi-Fi link's health and the last nearby-network scan), trends (daily history, before/after app and macOS updates) and \
-    camera_mic (which apps used the camera or microphone, and when), network_destinations (which hosts each app talked to) and battery (health forecast and what's wearing the battery). \
+    camera_mic (which apps used the camera or microphone, and when), network_destinations (which hosts each app talked to), \
+    battery (health forecast and what's wearing the battery), restarts (boots, how each previous session ended, \
+    boot and login time) and panics (kernel panic reports with the likely culprit). \
     All tools are read-only. Values FlightDeck could not measure are marked "unavailable", never reported as 0.
     """
 
@@ -90,6 +92,8 @@ public struct MCPTools: MCPToolProvider {
             case "camera_mic": out = try await cameraMic(a)
             case "battery": out = try await battery()
             case "network_destinations": out = try await networkDestinations(a)
+            case "restarts": out = try await restarts(a)
+            case "panics": out = try await panics(a)
             default: return .error("Unknown tool \(name)")
             }
             return MCPToolResult(text: out.text)
@@ -192,6 +196,12 @@ public struct MCPTools: MCPToolProvider {
                             ("days", Self.int("Days to include, ending today.", 1, 30, 7)),
                             ("limit", Self.int("Most apps, and most destinations per app, to list.", 1, 200, 20)),
                         ])),
+            MCPToolSpec(name: "restarts", title: "Restarts and shutdowns",
+                        description: "Every boot in the window, newest first, with how the session before it ended (clean, unexpected, kernel panic or unknown), a plain-English explanation, the kernel's shutdown cause code when FlightDeck saved one (codes are undocumented by Apple; certainty is given), the evidence and whether the verdict is inferred; counts by cause; boot and login timing (kernel to login window, login to desktop, login items, busiest processes after login); recent app hangs; and what the records can't tell. Read-only; doesn't query the unified log.",
+                        inputSchema: Self.schema([("days", Self.int("Days of boots to include, ending now.", 1, 90, 30))])),
+            MCPToolSpec(name: "panics", title: "Kernel panics",
+                        description: "Kernel panic reports from /Library/Logs/DiagnosticReports and its Retired folder, newest first: time, plain-English culprit (third-party driver, hung app or service, system hang, sleep/wake, hardware, memory, graphics, kernel), what to do, the panic string, panicked task and the kernel extensions in the backtrace.",
+                        inputSchema: Self.schema([("days", Self.int("Days to look back.", 1, 90, 90))])),
         ]
     }
 }

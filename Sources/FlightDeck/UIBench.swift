@@ -33,6 +33,12 @@ enum UIBench {
         out("stressmap", height: 900, StressMapView())
         out("welcome", height: 640, WelcomeView())
         out("sleep", height: 1500, SleepPreview())
+        // Restarts & Crashes: the invented history, then this Mac's records (wtmp, shutdown log, panic and hang reports,
+        // a few unified-log queries), loaded before building the view (see `ready` below). The saved history is only read.
+        out("restarts-demo", height: 3000, RestartsView(model: RestartsModel(preview: DemoRestarts.report())))
+        let restartsLive = RestartsModel.loadedForRender(blackBox: e.blackBox)
+        out("restarts", height: 2600, RestartsView(model: restartsLive))
+        if ProcessInfo.processInfo.environment["FD_RENDER_ONLY"] == "restarts" { exit(0) }   // quick iteration on this page
         out("flightlog", FlightLogView())
         out("cpu", VStack { CPUPerf() })
         out("memory", height: 1900, VStack { MemoryPerf() })
