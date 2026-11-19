@@ -77,11 +77,28 @@ struct PowerView: View {
 
 /// Installed Apps: bundles found by `InstalledApps.scan()` with version, vendor, architectures and source. Sizes are
 /// opt-in ("Compute Sizes") because walking every bundle is slow; until computed a size shows "—", not 0.
+/// One Installed Apps table row: the app plus a comparable value for each column, so every header sorts.
+struct AppRow: Identifiable {
+    let app: InstalledApp
+    /// Measured bundle size, nil until Compute Sizes has measured it.
+    let size: UInt64?
+    var id: String { app.id }
+    var name: String { app.name }
+    var version: String { app.version }
+    var vendor: String { app.vendor }
+    var kind: String { app.architectures }
+    var bundleID: String { app.bundleID }
+    var source: String { app.isSystem ? "System" : (app.isAppStore ? "App Store" : "Other") }
+    /// -1 for "not measured yet", so those rows sort below every measured app when sorting largest first.
+    var sizeSort: Int64 { size.map { Int64($0) } ?? -1 }
+    var modifiedSort: Date { app.modified ?? .distantPast }
+}
+
 struct InstalledAppsView: View {
     @StateObject var loader = Loader { InstalledApps.scan() }
     @State private var filter = ""
     @State private var hideSystem = false
-    @State private var sortOrder = [KeyPathComparator(\InstalledApp.name)]
+    @State private var sortOrder = [KeyPathComparator(\AppRow.name)]
     @State private var selection: InstalledApp.ID?
     /// Allocated bytes per app path, filled in as each background size walk finishes.
     @State private var sizes: [String: UInt64] = [:]
@@ -95,14 +112,17 @@ struct InstalledAppsView: View {
                 Text("\(items.count) apps").font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary)
                 Button("Compute Sizes") { computeSizes(items) }
             }.padding(10)
-            Table(items.sorted(using: sortOrder), selection: $selection, sortOrder: $sortOrder) {
-                TableColumn("Name", value: \.name) { a in HStack { Image(nsImage: IconCache.icon(a.path)).resizable().frame(width: 16, height: 16); Text(a.name) } }.width(min: 180, ideal: 240)
+            // Rows carry a sortable value for every column (Table can only sort columns that have one): Source as its
+            // label, Size with "not measured yet" as -1, Modified with "unknown" as the distant past.
+            let rows = items.map { AppRow(app: $0, size: sizes[$0.path]) }
+            Table(rows.sorted(using: sortOrder), selection: $selection, sortOrder: $sortOrder) {
+                TableColumn("Name", value: \.name) { r in HStack { Image(nsImage: IconCache.icon(r.app.path)).resizable().frame(width: 16, height: 16); Text(r.name) } }.width(min: 180, ideal: 240)
                 TableColumn("Version", value: \.version).width(90)
                 TableColumn("Vendor", value: \.vendor).width(100)
-                TableColumn("Kind", value: \.architectures).width(80)
-                TableColumn("Source") { a in Text(a.isSystem ? "System" : (a.isAppStore ? "App Store" : "Other")) }.width(80)
-                TableColumn("Size") { a in Text(sizes[a.path].map(Fmt.storage) ?? "—").monospacedDigit() }.width(80)
-                TableColumn("Modified") { a in Text(a.modified?.formatted(date: .abbreviated, time: .omitted) ?? "—") }.width(100)
+                TableColumn("Kind", value: \.kind).width(80)
+                TableColumn("Source", value: \.source).width(80)
+                TableColumn("Size", value: \.sizeSort) { r in Text(r.size.map(Fmt.storage) ?? "—").monospacedDigit() }.width(80)
+                TableColumn("Modified", value: \.modifiedSort) { r in Text(r.app.modified?.formatted(date: .abbreviated, time: .omitted) ?? "—") }.width(100)
                 TableColumn("Bundle ID", value: \.bundleID)
             }
             .contextMenu(forSelectionType: InstalledApp.ID.self) { ids in
