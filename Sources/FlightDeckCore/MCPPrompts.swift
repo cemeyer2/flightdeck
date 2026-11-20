@@ -26,13 +26,24 @@ public enum MCPPrompts {
         """
 
     public static let all: [MCPPrompt] = [
+        MCPPrompt(name: "triage", title: "What's wrong with my Mac?",
+                  description: "Ranks every current problem across the Mac, then checks the top ones in detail.") { _ in
+            """
+                Something seems wrong with my Mac. Investigate with FlightDeck:
+                1. Call triage. It ranks every current problem (CPU, memory, heat, disk, battery, network, Flight Log, \
+                crashes, restarts), each with evidence and a "next" tool with its arguments.
+                2. For the top three problems (or fewer), call the next tool exactly as given, to confirm and explain each.
+                3. If triage finds nothing, say so with its readings, and call recent_incidents for the last 24 hours in case it was earlier.
+                Rank your answer the same way: the most serious problem first, and whether each is still happening.
+                """ + reporting
+        },
         MCPPrompt(name: "diagnose_slow_mac", title: "Why is my Mac slow?",
                   description: "Finds what is making the Mac slow or unresponsive right now and recently.",
                   arguments: [.init(name: "minutes", description: "How far back to look (default 30)", required: false)]) { a in
             let m = min(max(a["minutes"].flatMap(Int.init) ?? 30, 1), 1440)
             return """
                 My Mac feels slow. Investigate with FlightDeck:
-                1. Call get_status for the current findings, system readings and Stress Map top causes.
+                1. Call triage for the ranked problems, then get_status for the system readings and Stress Map top causes.
                 2. Call list_processes sorted by cpu (limit 15), then by memory, to see the heaviest apps.
                 3. Call history for the last \(m) minutes to see whether this is new or ongoing.
                 4. Call recent_incidents for the last 24 hours, in case this has happened before.

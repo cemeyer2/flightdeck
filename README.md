@@ -771,6 +771,7 @@ errors. It may contain personal paths and names, so review it before sharing.
 
 | Tool | What it returns |
 |---|---|
+| `triage` | one call for "what's wrong right now?": every current problem (findings, ongoing Flight Log incidents, crashes/hangs/panics of the last 24 h, unexpected restarts of the last 7 days, memory pressure, heat, a full disk, low battery) ranked by severity, each with evidence numbers and the next tool to call with its arguments; plus the headline readings |
 | `get_status` | findings in plain English, CPU/memory/swap/disk/network/power/thermal/GPU, top apps by CPU, memory and energy, Stress Map top causes |
 | `list_processes` | processes or apps as a table; `sort`, `limit`, `filter` (the Processes filter syntax, e.g. `cpu>50 user:root`), `by_app` |
 | `get_process` | one PID: identity, path, user, parent chain, CPU, memory, energy, disk, network, listening ports, open files, code signature; optional arguments/files/sockets/threads |
@@ -792,11 +793,12 @@ errors. It may contain personal paths and names, so review it before sharing.
 | `measure` | what the Mac did between two marks, times, or a mark and now (within 24 h): CPU avg/p95/peak and CPU-seconds, memory and pressure, swap growth, disk and network totals, energy (Wh), hottest temperature and throttling, top processes and apps by CPU-seconds, peak memory, energy and disk. `process` or `app` gives that process tree's cost, children included; `compare_to` adds a baseline window, deltas and a verdict |
 | `query_metrics` | raw black-box series on a regular grid, columnar (`t` offsets plus one array per metric): `cpu`, `cpu_user`, `cpu_system`, `memory_used`, `memory_pressure`, `swap`, `disk_read`, `disk_write`, `net_in`, `net_out`, `watts`, `hottest_c`, `gpu`, `battery_pct`, `process:<pid or name>.cpu\|rss\|energy`. Automatic step (≤ 300 points), average or max per slot as stated, gaps as `null` |
 | `process_logs` | unified-log messages for an `app`, `pid` or `subsystem`, grouped (messages differing only in numbers or ids collapse) with counts, newest first; `level` error (default), fault, default or info; up to 24 h of errors or 60 min of default/info; 20 s and 20,000-message bounds; notes `<private>` redaction |
+| `wait_for_event` | blocks until something happens (an incident opens or closes, a new finding, a crash/hang/panic report, a thermal state change, low battery), filtered by `kinds`, `app` and `min_severity`, or with `until_cpu_below` until CPU has stayed below that % for `settle_seconds`; `timeout_seconds` up to 600; `after_seq` so nothing between two calls is missed |
 
 ### Guided prompts
 
 *MCP prompts; Claude Code shows them as `/mcp__flightdeck__<name>`.* These run a whole investigation with
-those tools and report in plain English: `diagnose_slow_mac`, `investigate_app` (needs `app`), `battery_drain`,
+those tools and report in plain English: `triage`, `diagnose_slow_mac`, `investigate_app` (needs `app`), `battery_drain`,
 `thermal_check`, `crash_triage`, `health_checkup`, `since_update` and `measure_change` (needs `command`; optional
 `process`). They only call FlightDeck's tools and tell the assistant to suggest, not perform, any fix; `measure_change`
 also runs the workload you name, twice (baseline and with your change), between marks.
@@ -833,6 +835,44 @@ box is counted in full up to that sighting. Processes that live less than one sa
 so. Differences under 5 % (or tiny in absolute terms) are called "about the same". With a filter, a `whole_mac` block
 compares the rest of the Mac too, so a busy browser or thermal throttling during one run is visible.
 
+### Notifications for agents
+
+Instead of polling, a client can be told when something happens on the Mac: a Flight Log incident opens or closes
+(a sustained CPU hog, memory pressure, heat, a hang, a disk filling…), a new finding appears or gets worse, a crash,
+hang, memory-kill or panic report is written, the thermal state changes, or the battery runs low. FlightDeck serves
+five resources (`resources/list`, `resources/read`; each reads like the matching tool): `flightdeck://events` (the
+latest events; subscribing to it means every event), `flightdeck://incidents`, `flightdeck://findings`,
+`flightdeck://reports` and `flightdeck://status` (thermal and battery). Every notification carries the event itself in
+`_meta["app.flightdeck/event"]` (kind, severity, title, detail, app, pid, since, key, `next_tool`), so the client can
+act without reading the resource again:
+
+```json
+{"jsonrpc":"2.0","method":"notifications/resources/updated","params":{"uri":"flightdeck://incidents","_meta":{"app.flightdeck/event":
+ {"seq":1,"event":"incident_opened","severity":"warning","title":"Xcode is using 412% CPU","app":"Xcode","since":"2026-11-19T10:00:00-08:00",
+  "key":"cpu:com.apple.dt.Xcode","uri":"flightdeck://incidents","next_tool":"recent_incidents"}}}}
+```
+
+- **2025-06-18 / 2025-11-25 clients**: `resources/subscribe` and `resources/unsubscribe` (capability
+  `resources.subscribe`). Over stdio the notifications arrive on stdout. Over HTTP, `initialize` returns an
+  `Mcp-Session-Id`; subscribe with that header and open `GET /mcp` (`Accept: text/event-stream`) with it to receive
+  them as Server-Sent Events (notifications are held, up to 50, until the stream opens). `DELETE /mcp` ends the session.
+- **2026-07-28 clients**: `subscriptions/listen` with `notifications.resourceSubscriptions`; the server acknowledges
+  with `notifications/subscriptions/acknowledged` and tags each update with `io.modelcontextprotocol/subscriptionId`.
+  Over HTTP the POST's response is the SSE stream; over stdio, `notifications/cancelled` ends it.
+- **Claude Code channels** (research preview): `FlightDeck --mcp --channel` declares `experimental["claude/channel"]`
+  and pushes each event as a `notifications/claude/channel` message, so the session sees
+  `<channel source="flightdeck" event="incident_opened" severity="warning" app="Xcode" …>`. Start Claude Code with
+  `claude --dangerously-load-development-channels server:flightdeck` while channels are in preview.
+- **Clients without notifications**: `wait_for_event` blocks until a matching event (or until CPU settles), up to 10
+  minutes. Set the client's tool timeout above the `timeout_seconds` you pass.
+
+Events are found by comparing the state FlightDeck already keeps (every 5 s in the app, 15 s standalone, where each
+check takes a sample), and only while a client is subscribed or waiting: with nobody listening there is no timer and
+no extra work. A new subscriber hears about what happens from then on; `triage` and the resources say what is already
+true. The stdio proxy relays the app's event stream (a `subscriptions/listen` to the HTTP endpoint) and falls back to
+its own standalone watcher when the app isn't reachable. At most 4 notification streams are open on the HTTP endpoint
+at once.
+
 No tool can quit, kill, renice or change anything. Unmeasured values are marked "unavailable", never 0, and every
 answer is capped at 48 KB. Two ways to connect:
 
@@ -866,7 +906,7 @@ answer is capped at 48 KB. Two ways to connect:
   need minutes of samples). Only protocol messages go to stdout.
 
 The server speaks both MCP eras: `initialize`-based revisions 2024-11-05 to 2025-11-25, and the stateless 2026-07-28
-revision (per-request `_meta`, `server/discover`). It does no work between requests. In demo mode the HTTP server
+revision (per-request `_meta`, `server/discover`). It does no work between requests unless a client is subscribed or waiting for an event. In demo mode the HTTP server
 doesn't start (an assistant must not be handed invented data as facts about this Mac); `--mcp` then answers standalone
 from real samples.
 

@@ -25,6 +25,7 @@ enum CLI {
       --csv <trace> <out.csv> [--processes]   export system (or per-process) metrics
       --report <trace> <out.pdf>      write a PDF flight report
       --mcp                           serve the Model Context Protocol on stdin/stdout, for AI assistants
+      --mcp --channel                 also push events into a Claude Code session as channel messages
                                       (uses the running app when its MCP server is on, else samples itself)
       --help
     """
@@ -41,14 +42,14 @@ enum CLI {
         // A mistyped flag or a missing argument must not silently open the GUI instead. (Single-dash arguments are
         // left alone: macOS and the automation hooks pass those, e.g. -destination, -NSDocumentRevisionsDebugMode.)
         let known: [String: Int] = ["--snapshot": 0, "--json": 0, "--findings": 0, "--processes": 0, "--top": 1, "--stats": 1, "--csv": 2,
-                                    "--report": 2, "--json-stream": 0, "--mcp": 0, "--render-views": 1, "--bench-ui": 0, "--render-iconset": 1, "--render-dock-previews": 1]
+                                    "--report": 2, "--json-stream": 0, "--mcp": 0, "--channel": 0, "--render-views": 1, "--bench-ui": 0, "--render-iconset": 1, "--render-dock-previews": 1]
         for (i, arg) in a.enumerated().dropFirst() where arg.hasPrefix("--") {
             guard let n = known[arg] else { fail("unknown option \(arg)\n\n\(usage)") }
             if n > 0 && (i + n >= a.count || a[(i + 1)...(i + n)].contains { $0.hasPrefix("--") }) && arg != "--bench-ui" {
                 fail("\(arg) needs \(n) argument\(n == 1 ? "" : "s")\n\n\(usage)")
             }
         }
-        if a.contains("--mcp") { mcpStdio() }
+        if a.contains("--mcp") { mcpStdio(channel: a.contains("--channel")) }
         if let v = value("--render-views") { UIBench.renderViews(to: v[0]) }
         if a.contains("--json-stream") { jsonStream(a) }
         if a.contains("--bench-ui") { UIBench.run(renders: Int(value("--bench-ui")?.first ?? "") ?? 20) }
@@ -119,12 +120,25 @@ enum CLI {
     /// to the app's MCP server when it is turned on and answering, else to a standalone server here (see MCPStdio).
     /// Nothing but protocol messages is written to stdout. `FLIGHTDECK_MCP_STANDALONE=1` skips the app (tests).
     /// Exits when the client closes stdin.
-    static func mcpStdio() -> Never {
-        let skipApp = ProcessInfo.processInfo.environment["FLIGHTDECK_MCP_STANDALONE"] != nil
+    /// `--channel` also pushes events into a Claude Code session as channel messages (see MCPStdioRun).
+    /// `FLIGHTDECK_MCP_INJECT_EVENT='{"event":"incident_opened",…}'` is a test hook: the standalone server publishes
+    /// that event a second after something first listens, so a script can watch a notification arrive.
+    static func mcpStdio(channel: Bool) -> Never {
+        let env = ProcessInfo.processInfo.environment
+        let skipApp = env["FLIGHTDECK_MCP_STANDALONE"] != nil
+        let inject = env["FLIGHTDECK_MCP_INJECT_EVENT"].flatMap { try? JSON.parse(Data($0.utf8)) }.flatMap(MCPEvent.init(json:))
         Task.detached {
             await MCPStdio.run(app: { skipApp ? nil : MCPEndpoint.appEndpoint() }, standalone: {
-                MCPServer(version: MCPEndpoint.version, instructions: MCPTools.instructions, tools: MCPTools(source: StandaloneMCPSource()))
-            })
+                let tools = MCPTools(source: StandaloneMCPSource())
+                if let inject, let hub = tools.events {
+                    Task.detached {
+                        while hub.listenerCount == 0 { try? await Task.sleep(nanoseconds: 200_000_000) }
+                        try? await Task.sleep(nanoseconds: 1_000_000_000)
+                        hub.publish(inject)
+                    }
+                }
+                return MCPServer(version: MCPEndpoint.version, instructions: MCPTools.instructions, tools: tools)
+            }, channel: channel)
             exit(0)
         }
         // The main thread only services the main queue from here on; the work happens in the task above.
