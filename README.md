@@ -19,6 +19,7 @@ by showing which process and which subsystem is responsible.
     - [Checkup](#checkup)
     - [Restarts & Crashes](#restarts--crashes)
     - [Boot and login time](#boot-and-login-time)
+    - [What Changed](#what-changed)
   - [Activity](#activity)
     - [Performance](#performance)
     - [Processes](#processes)
@@ -109,7 +110,7 @@ build is ad-hoc signed and the release notes explain how to open it past Gatekee
 The sidebar groups the pages as below (sections fold away; ⌘1–⌘9 jump to the first nine). Every page also has a
 demo-data version for screenshots (see Demo mode at the end).
 
-- **Overview:** Summary (the cockpit) · Stress Map · Flight Log · Trends · Checkup · Restarts & Crashes
+- **Overview:** Summary (the cockpit) · Stress Map · Flight Log · Trends · Checkup · Restarts & Crashes · What Changed
 - **Activity:** Performance (CPU, Memory, Disk, Network, Energy, Thermals, GPU) · Processes · Launches · Console · Camera & Mic
 - **Power:** Power & Freq · Sleep & Wake
 - **Network:** Network · Wi-Fi · Internet · Destinations · Connections · UPnP · UniFi
@@ -231,6 +232,33 @@ loginwindow, time at the login window (including typing the password), login (wt
 login and background items that started during login, and the busiest processes in the first 5 minutes from the
 black box when FlightDeck was itself running then (otherwise their CPU time since start, but only within an hour of
 login). Each boot's timing is saved for 90 days for the trend chart; boot-to-login comes from wtmp for every boot.
+
+#### What Changed
+
+What changed on this Mac, and when: a read-only persistence and configuration log in the spirit of KnockKnock and
+BlockBlock. About 90 s after launch and then every 15 minutes (and when the page opens or you press Check Now),
+FlightDeck takes an inventory, compares it with the previous one and records each difference, kept 90 days in
+`~/Library/Application Support/Flightdeck/Changes/`. A full inventory takes about a second. It covers, without root:
+
+- **launch agents and daemons** (the three LaunchAgents/LaunchDaemons folders, as Startup Apps reads them): the
+  program each runs, whether it starts at login or boot, who signed it;
+- **system extensions** (`systemextensionsctl list`) and loaded **kernel extensions** (`kmutil showloaded`), third-party only;
+- **configuration profiles**: your user's profiles (`profiles list`), DEP/MDM enrollment and the managed-settings
+  domains in `/Library/Managed Preferences`. Profiles installed for the whole Mac can only be listed with root;
+- **sharing services**: Remote Login, Screen Sharing, File Sharing, Remote Apple Events and Internet Sharing on or
+  off (launchd's override database);
+- **apps** outside `/System` (the Installed Apps inventory): installed, updated or removed, with version, bundle ID,
+  signer and team ID (signatures are checked only for new and updated apps);
+- **Homebrew** formulae and casks (folder listings of the Cellar and Caskroom; brew itself is never run), and the
+  **macOS version**.
+
+Each change shows when (the file's modification time, or for a macOS update the boot after it, when that falls
+between two checks; otherwise when the check found it), what kind (added, removed, changed, updated), what it is, and
+why it may matter. Notable changes are flagged and raised once as findings: unsigned or ad-hoc-signed code, a
+program in a temporary, shared, hidden or home folder, a new third-party system or kernel extension, a new profile or
+managed setting, an MDM enrollment, a sharing service turned on. The first inventory is the baseline and raises
+nothing, as does a category the first time it can be read. Items link to Startup Apps, Installed Apps or Checkup.
+Login items and SMAppService background items aren't tracked (listing them needs Automation permission or root).
 
 ### Activity
 
@@ -787,6 +815,7 @@ errors. It may contain personal paths and names, so review it before sharing.
 | `network_destinations` | per app (optionally one app, or only destinations matching a host or IP), the remote hosts it talked to over 1–30 days: bytes in and out, connections, first and last seen, services, local or internet, name source, and new / unusual-volume flags |
 | `restarts` | every boot with how the session before it ended (clean / unexpected / kernel panic / unknown), the explanation, saved shutdown cause code with its certainty, evidence and an inferred flag; counts by cause; boot and login timing; recent app hangs; what the records can't tell. Never queries the unified log |
 | `panics` | kernel panic reports: time, culprit, what to do, panic string, panicked task, kexts in the backtrace |
+| `system_changes` | what FlightDeck's What Changed inventory found over the last N days or `since` a time: launch agents and daemons, system and kernel extensions, profiles and MDM, sharing services, apps, Homebrew, macOS updates; each with when, the item, signer and team, program and path, why it may matter and a notable flag; `kind` filter and `notable_only`. Reads the saved log, never takes an inventory |
 | `mark` | records a named timestamp (`label`) and returns its id and time, and whether the black box is recording. Writes only `~/Library/Application Support/Flightdeck/marks.json` (kept 48 h); marks show as flags on the Flight Log timeline |
 | `marks` | recent marks, newest first |
 | `measure` | what the Mac did between two marks, times, or a mark and now (within 24 h): CPU avg/p95/peak and CPU-seconds, memory and pressure, swap growth, disk and network totals, energy (Wh), hottest temperature and throttling, top processes and apps by CPU-seconds, peak memory, energy and disk. `process` or `app` gives that process tree's cost, children included; `compare_to` adds a baseline window, deltas and a verdict |
