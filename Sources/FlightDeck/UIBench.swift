@@ -141,7 +141,12 @@ enum UIBench {
             while l.value == nil && Date() < until { RunLoop.main.run(until: Date().addingTimeInterval(0.2)) }
             return l
         }
-        let peripherals = ready(Loader { Peripherals.collect() })   // before building the view: see `ready`
+        // Peripherals: the invented desk, then this Mac with its saved accessory history read-only (nothing recorded).
+        let peripheralsDemo = ready(Loader { DemoPeripherals.report() })
+        out("peripherals-demo", height: 1900, PeripheralsView(loader: peripheralsDemo))
+        let peripherals = ready(Loader {   // before building the view: see `ready`
+            Peripherals.collect(recorder: AccessoryRecorder(store: AccessoryStore(dir: AccessoryStore.defaultDirectory, readOnly: true)))
+        })
         out("peripherals", height: 1500, PeripheralsView(loader: peripherals))
         // UPnP: the invented demo network, then a real ~3 s SSDP scan of this network (run here, since onAppear doesn't).
         out("upnp-demo", height: 1250, UPnPView(model: UPnPModel(preview: Demo.upnpScan())))

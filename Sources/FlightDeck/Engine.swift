@@ -186,6 +186,7 @@ final class Engine: ObservableObject {
         MetricsEndpoint.shared.configure(engine: self)   // Prometheus endpoint, if turned on in Settings
         MCPEndpoint.shared.configure(engine: self)       // MCP server for AI assistants, if turned on in Settings
         CameraMicService.start()   // camera & microphone listeners (event-driven; nothing in demo mode)
+        PeripheralsService.start()   // plug/unplug notifications and accessory battery readings (nothing in demo mode)
         let r = rules; queue.async { [ruleEngine] in ruleEngine.rules = r }
         startVisibilityTracking()
         // Sleep findings: at launch, after every wake, and every 30 minutes (so they expire 12 h after waking).
@@ -418,6 +419,7 @@ final class Engine: ObservableObject {
                 + CameraMicService.findings(now: s.time)   // opt-in camera & mic alerts
                 + DestinationService.findings(now: s.time)   // opt-in "new destination" alerts
                 + RestartWatch.shared.findings(now: s.time)   // one-shot: unexpected shutdown or panic since last launch
+                + PeripheralsService.findings(now: s.time)   // once per plug-in: slow drive; once per discharge: low accessory
             self.chargeCurve.ingest(s)
             ruleEngine.frontmostPID = front
             let firings = ruleEngine.evaluate(s)

@@ -35,7 +35,8 @@ public struct MCPTools: MCPToolProvider {
     and hangs), checkup (health and security checklist), temperatures (every sensor, fans, throttling), wifi (the Wi-Fi link's health and the last nearby-network scan), trends (daily history, before/after app and macOS updates) and \
     camera_mic (which apps used the camera or microphone, and when), network_destinations (which hosts each app talked to), \
     battery (health forecast and what's wearing the battery), restarts (boots, how each previous session ended, \
-    boot and login time) and panics (kernel panic reports with the likely culprit). \
+    boot and login time), panics (kernel panic reports with the likely culprit) and peripherals (USB/Thunderbolt link \
+    speeds with why a device runs slower than it could, and accessory battery levels with time left). \
     To measure your own work (a build, a test run, a benchmark): call mark before and after it, then measure between \
     the two marks, optionally with process or app for that process tree's cost and compare_to for a baseline run \
     (see the measure_change prompt). query_metrics returns raw black-box time series; process_logs returns a process's \
@@ -102,6 +103,7 @@ public struct MCPTools: MCPToolProvider {
             case "network_destinations": out = try await networkDestinations(a)
             case "restarts": out = try await restarts(a)
             case "panics": out = try await panics(a)
+            case "peripherals": out = try await peripherals()
             case "mark": out = try await mark(a)
             case "marks": out = try await listMarks(a)
             case "measure": out = try await measure(a)
@@ -215,6 +217,9 @@ public struct MCPTools: MCPToolProvider {
             MCPToolSpec(name: "panics", title: "Kernel panics",
                         description: "Kernel panic reports from /Library/Logs/DiagnosticReports and its Retired folder, newest first: time, plain-English culprit (third-party driver, hung app or service, system hang, sleep/wake, hardware, memory, graphics, kernel), what to do, the panic string, panicked task and the kernel extensions in the backtrace.",
                         inputSchema: Self.schema([("days", Self.int("Days to look back.", 1, 90, 90))])),
+            MCPToolSpec(name: "peripherals", title: "Peripherals: link speeds and accessory batteries",
+                        description: "Every USB and Thunderbolt/USB4 device with its negotiated link speed, what the device supports, what its port or hub supports, hubs in the chain, a drive's realistic maximum MB/s, and a plain-English diagnosis when it's linked slower than both ends could (e.g. an SSD stuck at USB 2 behind a USB 2-only cable or hub, a dock at 20 Gb/s instead of 40). Plus accessory batteries (Magic Mouse/Keyboard/Trackpad, AirPods per bud and case where macOS reports them) with an estimate of the time left from FlightDeck's saved history. Inferred capabilities are flagged. Takes about a second (one system_profiler call).",
+                        inputSchema: Self.schema([])),
         ] + Self.agentSpecs
     }
 }

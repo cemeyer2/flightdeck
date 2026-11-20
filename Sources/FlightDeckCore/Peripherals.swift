@@ -20,6 +20,11 @@ public struct USBDevice: Identifiable, Hashable, Sendable {
     /// mA the device is expected to draw from VBUS (5 V), and the most it may draw (UsbPowerSinkAllocation/Capability).
     public var powerAllocatedmA: Int?
     public var powerCapabilitymA: Int?
+    public init(id: UInt64, parent: UInt64?, name: String, vendor: String?, vendorID: Int?, productID: Int?, speed: String?,
+         powerAllocatedmA: Int?, powerCapabilitymA: Int?) {
+        self.id = id; self.parent = parent; self.name = name; self.vendor = vendor; self.vendorID = vendorID; self.productID = productID
+        self.speed = speed; self.powerAllocatedmA = powerAllocatedmA; self.powerCapabilitymA = powerCapabilitymA
+    }
 }
 
 public struct ThunderboltBus: Identifiable, Hashable, Sendable {
@@ -29,6 +34,7 @@ public struct ThunderboltBus: Identifiable, Hashable, Sendable {
     public var ports: [String]
     /// Connected devices (name, vendor, speed where reported), in chain order.
     public var devices: [String]
+    public init(name: String, ports: [String], devices: [String]) { self.name = name; self.ports = ports; self.devices = devices }
 }
 
 public struct DisplayInfo: Identifiable, Hashable, Sendable {
@@ -43,6 +49,11 @@ public struct DisplayInfo: Identifiable, Hashable, Sendable {
     public var isMain: Bool
     /// Filled in by the UI from NSScreen (which belongs on the main thread): nil = not determined.
     public var hdr: Bool?
+    public init(name: String, gpu: String?, displayID: UInt32?, pixels: String?, resolution: String?, refreshHz: Double?, connection: String?,
+         isMain: Bool, hdr: Bool?) {
+        self.name = name; self.gpu = gpu; self.displayID = displayID; self.pixels = pixels; self.resolution = resolution
+        self.refreshHz = refreshHz; self.connection = connection; self.isMain = isMain; self.hdr = hdr
+    }
 }
 
 public struct BluetoothDevice: Identifiable, Hashable, Sendable {
@@ -53,6 +64,9 @@ public struct BluetoothDevice: Identifiable, Hashable, Sendable {
     public var connected: Bool
     /// e.g. ["Main": 80] or ["Left": 70, "Right": 75, "Case": 40], in %.
     public var battery: [String: Int]
+    public init(name: String, address: String?, kind: String?, connected: Bool, battery: [String: Int]) {
+        self.name = name; self.address = address; self.kind = kind; self.connected = connected; self.battery = battery
+    }
 }
 
 public struct AudioDevice: Identifiable, Hashable, Sendable {
@@ -65,6 +79,11 @@ public struct AudioDevice: Identifiable, Hashable, Sendable {
     public var transport: String?
     public var defaultInput: Bool
     public var defaultOutput: Bool
+    public init(name: String, manufacturer: String?, inputs: Int?, outputs: Int?, sampleRate: Double?, transport: String?,
+         defaultInput: Bool, defaultOutput: Bool) {
+        self.name = name; self.manufacturer = manufacturer; self.inputs = inputs; self.outputs = outputs; self.sampleRate = sampleRate
+        self.transport = transport; self.defaultInput = defaultInput; self.defaultOutput = defaultOutput
+    }
 }
 
 public struct PowerAdapterInfo: Hashable, Sendable {
@@ -73,6 +92,9 @@ public struct PowerAdapterInfo: Hashable, Sendable {
     public var name: String?
     public var watts: Int?
     public var manufacturer: String?
+    public init(connected: Bool?, charging: Bool?, name: String?, watts: Int?, manufacturer: String?) {
+        self.connected = connected; self.charging = charging; self.name = name; self.watts = watts; self.manufacturer = manufacturer
+    }
 }
 
 public struct PeripheralsReport: Sendable {
@@ -85,11 +107,40 @@ public struct PeripheralsReport: Sendable {
     public var power: PowerAdapterInfo?
     /// Set when system_profiler couldn't be run or its output didn't parse; the IOKit sections still fill.
     public var profilerError: String?
+    /// Negotiated vs supported link speeds with diagnoses (LinkAnalysis.swift, ThunderboltLink.swift).
+    public var links = LinkReport()
+    /// Accessory batteries now and their saved history (AccessoryBattery.swift).
+    public var accessories: [AccessoryBattery] = []
+    public init(usb: [USBDevice], thunderbolt: [ThunderboltBus], displays: [DisplayInfo], bluetooth: [BluetoothDevice], bluetoothState: String? = nil,
+         audio: [AudioDevice], power: PowerAdapterInfo?) {
+        self.usb = usb; self.thunderbolt = thunderbolt; self.displays = displays; self.bluetooth = bluetooth
+        self.bluetoothState = bluetoothState; self.audio = audio; self.power = power
+    }
 }
 
 public enum Peripherals {
     /// Blocking: system_profiler (~1 s) plus IORegistry walks. Call off the main thread.
-    public static func collect() -> PeripheralsReport {
+    /// With a recorder, this load's battery levels are saved and the saved history joins the report.
+    public static func collect(recorder: AccessoryRecorder? = nil) -> PeripheralsReport {
+        var r = collectDevices()
+        r.links = LinkSpeedReader.read()
+        r.accessories = accessories(bluetooth: r.bluetooth, hid: hidBatteries(), recorder: recorder)
+        return r
+    }
+
+    /// Bluetooth levels (system_profiler, plus the IORegistry for Apple's HID accessories) and USB HID accessories
+    /// that only the IORegistry reports, recorded and joined with up to 60 days of history.
+    static func accessories(bluetooth: [BluetoothDevice], hid: [String: Int], recorder: AccessoryRecorder?, now: Date = Date()) -> [AccessoryBattery] {
+        var current = bluetooth.filter { $0.connected && !$0.battery.isEmpty }.map { (name: $0.name, kind: $0.kind, levels: $0.battery) }
+        for (name, pct) in hid.sorted(by: { $0.key < $1.key }) where !current.contains(where: { $0.name == name }) {
+            current.append((name: name, kind: nil, levels: ["Main": pct]))
+        }
+        recorder?.record(Dictionary(current.map { ($0.name, $0.levels) }, uniquingKeysWith: { a, _ in a }), now: now)
+        let history = recorder?.store.history(since: now.addingTimeInterval(-Double(AccessoryStore.retentionDays) * 86_400), now: now) ?? [:]
+        return AccessoryForecast.combine(current: current, history: history, since: now.addingTimeInterval(-Double(AccessoryStore.retentionDays) * 86_400))
+    }
+
+    static func collectDevices() -> PeripheralsReport {
         var r = PeripheralsReport(usb: usbDevices(), thunderbolt: [], displays: [], bluetooth: [], audio: [], power: nil)
         let types = ["SPThunderboltDataType", "SPDisplaysDataType", "SPBluetoothDataType", "SPAudioDataType", "SPPowerDataType"]
         guard let out = Shell.run("/usr/sbin/system_profiler", ["-json"] + types, timeout: 30),
