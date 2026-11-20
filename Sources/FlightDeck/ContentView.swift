@@ -22,6 +22,7 @@ enum Destination: String, CaseIterable, Identifiable, Hashable {
     case changes = "What Changed"
     case weeklyReport = "Weekly Report"
     case backups = "Backups"
+    case fleet = "Fleet"
     var id: String { rawValue }
     var icon: String {
         switch self {
@@ -58,6 +59,7 @@ enum Destination: String, CaseIterable, Identifiable, Hashable {
         case .changes: "clock.badge.exclamationmark"
         case .weeklyReport: "calendar.badge.clock"
         case .backups: "clock.arrow.circlepath"
+        case .fleet: "macbook.and.iphone"
         }
     }
 }
@@ -77,7 +79,7 @@ enum SidebarSection: String, CaseIterable, Identifiable {
         case .overview: [.summary, .stressMap, .flightLog, .trends, .weeklyReport, .checkup, .restarts, .changes]
         case .activity: [.performance, .processes, .launches, .console, .cameraMic]
         case .power: [.power, .sleep]
-        case .network: [.network, .wifi, .internet, .destinations, .connections, .upnp, .unifi]
+        case .network: [.network, .wifi, .internet, .destinations, .connections, .upnp, .unifi, .fleet]
         case .storage: [.diskSpace, .backups]
         case .system: [.systemInfo, .peripherals, .apps, .startup, .services, .users]
         case .tools: [.rules, .developer, .benchmarks]
@@ -212,6 +214,7 @@ struct ContentView: View {
         case .changes: ChangesView()
         case .weeklyReport: WeeklyReportView()
         case .backups: BackupsView()
+        case .fleet: FleetView()
         }
     }
 

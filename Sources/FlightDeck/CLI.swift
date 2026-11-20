@@ -41,7 +41,8 @@ enum CLI {
         // A mistyped flag or a missing argument must not silently open the GUI instead. (Single-dash arguments are
         // left alone: macOS and the automation hooks pass those, e.g. -destination, -NSDocumentRevisionsDebugMode.)
         let known: [String: Int] = ["--snapshot": 0, "--json": 0, "--findings": 0, "--processes": 0, "--top": 1, "--stats": 1, "--csv": 2,
-                                    "--report": 2, "--json-stream": 0, "--mcp": 0, "--render-views": 1, "--bench-ui": 0, "--render-iconset": 1, "--render-dock-previews": 1]
+                                    "--report": 2, "--json-stream": 0, "--mcp": 0, "--render-views": 1, "--bench-ui": 0, "--render-iconset": 1, "--render-dock-previews": 1,
+                                    "--fleet-serve": 1, "--fleet-query": 2]
         for (i, arg) in a.enumerated().dropFirst() where arg.hasPrefix("--") {
             guard let n = known[arg] else { fail("unknown option \(arg)\n\n\(usage)") }
             if n > 0 && (i + n >= a.count || a[(i + 1)...(i + n)].contains { $0.hasPrefix("--") }) && arg != "--bench-ui" {
@@ -49,6 +50,8 @@ enum CLI {
             }
         }
         if a.contains("--mcp") { mcpStdio() }
+        if let v = value("--fleet-serve") { FleetCLI.serve(port: v[0]) }            // developer-only, FleetCLI.swift
+        if let v = value("--fleet-query", 2) { FleetCLI.query(v[0], code: v[1]) }
         if let v = value("--render-views") { UIBench.renderViews(to: v[0]) }
         if a.contains("--json-stream") { jsonStream(a) }
         if a.contains("--bench-ui") { UIBench.run(renders: Int(value("--bench-ui")?.first ?? "") ?? 20) }

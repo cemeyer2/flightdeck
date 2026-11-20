@@ -46,6 +46,7 @@ by showing which process and which subsystem is responsible.
     - [Connections](#connections)
     - [UPnP](#upnp)
     - [UniFi](#unifi)
+    - [Fleet](#fleet)
   - [Storage](#storage)
     - [Disk Space › Folder Scanner](#disk-space--folder-scanner)
     - [Disk Space › What's Using My Disk](#disk-space--whats-using-my-disk)
@@ -645,6 +646,35 @@ open. With nothing configured, opening the view checks whether the default gatew
 like UniFi OS (one unauthenticated HTTPS GET) and suggests it; no credentials are sent anywhere you haven't configured.
 Anything the console doesn't report is shown as unknown. For other features, `UniFiSnapshot.attachment(ofMAC:)` and
 `UniFiTopology` (FlightDeckCore) say which AP or switch port a MAC address is on.
+
+#### Fleet
+
+*Settings › Network › Fleet, off by default on every Mac.* Your other Macs running FlightDeck, on one page: a card per
+Mac with its model icon, online/offline (and when it was last seen), CPU, memory-pressure and temperature sparklines for
+the last 30 minutes, and its worst current finding. Click a card for a read-only detail panel: CPU, memory pressure and
+use, hottest sensor, thermal state, startup-disk free space, battery, uptime, macOS and FlightDeck versions, current
+findings and recent incidents. Values the other Mac couldn't measure show as "—" with its reason. To add a Mac, turn on
+**Share this Mac with my other Macs** on it and click **Pair a Mac**; it shows a 6-digit code for 5 minutes. Its card
+appears on your other Macs' Fleet page ("FlightDeck on Studio — pair to view"); click **Pair…** and type the code.
+The page polls paired Macs every 10 s while open; otherwise every 5 minutes, so a paired Mac with a warning raises a
+finding here ("Studio: Memory pressure is critical"). A sharing Mac does no work between requests apart from noting
+four numbers every 30 s for the history.
+
+Security: sharing Macs advertise `_flightdeck._tcp` over Bonjour and answer only private, link-local or loopback
+addresses (never peer-to-peer or cellular interfaces). Without pairing a Mac learns only the other's name. Pairing is
+Bluetooth-style Passkey Entry over X25519: six rounds in which the viewer commits to each digit of the code before the
+host proves it knows it, so neither a listener nor a man in the middle can recover the code or the key (an active
+attacker gets one 1-in-a-million guess per attempt); pairing is only accepted while the code is shown, any wrong or
+abandoned attempt changes the code, and 5 failures pause pairing for 10 minutes. Every request is signed (HMAC-SHA256
+over method, path, time and a one-time nonce; ±5 min clock window; replays refused) and every reply is encrypted and
+authenticated with ChaCha20-Poly1305, bound to its request. Read-only: there is no endpoint that changes anything.
+Shared data is limited to the vital signs above, finding kinds and wording (paths, URLs, e-mail, IP/MAC addresses,
+host names and your user names are replaced; camera, microphone and destination alerts are never shared; no process
+IDs, command lines or app identifiers) and the coarse history. Each Mac can remove a viewer (Settings) or forget a host
+(the detail panel). Pairing secrets are kept in `~/Library/Application Support/Flightdeck/Fleet/fleet.json` (mode 0600
+in a 0700 folder) rather than the Keychain: FlightDeck is ad-hoc signed, so each update would trigger Keychain access
+prompts at random moments from the background poll. For testing without a second Mac, `FlightDeck --fleet-serve <port>`
+serves this Mac on 127.0.0.1 and `FlightDeck --fleet-query 127.0.0.1:<port> <code>` pairs with it and prints the reply.
 
 ### Storage
 
