@@ -39,6 +39,12 @@ enum UIBench {
         let restartsLive = RestartsModel.loadedForRender(blackBox: e.blackBox)
         out("restarts", height: 2600, RestartsView(model: restartsLive))
         if ProcessInfo.processInfo.environment["FD_RENDER_ONLY"] == "restarts" { exit(0) }   // quick iteration on this page
+        // Displays: the invented XDR panel and HDMI monitor stuck at 30 Hz (mode lists open), then this Mac's displays,
+        // read before building the view (CoreGraphics, IORegistry, NSScreen; nothing is changed).
+        out("displays-demo", height: 2600, DisplaysView(model: DisplaysModel(preview: DemoDisplays.report()), expandModes: true))
+        let displaysLive = DisplaysModel.loadedForRender()
+        out("displays", height: 1900, DisplaysView(model: displaysLive, expandModes: true))
+        if ProcessInfo.processInfo.environment["FD_RENDER_ONLY"] == "displays" { exit(0) }
         out("flightlog", FlightLogView())
         // The timeline with demo buckets and marks (as a coding agent's `mark` calls would leave them), handed in
         // because ImageRenderer doesn't run the panel's loading task.

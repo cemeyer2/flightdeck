@@ -191,6 +191,7 @@ final class Engine: ObservableObject {
         // Sleep findings: at launch, after every wake, and every 30 minutes (so they expire 12 h after waking).
         refreshSleepFindings()
         RestartsModel.launchCheck()   // once, ~30 s after launch: unexpected shutdowns and panics since the last check
+        if !Demo.isEnabled { DisplayHistory.shared.start() }   // display connects and mode changes this session (callback, no polling)
         NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
             // give powerd a moment to write the wake to the log
             DispatchQueue.main.asyncAfter(deadline: .now() + 20) { MainActor.assumeIsolated { self?.refreshSleepFindings() } }

@@ -19,6 +19,7 @@ enum Destination: String, CaseIterable, Identifiable, Hashable {
     case cameraMic = "Camera & Mic"
     case destinations = "Destinations"
     case restarts = "Restarts & Crashes"
+    case displays = "Displays"
     var id: String { rawValue }
     var icon: String {
         switch self {
@@ -52,6 +53,7 @@ enum Destination: String, CaseIterable, Identifiable, Hashable {
         case .cameraMic: "web.camera"
         case .destinations: "point.3.connected.trianglepath.dotted"
         case .restarts: "restart.circle"
+        case .displays: "display.2"
         }
     }
 }
@@ -73,7 +75,7 @@ enum SidebarSection: String, CaseIterable, Identifiable {
         case .power: [.power, .sleep]
         case .network: [.network, .wifi, .internet, .destinations, .connections, .upnp, .unifi]
         case .storage: [.diskSpace]
-        case .system: [.systemInfo, .peripherals, .apps, .startup, .services, .users]
+        case .system: [.systemInfo, .peripherals, .displays, .apps, .startup, .services, .users]
         case .tools: [.rules, .developer, .benchmarks]
         case .more: Destination.allCases.filter { d in !Self.listed.contains(d) }
         }
@@ -201,6 +203,7 @@ struct ContentView: View {
         case .cameraMic: CameraMicView()
         case .destinations: DestinationsView()
         case .restarts: RestartsView()
+        case .displays: DisplaysView()
         }
     }
 
