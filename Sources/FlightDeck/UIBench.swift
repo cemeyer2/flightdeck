@@ -39,6 +39,13 @@ enum UIBench {
         let restartsLive = RestartsModel.loadedForRender(blackBox: e.blackBox)
         out("restarts", height: 2600, RestartsView(model: restartsLive))
         if ProcessInfo.processInfo.environment["FD_RENDER_ONLY"] == "restarts" { exit(0) }   // quick iteration on this page
+        // What Changed: the invented week (also filtered to apps), then this Mac: its saved log, read-only, plus one
+        // inventory taken in memory so the tracked counts are current (nothing is written).
+        out("changes-demo", height: 2600, ChangesView(model: ChangesModel(preview: DemoChanges.report(), demo: true)))
+        out("changes-demo-apps", height: 1100, ChangesView(model: ChangesModel(preview: DemoChanges.report(), demo: true), category: .app))
+        let changesLive = ChangesModel.savedForRender()
+        out("changes", height: 1800, ChangesView(model: changesLive))
+        if ProcessInfo.processInfo.environment["FD_RENDER_ONLY"] == "changes" { exit(0) }
         out("flightlog", FlightLogView())
         // The timeline with demo buckets and marks (as a coding agent's `mark` calls would leave them), handed in
         // because ImageRenderer doesn't run the panel's loading task.

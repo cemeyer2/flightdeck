@@ -35,7 +35,8 @@ public struct MCPTools: MCPToolProvider {
     and hangs), checkup (health and security checklist), temperatures (every sensor, fans, throttling), wifi (the Wi-Fi link's health and the last nearby-network scan), trends (daily history, before/after app and macOS updates) and \
     camera_mic (which apps used the camera or microphone, and when), network_destinations (which hosts each app talked to), \
     battery (health forecast and what's wearing the battery), restarts (boots, how each previous session ended, \
-    boot and login time) and panics (kernel panic reports with the likely culprit). \
+    boot and login time), panics (kernel panic reports with the likely culprit) and system_changes (what was installed, \
+    updated, removed or reconfigured: launch agents, extensions, profiles, sharing, apps, Homebrew, macOS). \
     To measure your own work (a build, a test run, a benchmark): call mark before and after it, then measure between \
     the two marks, optionally with process or app for that process tree's cost and compare_to for a baseline run \
     (see the measure_change prompt). query_metrics returns raw black-box time series; process_logs returns a process's \
@@ -102,6 +103,7 @@ public struct MCPTools: MCPToolProvider {
             case "network_destinations": out = try await networkDestinations(a)
             case "restarts": out = try await restarts(a)
             case "panics": out = try await panics(a)
+            case "system_changes": out = try await systemChanges(a)
             case "mark": out = try await mark(a)
             case "marks": out = try await listMarks(a)
             case "measure": out = try await measure(a)
@@ -215,6 +217,15 @@ public struct MCPTools: MCPToolProvider {
             MCPToolSpec(name: "panics", title: "Kernel panics",
                         description: "Kernel panic reports from /Library/Logs/DiagnosticReports and its Retired folder, newest first: time, plain-English culprit (third-party driver, hung app or service, system hang, sleep/wake, hardware, memory, graphics, kernel), what to do, the panic string, panicked task and the kernel extensions in the backtrace.",
                         inputSchema: Self.schema([("days", Self.int("Days to look back.", 1, 90, 90))])),
+            MCPToolSpec(name: "system_changes", title: "What changed on this Mac",
+                        description: "Changes FlightDeck recorded to this Mac's persistent configuration, newest first: launch agents and daemons (with the program each runs and its signer), third-party system and kernel extensions, configuration profiles, MDM enrollment and managed settings, sharing services (Remote Login, Screen Sharing, File Sharing…) turned on or off, apps installed, updated or removed (version, bundle id, signer, team id), Homebrew formulae and casks, and macOS updates. Each change has when (file modification time when that is a better estimate than FlightDeck's check), what it is, and why it may matter; notable ones (unsigned or ad-hoc code that runs automatically, programs in temporary or home folders, new extensions or profiles, sharing turned on) are flagged. FlightDeck takes an inventory every 15 minutes while the app runs; nothing before its first inventory is known, and items readable only with root are listed as limits.",
+                        inputSchema: Self.schema([
+                            ("days", Self.int("Days to look back, ending now (ignored when since is given).", 1, 90, 7)),
+                            ("since", ["type": "string", "description": "Only changes at or after this ISO 8601 time or date (e.g. 2026-11-18 or 2026-11-18T09:00:00Z)."]),
+                            ("kind", ["type": "array", "description": "Only these kinds.", "items": Self.enumeration("Kind", ChangeCategory.allCases.map(\.slug))]),
+                            ("notable_only", ["type": "boolean", "description": "Only changes flagged as notable.", "default": false]),
+                            ("limit", Self.int("Most changes to list.", 1, 500, 100)),
+                        ])),
         ] + Self.agentSpecs
     }
 }
