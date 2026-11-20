@@ -2,35 +2,39 @@ import SwiftUI
 import AppKit
 import FlightDeckCore
 
-// Peripherals destination: USB tree, Thunderbolt/USB4, displays, Bluetooth (with battery levels), audio devices and the
-// power adapter, from `Peripherals.collect()`. Loaded when the page appears and on Refresh only, never per sample.
+// Peripherals destination: link speeds with diagnoses, accessory batteries with history, then the USB tree,
+// Thunderbolt/USB4, displays, Bluetooth, audio devices and the power adapter, from `Peripherals.collect()`. Loaded when
+// the page appears, on Refresh and after a plug/unplug while the page is open; never per sample. Demo mode shows
+// DemoPeripherals' invented desk.
 
 struct PeripheralsView: View {
     @Environment(\.palette) var p
-    @StateObject var loader = Loader { Peripherals.collect() }
+    /// The live report (which also records this load's accessory battery levels), or in demo mode the invented one.
+    @StateObject var loader = Loader { PeripheralsService.load() }
     /// HDR capability per CGDirectDisplayID, read from NSScreen on the main thread when the report arrives.
     @State private var hdr: [UInt32: Bool] = [:]
 
     var body: some View {
-        if Demo.isEnabled {
-            DemoUnavailable(what: "Peripherals lists the devices connected to this Mac")
-        } else {
-            MaybeScroll {
-                VStack(spacing: 12) {
-                    HStack {
-                        Text("Devices connected to or paired with this Mac. Fields a device doesn't report are shown as \"not reported\".")
-                            .font(.system(size: 11, design: .monospaced)).foregroundStyle(p.dim)
-                        Spacer()
-                        if loader.loading { ProgressView().controlSize(.small) }
-                        Button("Refresh") { loader.load() }.disabled(loader.loading)
-                    }
-                    if let r = loader.value { sections(r) } else { ProgressView("Reading devices…").padding(30) }
-                }.padding(16)
-            }
-            .onAppear { loader.load(); hdr = Self.screenHDR() }
-            .onChange(of: loader.value?.displays.count) { hdr = Self.screenHDR() }
+        MaybeScroll {
+            VStack(spacing: 12) {
+                HStack {
+                    Text("Devices connected to or paired with this Mac. Fields a device doesn't report are shown as \"not reported\".")
+                        .font(.system(size: 11, design: .monospaced)).foregroundStyle(p.dim)
+                    Spacer()
+                    if loader.loading { ProgressView().controlSize(.small) }
+                    Button("Refresh") { loader.load() }.disabled(loader.loading)
+                }
+                if let r = loader.value { sections(r) } else { ProgressView("Reading devices…").padding(30) }
+            }.padding(16)
         }
+        .onAppear { loader.load(); refreshHDR() }
+        .onChange(of: loader.value?.displays.count) { refreshHDR() }
+        // Something was plugged in or out: re-read while the page is open (the watch itself never runs system_profiler).
+        .onReceive(NotificationCenter.default.publisher(for: PeripheralsService.linksChanged)) { _ in loader.load() }
     }
+
+    /// Demo displays carry their own invented HDR flags; NSScreen is only asked about this Mac's.
+    func refreshHDR() { if !Demo.isEnabled { hdr = Self.screenHDR() } }
 
     /// NSScreen's potential EDR headroom above 1.0 means the display can show HDR content.
     static func screenHDR() -> [UInt32: Bool] {
@@ -45,6 +49,8 @@ struct PeripheralsView: View {
 
     @ViewBuilder func sections(_ r: PeripheralsReport) -> some View {
         if let e = r.profilerError { Text("Only USB is shown: \(e).").foregroundStyle(.orange).font(.system(size: 11)) }
+        LinkSpeedsPanel(links: r.links)
+        AccessoryBatteryPanel(accessories: r.accessories)
         Panel(title: "USB", trailing: r.usb.isEmpty ? "no devices" : "\(r.usb.count) devices") {
             ForEach(Peripherals.usbTree(r.usb), id: \.device.id) { item in
                 let d = item.device
@@ -65,7 +71,7 @@ struct PeripheralsView: View {
         }
         Panel(title: "Displays") {
             ForEach(r.displays) { d in
-                let h = d.displayID.flatMap { hdr[$0] }
+                let h = d.hdr ?? d.displayID.flatMap { hdr[$0] }
                 Row(icon: "display", title: d.name + (d.isMain ? " (main)" : ""), facts: [
                     d.resolution.map { "looks like \($0)" }, d.pixels.map { "\($0) pixels" },
                     d.refreshHz.map { String(format: "%.0f Hz", $0) } ?? "refresh not reported",
@@ -77,7 +83,11 @@ struct PeripheralsView: View {
             if r.bluetooth.isEmpty { Text("No paired devices reported.").foregroundStyle(p.dim).font(.system(size: 11)) }
             ForEach(r.bluetooth) { d in
                 // Order the battery parts the way AirPods-style devices are usually described.
-                let parts = ["Main", "Left", "Right", "Case"].compactMap { k in d.battery[k].map { (k == "Main" ? "battery" : k.lowercased()) + " \($0)%" } }
+                let parts: [String] = ["Main", "Left", "Right", "Case"].compactMap { (k: String) -> String? in
+                    guard let v = d.battery[k] else { return nil }
+                    let label: String = k == "Main" ? "battery" : k.lowercased()
+                    return label + " \(v)%"
+                }
                 Row(icon: d.connected ? "dot.radiowaves.left.and.right" : "circle.dashed", title: d.name, dim: !d.connected, facts: [
                     d.connected ? "connected" : "not connected", d.kind,
                     d.connected ? (parts.isEmpty ? "battery not reported" : parts.joined(separator: " · ")) : nil,

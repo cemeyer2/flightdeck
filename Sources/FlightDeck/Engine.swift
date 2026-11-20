@@ -187,6 +187,7 @@ final class Engine: ObservableObject {
         MCPEndpoint.shared.configure(engine: self)       // MCP server for AI assistants, if turned on in Settings
         FleetService.shared.configure(engine: self)      // Fleet: share this Mac (if on) and poll paired Macs
         CameraMicService.start()   // camera & microphone listeners (event-driven; nothing in demo mode)
+        PeripheralsService.start()   // plug/unplug notifications and accessory battery readings (nothing in demo mode)
         let r = rules; queue.async { [ruleEngine] in ruleEngine.rules = r }
         startVisibilityTracking()
         // Sleep findings: at launch, after every wake, and every 30 minutes (so they expire 12 h after waking).
@@ -425,6 +426,7 @@ final class Engine: ObservableObject {
                 + ChangeWatch.shared.findings(now: s.time)   // notable changes: unsigned launch agent, new extension or profile…
                 + BackupWatch.shared.findings()   // no successful Time Machine backup for days (refreshed every 15 min)
                 + FleetWatch.shared.findings()   // a paired Mac in trouble (set by the Fleet poll)
+                + PeripheralsService.findings(now: s.time)   // once per plug-in: slow drive; once per discharge: low accessory
             self.chargeCurve.ingest(s)
             ruleEngine.frontmostPID = front
             let firings = ruleEngine.evaluate(s)

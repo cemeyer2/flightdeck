@@ -43,8 +43,9 @@ public struct MCPTools: MCPToolProvider {
     boot and login time), panics (kernel panic reports with the likely culprit), system_changes (what was installed, \
     updated, removed or reconfigured: launch agents, extensions, profiles, sharing, apps, Homebrew, macOS), weekly_report (a week's digest: \
     slowdowns, restarts, battery, storage, network, compared with the week before), backups (Time Machine: status, \
-    destinations, recent runs with failure reasons, gaps) and displays (modes, \
-    refresh, HDR, connection bandwidth and diagnoses). \
+    destinations, recent runs with failure reasons, gaps), displays (modes, \
+    refresh, HDR, connection bandwidth and diagnoses) and peripherals (USB/Thunderbolt link \
+    speeds with why a device runs slower than it could, and accessory battery levels with time left). \
     To measure your own work (a build, a test run, a benchmark): call mark before and after it, then measure between \
     the two marks, optionally with process or app for that process tree's cost and compare_to for a baseline run \
     (see the measure_change prompt). query_metrics returns raw black-box time series; process_logs returns a process's \
@@ -115,6 +116,7 @@ public struct MCPTools: MCPToolProvider {
             case "weekly_report": out = try await weeklyReport(a)
             case "backups": out = try await backups(a)
             case "displays": out = try await displays()
+            case "peripherals": out = try await peripherals()
             case "mark": out = try await mark(a)
             case "marks": out = try await listMarks(a)
             case "measure": out = try await measure(a)
@@ -245,6 +247,9 @@ public struct MCPTools: MCPToolProvider {
                         inputSchema: Self.schema([("days", Self.int("Days of runs and gaps to include, ending now.", 1, 90, 30))])),
             MCPToolSpec(name: "displays", title: "Displays and video links",
                         description: "Every connected display: name, built-in or external, connection (HDMI, USB-C DisplayPort Alt Mode, Thunderbolt tunnel, virtual), the GPU driving it, size, manufacture year, panel type hints, current mode in points and pixels with HiDPI scale, refresh rate and ProMotion/variable range, the signal (timing, pixel clock, bit depth, chroma, DSC), the DisplayPort link (rate × lanes and usable Gbit/s) where the IORegistry reports it, HDR state and EDR headroom, built-in brightness, and plain-English diagnoses with bandwidth figures (e.g. stuck at 30 Hz by an HDMI 1.4 link, 4:2:2 chroma for lack of bandwidth, HiDPI not offered). Includes this session's connects and mode changes when the app is running. Read-only.",
+                        inputSchema: Self.schema([])),
+            MCPToolSpec(name: "peripherals", title: "Peripherals: link speeds and accessory batteries",
+                        description: "Every USB and Thunderbolt/USB4 device with its negotiated link speed, what the device supports, what its port or hub supports, hubs in the chain, a drive's realistic maximum MB/s, and a plain-English diagnosis when it's linked slower than both ends could (e.g. an SSD stuck at USB 2 behind a USB 2-only cable or hub, a dock at 20 Gb/s instead of 40). Plus accessory batteries (Magic Mouse/Keyboard/Trackpad, AirPods per bud and case where macOS reports them) with an estimate of the time left from FlightDeck's saved history. Inferred capabilities are flagged. Takes about a second (one system_profiler call).",
                         inputSchema: Self.schema([])),
         ] + Self.agentSpecs
     }

@@ -762,8 +762,27 @@ After each wake, a restless or draining night (30+ dark wakes, or 10%+ battery l
 
 #### Peripherals
 
-The USB tree (speed, power drawn), Thunderbolt/USB4, displays (resolution, refresh, HDR), Bluetooth
-devices with battery levels, audio devices and the power adapter. **Connections** adds **listening ports**: which
+**Link speeds** compares, for every USB and Thunderbolt/USB4 device, the speed it negotiated with what the device
+supports and what its port (or the hub in front of it) supports, and says why in plain English: "Ridgeline Portable
+SSD is running at USB 2 (480 Mb/s) but supports 5 Gb/s: the cable or adapter is limiting it — try a USB-C cable rated
+10 Gb/s, or plug it straight into the Mac", a USB 2-only hub in the chain, or "This Thunderbolt dock is linked at
+20 Gb/s (Gen 2 ×2), not 40 Gb/s". Drives show the most they can transfer over the link (about 40 MB/s at USB 2).
+Everything comes from documented IORegistry keys (`UsbLinkSpeed`/`USBSpeed`, `bcdUSB`, the port's USB 3 companion,
+the USB-C port's transports and cable flags, and the Thunderbolt lane adapters' current/supported speed and width).
+A USB 3 device that fell back to USB 2 describes itself like a USB 2 device, so that case is diagnosed only when its
+descriptor says USB 3 or it is an SSD, and the latter is marked "probably". IOKit plug/unplug notifications (no polling)
+re-read the links, and a drive linked well below its capability raises a finding once per plug-in.
+
+**Accessory batteries** shows each accessory's level (AirPods per bud and case) with a 30-day sparkline and an
+estimate such as "about 9 days left at this rate", a Theil–Sen fit over the readings since the last charge (or the
+reason there is none yet). Apple's Magic Mouse/Keyboard/Trackpad publish their level in the IORegistry, read every
+20 minutes; AirPods and other headsets only report through `system_profiler`, so their levels are recorded only when
+the page loads. History is kept for 60 days in `~/Library/Application Support/Flightdeck/Accessories/` (one JSON
+file per month, only changes and two-hourly repeats). A main battery dropping below 15% raises a finding once per
+discharge.
+
+Below those: the USB tree (speed, power drawn), Thunderbolt/USB4, displays (resolution, refresh, HDR), Bluetooth
+devices with battery levels, audio devices and the power adapter. Demo mode shows an invented desk. **Connections** adds **listening ports**: which
 process listens on which port, flagging services open on all interfaces. It uses `netstat` (every process) when macOS
 gives the app the socket table, and otherwise falls back to `lsof` (your own processes only) and says so; on macOS 27,
 netstat launched from an app returns no Internet sockets even though it works in Terminal.
@@ -948,6 +967,7 @@ errors. It may contain personal paths and names, so review it before sharing.
 | `weekly_report` | one calendar week (`weeks_ago`: 0 = this week so far, 1 = last week): the headline, hours of high CPU / memory pressure / heat with the top incidents and apps, busiest apps, restarts, panics, freezes and crash reports, battery cycles, health and forecast change, startup-disk use, internet data and new destinations, plus the report as Markdown. Finished weeks come from the saved reports |
 | `backups` | Time Machine: state now and progress, each destination (kind, space and trend, last successful backup, backups kept, encryption), recent runs with duration, size and plain-English failure reasons, gaps, local snapshot count, limits. Read-only; never runs `log show` or mounts a disk |
 | `displays` | every display: identity, connection, current mode and refresh range, signal (timing, pixel clock, bit depth, chroma, DSC), DisplayPort link rate × lanes, HDR / EDR headroom, built-in brightness, diagnoses with bandwidth figures, and this session's connects and mode changes (app only). Never includes serial numbers |
+| `peripherals` | USB and Thunderbolt/USB4 devices: negotiated vs supported link speed, hubs in the chain, a drive's realistic MB/s and why it's slower than it could be; accessory batteries with time left |
 | `mark` | records a named timestamp (`label`) and returns its id and time, and whether the black box is recording. Writes only `~/Library/Application Support/Flightdeck/marks.json` (kept 48 h); marks show as flags on the Flight Log timeline |
 | `marks` | recent marks, newest first |
 | `measure` | what the Mac did between two marks, times, or a mark and now (within 24 h): CPU avg/p95/peak and CPU-seconds, memory and pressure, swap growth, disk and network totals, energy (Wh), hottest temperature and throttling, top processes and apps by CPU-seconds, peak memory, energy and disk. `process` or `app` gives that process tree's cost, children included; `compare_to` adds a baseline window, deltas and a verdict |
@@ -1116,7 +1136,7 @@ Automation hooks: `open build/FlightDeck.app --args -destination "Processes" -th
 **Demo mode:** `open build/FlightDeck.app --args -demo YES -skipWelcome YES` runs the UI on synthetic data
 (`Sources/FlightDeck/Demo.swift`) for screenshots. It never saves rules, never posts alerts and can't act on real
 processes, run cleanups, start or stop services, or contact the network. The pages in the screenshots above (plus Console,
-Checkup and Peripherals, which show a placeholder) are synthetic. System Info, Connections, Installed Apps, Startup
+Checkup, which shows a placeholder, and Peripherals, which shows an invented desk) are synthetic. System Info, Connections, Installed Apps, Startup
 Apps, Services, Users, the GPU tab and the process inspector still read this Mac, so don't screenshot those in demo mode. On Thermals every sensor (names and values), fan and pmset limit is invented, catalogued with the generic
 Apple-silicon table so nothing depends on this Mac's chip. Camera & Mic shows invented sessions (Zoom, FaceTime, a
 first use, an unknown app at 3 a.m. while locked) with no device listeners and nothing written. Restarts & Crashes shows
