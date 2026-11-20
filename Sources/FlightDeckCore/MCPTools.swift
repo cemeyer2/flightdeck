@@ -23,6 +23,11 @@ public struct MCPTools: MCPToolProvider {
     var marks = MarkStore()
     /// Runs `log show` for `process_logs`; tests replay captured ndjson instead.
     var logRunner: @Sendable (ProcessLogs.Query) -> ProcessLogs.Result = { ProcessLogs.read($0) }
+    /// `weekly_report`: the saved weekly reports (read-only) and the boot/panic reader; tests use in-memory ones.
+    var weeklyStore = WeeklyReportStore(dir: WeeklyReportStore.defaultDirectory, readOnly: true)
+    var restartsReader: @Sendable () -> RestartsReport? = {
+        RestartsCollector.collect(store: BootStore(dir: DailyLog.defaultDirectory, readOnly: true), queryLog: .none)
+    }
 
     public init(source: MCPDataSource) { self.source = source }
 
@@ -35,8 +40,9 @@ public struct MCPTools: MCPToolProvider {
     and hangs), checkup (health and security checklist), temperatures (every sensor, fans, throttling), wifi (the Wi-Fi link's health and the last nearby-network scan), trends (daily history, before/after app and macOS updates) and \
     camera_mic (which apps used the camera or microphone, and when), network_destinations (which hosts each app talked to), \
     battery (health forecast and what's wearing the battery), restarts (boots, how each previous session ended, \
-    boot and login time), panics (kernel panic reports with the likely culprit) and system_changes (what was installed, \
-    updated, removed or reconfigured: launch agents, extensions, profiles, sharing, apps, Homebrew, macOS). \
+    boot and login time), panics (kernel panic reports with the likely culprit), system_changes (what was installed, \
+    updated, removed or reconfigured: launch agents, extensions, profiles, sharing, apps, Homebrew, macOS) and weekly_report (a week's digest: \
+    slowdowns, restarts, battery, storage, network, compared with the week before). \
     To measure your own work (a build, a test run, a benchmark): call mark before and after it, then measure between \
     the two marks, optionally with process or app for that process tree's cost and compare_to for a baseline run \
     (see the measure_change prompt). query_metrics returns raw black-box time series; process_logs returns a process's \
@@ -104,6 +110,7 @@ public struct MCPTools: MCPToolProvider {
             case "restarts": out = try await restarts(a)
             case "panics": out = try await panics(a)
             case "system_changes": out = try await systemChanges(a)
+            case "weekly_report": out = try await weeklyReport(a)
             case "mark": out = try await mark(a)
             case "marks": out = try await listMarks(a)
             case "measure": out = try await measure(a)
@@ -226,6 +233,9 @@ public struct MCPTools: MCPToolProvider {
                             ("notable_only", ["type": "boolean", "description": "Only changes flagged as notable.", "default": false]),
                             ("limit", Self.int("Most changes to list.", 1, 500, 100)),
                         ])),
+            MCPToolSpec(name: "weekly_report", title: "Weekly Report",
+                        description: "One calendar week (Monday to Sunday, local time) of how this Mac did, as on FlightDeck's Weekly Report page: a headline, hours of high CPU / memory pressure / heat from the Flight Log with the top incidents and the apps behind them, the busiest apps by CPU time, unexpected restarts, kernel panics, app freezes and crash reports, battery cycles used and health and 80%-forecast change, the startup disk's use and growth, internet data used and new destinations, and changes against the week before; plus the same report as Markdown text. Finished weeks come from the reports the app saved; the current week is built on the spot. Read-only.",
+                        inputSchema: Self.schema([("weeks_ago", Self.int("0 = this week so far, 1 = last week, and so on.", 0, 104, 1))])),
         ] + Self.agentSpecs
     }
 }

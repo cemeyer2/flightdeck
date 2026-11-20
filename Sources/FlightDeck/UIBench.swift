@@ -50,6 +50,16 @@ enum UIBench {
         let changesLive = ChangesModel.savedForRender()
         out("changes", height: 1800, ChangesView(model: changesLive))
         if ProcessInfo.processInfo.environment["FD_RENDER_ONLY"] == "changes" { exit(0) }
+        // Weekly Report: the invented busy week (and its PDF's first page), then this Mac's weeks from its saved data, built
+        // in memory before the view (nothing is saved). FD_RENDER_ONLY=weekly stops here.
+        let weeklyDemo = WeeklyReportModel.demo()
+        out("weekly-demo", height: 1500, WeeklyReportView(model: weeklyDemo))
+        if let r = weeklyDemo.selected, let pdf = WeeklyReportExport.pdf(WeeklyDigest.make(r, previous: weeklyDemo.previous(of: r))) {
+            try? pdf.write(to: URL(fileURLWithPath: dir).appendingPathComponent("weekly-demo.pdf")); print("wrote weekly-demo.pdf")
+        }
+        let weeklyLive = WeeklyReportModel.loadedForRender(engine: e)
+        out("weekly", height: 1500, WeeklyReportView(model: weeklyLive))
+        if ProcessInfo.processInfo.environment["FD_RENDER_ONLY"] == "weekly" { exit(0) }
         out("flightlog", FlightLogView())
         // The easter egg (Konami code): its boarding pass, mid-flight over an invented course, and the crash card.
         let course = TurbulenceModel.previewCourse()

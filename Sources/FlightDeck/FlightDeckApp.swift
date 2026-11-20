@@ -238,6 +238,7 @@ struct SettingsView: View {
                 TemperatureAlertsSection()
                 CameraMicAlertsSection()
                 DestinationAlertsSection()
+                WeeklyReportSettingsSection()
             }
             .tabItem { Label("Alerts", systemImage: "bell.badge") }
             tab {

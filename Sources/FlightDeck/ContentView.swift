@@ -20,6 +20,7 @@ enum Destination: String, CaseIterable, Identifiable, Hashable {
     case destinations = "Destinations"
     case restarts = "Restarts & Crashes"
     case changes = "What Changed"
+    case weeklyReport = "Weekly Report"
     var id: String { rawValue }
     var icon: String {
         switch self {
@@ -54,6 +55,7 @@ enum Destination: String, CaseIterable, Identifiable, Hashable {
         case .destinations: "point.3.connected.trianglepath.dotted"
         case .restarts: "restart.circle"
         case .changes: "clock.badge.exclamationmark"
+        case .weeklyReport: "calendar.badge.clock"
         }
     }
 }
@@ -70,7 +72,7 @@ enum SidebarSection: String, CaseIterable, Identifiable {
     /// System is inventory; Tools are things you set up or run.
     var members: [Destination] {
         switch self {
-        case .overview: [.summary, .stressMap, .flightLog, .trends, .checkup, .restarts, .changes]
+        case .overview: [.summary, .stressMap, .flightLog, .trends, .weeklyReport, .checkup, .restarts, .changes]
         case .activity: [.performance, .processes, .launches, .console, .cameraMic]
         case .power: [.power, .sleep]
         case .network: [.network, .wifi, .internet, .destinations, .connections, .upnp, .unifi]
@@ -155,6 +157,7 @@ struct ContentView: View {
         .onAppear {
             if Demo.isEnabled && engine.demoSleep == nil { Demo.start(engine) }   // screenshot mode: synthetic data only
             InternetModel.shared.attach(engine)   // speed-test history and the opt-in schedule (idempotent)
+            WeeklyReportService.shared.attach(engine)   // daily report build and the opt-in weekly notification (idempotent)
             // The inspector WindowGroup is opened by value (a ProcessIdentity), which only a SwiftUI view can do.
             // (Not in demo mode: demo PIDs are invented and could match real processes, whose details must not be shown.)
             AppActions.openInspector = Demo.isEnabled ? nil : { openWindow(id: "inspector", value: $0) }
@@ -205,6 +208,7 @@ struct ContentView: View {
         case .destinations: DestinationsView()
         case .restarts: RestartsView()
         case .changes: ChangesView()
+        case .weeklyReport: WeeklyReportView()
         }
     }
 
