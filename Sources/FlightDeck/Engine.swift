@@ -185,6 +185,7 @@ final class Engine: ObservableObject {
         applyProbe()
         MetricsEndpoint.shared.configure(engine: self)   // Prometheus endpoint, if turned on in Settings
         MCPEndpoint.shared.configure(engine: self)       // MCP server for AI assistants, if turned on in Settings
+        FleetService.shared.configure(engine: self)      // Fleet: share this Mac (if on) and poll paired Macs
         CameraMicService.start()   // camera & microphone listeners (event-driven; nothing in demo mode)
         let r = rules; queue.async { [ruleEngine] in ruleEngine.rules = r }
         startVisibilityTracking()
@@ -418,6 +419,7 @@ final class Engine: ObservableObject {
                 + CameraMicService.findings(now: s.time)   // opt-in camera & mic alerts
                 + DestinationService.findings(now: s.time)   // opt-in "new destination" alerts
                 + RestartWatch.shared.findings(now: s.time)   // one-shot: unexpected shutdown or panic since last launch
+                + FleetWatch.shared.findings()   // a paired Mac in trouble (set by the Fleet poll)
             self.chargeCurve.ingest(s)
             ruleEngine.frontmostPID = front
             let firings = ruleEngine.evaluate(s)

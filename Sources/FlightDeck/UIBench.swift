@@ -33,6 +33,13 @@ enum UIBench {
         out("stressmap", height: 900, StressMapView())
         out("welcome", height: 640, WelcomeView())
         out("sleep", height: 1500, SleepPreview())
+        // Fleet: the invented Macs (one offline, one with a memory warning, one nearby unpaired) with the Studio open,
+        // then the "no Macs yet" page and the Settings section. Nothing is browsed or polled.
+        let (fleetHosts, fleetNearby) = DemoFleet.model()
+        out("fleet-demo", height: 1500, FleetView(model: FleetModel(preview: fleetHosts, unpaired: fleetNearby, selected: "demo-studio")))
+        out("fleet-empty", height: 500, FleetView(model: FleetModel(preview: [], unpaired: [])))
+        out("fleet-settings", width: 640, height: 360, VStack(alignment: .leading) { FleetSettingsSection() })
+        if ProcessInfo.processInfo.environment["FD_RENDER_ONLY"] == "fleet" { exit(0) }
         // Restarts & Crashes: the invented history, then this Mac's records (wtmp, shutdown log, panic and hang reports,
         // a few unified-log queries), loaded before building the view (see `ready` below). The saved history is only read.
         out("restarts-demo", height: 3000, RestartsView(model: RestartsModel(preview: DemoRestarts.report())))

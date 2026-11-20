@@ -19,6 +19,7 @@ enum Destination: String, CaseIterable, Identifiable, Hashable {
     case cameraMic = "Camera & Mic"
     case destinations = "Destinations"
     case restarts = "Restarts & Crashes"
+    case fleet = "Fleet"
     var id: String { rawValue }
     var icon: String {
         switch self {
@@ -52,6 +53,7 @@ enum Destination: String, CaseIterable, Identifiable, Hashable {
         case .cameraMic: "web.camera"
         case .destinations: "point.3.connected.trianglepath.dotted"
         case .restarts: "restart.circle"
+        case .fleet: "macbook.and.iphone"
         }
     }
 }
@@ -71,7 +73,7 @@ enum SidebarSection: String, CaseIterable, Identifiable {
         case .overview: [.summary, .stressMap, .flightLog, .trends, .checkup, .restarts]
         case .activity: [.performance, .processes, .launches, .console, .cameraMic]
         case .power: [.power, .sleep]
-        case .network: [.network, .wifi, .internet, .destinations, .connections, .upnp, .unifi]
+        case .network: [.network, .wifi, .internet, .destinations, .connections, .upnp, .unifi, .fleet]
         case .storage: [.diskSpace]
         case .system: [.systemInfo, .peripherals, .apps, .startup, .services, .users]
         case .tools: [.rules, .developer, .benchmarks]
@@ -201,6 +203,7 @@ struct ContentView: View {
         case .cameraMic: CameraMicView()
         case .destinations: DestinationsView()
         case .restarts: RestartsView()
+        case .fleet: FleetView()
         }
     }
 

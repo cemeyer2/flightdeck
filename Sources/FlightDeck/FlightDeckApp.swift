@@ -266,10 +266,12 @@ struct SettingsView: View {
                 }
                 UniFiSettingsSection()
                 SpeedTestSettingsSection()
+                FleetSettingsSection()
                 // Kept honest as features are added: list every way FlightDeck itself touches the network.
                 Text("FlightDeck sends no data off this Mac. It only uses the network when you ask: latency pings (if on above), "
                      + "device discovery while the Network or UPnP page is open, scans and traceroutes you start there, and your "
-                     + "UniFi console once you've set it up, and speed tests you run or schedule (against Apple's test servers). The metrics and MCP servers listen on this Mac only.")
+                     + "UniFi console once you've set it up, and speed tests you run or schedule (against Apple's test servers). The metrics and MCP servers listen on this Mac only. "
+                     + "Fleet (if you share this Mac or pair with one) talks only to your paired Macs on the local network.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             .tabItem { Label("Network", systemImage: "network") }
