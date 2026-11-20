@@ -114,7 +114,12 @@ public enum WeeklyReportBuilder {
 
     /// Seconds of [from, to) covered by at least one span (overlaps counted once).
     static func union(_ spans: [(Date, Date)], from: Date, to: Date) -> Double {
-        let clipped = spans.map { (max($0.0, from), min($0.1, to)) }.filter { $0.0 < $0.1 }.sorted { $0.0 < $1.0 }
+        var clipped: [(Date, Date)] = []
+        for s in spans {
+            let a = max(s.0, from), b = min(s.1, to)
+            if a < b { clipped.append((a, b)) }
+        }
+        clipped.sort { (l: (Date, Date), r: (Date, Date)) -> Bool in l.0 < r.0 }
         var total = 0.0, cur: (Date, Date)?
         for s in clipped {
             if let c = cur, s.0 <= c.1 { cur = (c.0, max(c.1, s.1)) }

@@ -36,7 +36,9 @@ final class BatteryForecastTests: XCTestCase {
         XCTAssertEqual(l.slope, -0.05, accuracy: 0.01)
         // Ordinary least squares for comparison: the outliers on the early side bias it.
         let mx = pts.map(\.x).reduce(0, +) / 40, my = pts.map(\.y).reduce(0, +) / 40
-        let ols = zip(pts.map(\.x), pts.map(\.y)).reduce(0) { $0 + ($1.0 - mx) * ($1.1 - my) } / pts.map { ($0.x - mx) * ($0.x - mx) }.reduce(0, +)
+        var sxy = 0.0, sxx = 0.0
+        for p in pts { sxy += (p.x - mx) * (p.y - my); sxx += (p.x - mx) * (p.x - mx) }
+        let ols = sxy / sxx
         XCTAssertGreaterThan(abs(ols - -0.05), abs(l.slope - -0.05))
     }
 

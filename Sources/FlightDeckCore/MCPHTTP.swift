@@ -1,7 +1,8 @@
 import Foundation
 import Network
-// The Streamable HTTP transport for the MCP server: `POST /mcp` with a JSON-RPC message in, one JSON response out
-// (never an SSE stream: no tool sends progress, so a single JSON object is all a client needs). Bound to 127.0.0.1
+// The Streamable HTTP transport for the MCP server: `POST /mcp` with a JSON-RPC message in, one JSON response out.
+// Server-to-client streams (Server-Sent Events) exist only for notifications (MCPHTTPStream.swift): the legacy GET
+// stream of a session from `initialize`, and the 2026-07-28 `subscriptions/listen` POST. Bound to 127.0.0.1
 // only, like MetricsServer. Every request must carry the bearer token shown in Settings, and a browser `Origin` or
 // `Host` that isn't this Mac is refused, so a web page can't reach the server through DNS rebinding. Nothing runs
 // between requests.
@@ -40,9 +41,8 @@ public enum MCPHTTPGate {
         let auth = headers["authorization"] ?? ""
         let given = auth.lowercased().hasPrefix("bearer ") ? String(auth.dropFirst(7)).trimmingCharacters(in: .whitespaces) : ""
         guard constantTimeEqual(given, token) else { return (401, "Unauthorized: send the token from FlightDeck Settings as 'Authorization: Bearer <token>'") }
-        // GET would open a server-to-client SSE stream (legacy revisions) and DELETE would end a session; this server
-        // has neither, and 405 is the answer both revisions define for that.
-        guard method == "POST" else { return (405, "Method not allowed: POST JSON-RPC messages to /mcp") }
+        // GET opens a session's notification stream and DELETE ends a session (legacy revisions; MCPHTTPStream.swift).
+        guard ["POST", "GET", "DELETE"].contains(method) else { return (405, "Method not allowed: POST JSON-RPC messages to /mcp") }
         return nil
     }
 
@@ -62,10 +62,13 @@ public enum MCPHTTPGate {
 public final class MCPHTTPServer: @unchecked Sendable {
     public static let maxBody = 1 << 20, maxHeader = 16 << 10, maxResponse = 1 << 20
 
-    private let queue = DispatchQueue(label: "flightdeck.mcp.http", qos: .userInitiated)
+    let queue = DispatchQueue(label: "flightdeck.mcp.http", qos: .userInitiated)
     private var listener: NWListener?
     private var connections = 0
-    private let server: MCPServer
+    /// Open SSE streams (touched only on `queue`), limited to `maxStreams`.
+    var streams = 0
+    public static let maxStreams = 4
+    let server: MCPServer
     private let token: String
     public let requestedPort: UInt16
     /// The bound port while running.
@@ -101,7 +104,7 @@ public final class MCPHTTPServer: @unchecked Sendable {
     public func stop() { queue.async { [self] in listener?.cancel(); listener = nil; port = nil } }
 
     private func accept(_ c: NWConnection) {
-        guard connections < 8 else { c.cancel(); return }
+        guard connections < 8 + Self.maxStreams else { c.cancel(); return }
         connections += 1
         c.stateUpdateHandler = { [weak self] st in
             switch st {
@@ -191,13 +194,14 @@ public final class MCPHTTPServer: @unchecked Sendable {
             if status == 405 { extra.append(("Allow", "POST")) }
             return send(c, status: status, body: Self.errorJSON(msg), extra: extra)
         }
+        if method != "POST" || Self.isListen(body) { return respondStreaming(c, method: method, headers: headers, body: body) }
         let server = self.server
         Task {
             let reply = await server.handle(body, headers: headers)
             self.queue.async {
                 guard var data = reply.body?.data else { return self.send(c, status: reply.status, body: nil) }
                 if data.count > Self.maxResponse { data = Self.errorJSON("Response too large") }
-                self.send(c, status: reply.status, body: data)
+                self.send(c, status: reply.status, body: data, extra: reply.sessionID.map { [("Mcp-Session-Id", $0)] } ?? [])
             }
         }
     }
@@ -208,9 +212,9 @@ public final class MCPHTTPServer: @unchecked Sendable {
     }
 
     static let reasons = [200: "OK", 202: "Accepted", 400: "Bad Request", 401: "Unauthorized", 403: "Forbidden", 404: "Not Found",
-                          405: "Method Not Allowed", 413: "Payload Too Large", 431: "Request Header Fields Too Large", 503: "Service Unavailable"]
+                          405: "Method Not Allowed", 406: "Not Acceptable", 429: "Too Many Requests", 413: "Payload Too Large", 431: "Request Header Fields Too Large", 503: "Service Unavailable"]
 
-    private func send(_ c: NWConnection, status: Int, body: Data?, extra: [(String, String)] = []) {
+    func send(_ c: NWConnection, status: Int, body: Data?, extra: [(String, String)] = []) {
         var head = "HTTP/1.1 \(status) \(Self.reasons[status] ?? "Error")\r\n"
         if let body { head += "Content-Type: application/json\r\nContent-Length: \(body.count)\r\n" } else { head += "Content-Length: 0\r\n" }
         for (k, v) in extra { head += "\(k): \(v)\r\n" }

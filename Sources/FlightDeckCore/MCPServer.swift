@@ -11,6 +11,8 @@ import Foundation
 // This server is "dual-era": it answers `initialize` for legacy clients and serves modern requests statelessly. It
 // keeps no per-session state at all (every tool is argument-driven; the one that writes, `mark`, keeps its marks in a file), so a legacy client that skips
 // `initialize`, or a stdio proxy that switches between the app and standalone mode mid-session, still works.
+// The one exception is notifications (MCPServerEvents.swift): a legacy `resources/subscribe` lives on an MCPSession
+// (stdio's, or an HTTP session from `initialize`), and a modern `subscriptions/listen` lives as long as its request.
 
 /// One tool as listed by `tools/list`.
 public struct MCPToolSpec: Sendable {
@@ -46,6 +48,8 @@ public protocol MCPToolProvider: Sendable {
 public struct MCPReply: Sendable {
     public var status: Int
     public var body: JSON?
+    /// Set on an HTTP `initialize` reply: the `Mcp-Session-Id` to send back (resource subscriptions need it).
+    public var sessionID: String? = nil
 }
 
 public final class MCPServer: Sendable {
@@ -68,16 +72,24 @@ public final class MCPServer: Sendable {
 
     let name: String, version: String, instructions: String
     let tools: MCPToolProvider
+    /// Resources and the event hub behind subscriptions (MCPServerEvents.swift); nil when the tools have none.
+    let resources: MCPResourceProvider?
+    /// HTTP sessions (created by `initialize`), for resource subscriptions only.
+    let sessions = MCPSessionTable()
 
     public init(name: String = "flightdeck", version: String, instructions: String, tools: MCPToolProvider) {
         self.name = name; self.version = version; self.instructions = instructions; self.tools = tools
+        resources = tools as? MCPResourceProvider
     }
 
     var serverInfo: JSON { ["name": .str(name), "title": "FlightDeck", "version": .str(version)] }
 
     /// Handles one message. `headers` (lowercased names) are passed by the HTTP transport so the request-metadata
-    /// headers can be checked against the body; stdio passes nil.
-    public func handle(_ data: Data, headers: [String: String]? = nil) async -> MCPReply {
+    /// headers can be checked against the body; stdio passes nil. `session` is the transport's client state (stdio has
+    /// one; over HTTP it is found from `Mcp-Session-Id`). `notify` is where a `subscriptions/listen` stream writes
+    /// (stdout, or the HTTP response's SSE stream); that request only returns when its task is cancelled.
+    public func handle(_ data: Data, headers: [String: String]? = nil, session: MCPSession? = nil,
+                       notify: (@Sendable (JSON) -> Void)? = nil) async -> MCPReply {
         guard let msg = try? JSON.parse(data) else { return error(nil, Code.parseError, "Parse error: the body is not valid JSON", status: 400) }
         // JSON-RPC batches were allowed only in 2025-03-26 and removed after it; no current client sends them.
         guard msg.isObject else { return error(nil, Code.invalidRequest, "Invalid request: expected one JSON-RPC object (batches are not supported)", status: 400) }
@@ -104,16 +116,24 @@ public final class MCPServer: Sendable {
             return error(id, Code.headerMismatch, "Header mismatch: \(mismatch)", status: 400)
         }
 
+        var session = session
+        if session == nil, let sid = headers?["mcp-session-id"] {
+            guard let s = sessions.find(sid) else { return error(id, Code.invalidRequest, "Session not found: send initialize again", status: 404) }
+            session = s
+        }
         switch method {
         case "initialize":
             // Echo the client's version when it's a legacy one we speak; otherwise offer the newest legacy version
             // (the client then decides whether it can continue).
             let asked = params["protocolVersion"]?.string ?? ""
             let v = Self.legacyVersions.contains(asked) ? asked : Self.legacyVersions[0]
-            return ok(id, ["protocolVersion": .str(v), "capabilities": capabilities, "serverInfo": serverInfo,
-                           "instructions": .str(instructions)], modern: false)
+            var reply = ok(id, ["protocolVersion": .str(v), "capabilities": capabilities(session), "serverInfo": serverInfo,
+                               "instructions": .str(instructions)], modern: false)
+            // Over HTTP a session is only worth having for subscriptions.
+            if headers != nil, session == nil, resources?.events != nil { reply.sessionID = sessions.create().id }
+            return reply
         case "server/discover":
-            return ok(id, ["supportedVersions": .strings(Self.supportedVersions), "capabilities": capabilities,
+            return ok(id, ["supportedVersions": .strings(Self.supportedVersions), "capabilities": capabilities(session),
                            "instructions": .str(instructions)], modern: true)
         case "ping":
             return ok(id, [:], modern: modern)
@@ -156,13 +176,25 @@ public final class MCPServer: Sendable {
             return ok(id, ["description": .str(p.description),
                            "messages": [["role": "user", "content": ["type": "text", "text": .str(p.render(args))]]]], modern: modern)
         default:
+            if let r = await handleEvents(method, id: id, params: params, modern: modern, session: session, notify: notify) { return r }
             // A modern server answers an unknown method with HTTP 404 so clients can tell it from a legacy server.
             return error(id, Code.methodNotFound, "Method not found: \(method)", status: modern ? 404 : 200)
         }
     }
 
-    /// Tools and prompts (fixed lists, so nothing ever list-changes); no resources or subscriptions.
-    var capabilities: JSON { ["tools": ["listChanged": false], "prompts": ["listChanged": false]] }
+    /// Tools and prompts (fixed lists, so nothing ever list-changes); resources with subscriptions when the tools
+    /// have an event hub; the Claude Code channel capability in channel mode.
+    func capabilities(_ session: MCPSession?) -> JSON {
+        var c: [(String, JSON)] = [("tools", ["listChanged": false]), ("prompts", ["listChanged": false])]
+        if let r = resources { c.append(("resources", ["subscribe": .bool(r.events != nil), "listChanged": false])) }
+        if session?.channel == true { c.append(("experimental", ["claude/channel": .object([])])) }
+        return .object(c)
+    }
+
+    /// Ends an HTTP session (DELETE with its `Mcp-Session-Id`); false if there was none.
+    public func endSession(_ id: String) -> Bool { sessions.remove(id) }
+    /// The HTTP session with this id, for the GET stream.
+    public func session(_ id: String) -> MCPSession? { sessions.find(id) }
 
     /// Cuts text at `maxToolTextBytes` (on a character boundary) and says so, so the model knows to narrow its request.
     static func capped(_ s: String) -> String {

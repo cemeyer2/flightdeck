@@ -76,7 +76,8 @@ final class MCPTests: XCTestCase {
         let specs = MCPTools(source: FakeSource()).specs
         XCTAssertEqual(Set(specs.map(\.name)), ["get_status", "list_processes", "get_process", "sample_stacks", "recent_incidents",
                                                 "diagnostic_reports", "history", "checkup", "trends", "temperatures", "wifi", "camera_mic", "battery", "network_destinations",
-                                                "restarts", "panics", "system_changes", "weekly_report", "backups", "displays", "peripherals", "mark", "marks", "measure", "query_metrics", "process_logs"])
+                                                "restarts", "panics", "system_changes", "weekly_report", "backups", "displays", "peripherals", "mark", "marks", "measure", "query_metrics", "process_logs",
+                                                "wait_for_event", "triage"])
         for s in specs {
             XCTAssertFalse(s.description.isEmpty)
             XCTAssertEqual(s.inputSchema["type"]?.string, "object")
@@ -163,7 +164,8 @@ final class MCPPromptTests: XCTestCase {
         let toolNames = ["get_status", "list_processes", "get_process", "sample_stacks", "recent_incidents", "diagnostic_reports", "history", "checkup", "trends", "temperatures", "wifi", "camera_mic", "network_destinations"]
         for p in MCPPrompts.all {
             let body = p.render(["app": "X", "minutes": "30", "hours": "3", "days": "7"])
-            let mentioned = body.split(whereSeparator: { !$0.isLetter && $0 != "_" }).map(String.init).filter { $0.contains("_") && $0 == $0.lowercased() }
+            let words: [String] = body.split(whereSeparator: { (c: Character) -> Bool in !c.isLetter && c != "_" }).map(String.init)
+            let mentioned = words.filter { (w: String) -> Bool in w.contains("_") && w == w.lowercased() }
             for m in mentioned where m.hasPrefix("get_") || m.hasPrefix("list_") || m.hasSuffix("_reports") || m.hasSuffix("_stacks") || m.hasSuffix("_incidents") {
                 XCTAssertTrue(toolNames.contains(m), "\(p.name) mentions unknown tool \(m)")
             }

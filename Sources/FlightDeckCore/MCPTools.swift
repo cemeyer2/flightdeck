@@ -29,11 +29,21 @@ public struct MCPTools: MCPToolProvider {
         RestartsCollector.collect(store: BootStore(dir: DailyLog.defaultDirectory, readOnly: true), queryLog: .none)
     }
 
-    public init(source: MCPDataSource) { self.source = source }
+    /// Sleeps between `wait_for_event`'s CPU checks; tests make it instant.
+    var sleeper: @Sendable (TimeInterval) async throws -> Void = { try await Task.sleep(nanoseconds: UInt64($0 * 1e9)) }
+    /// Boots with how each previous session ended, for `triage` (as `restarts` reads them); tests supply fixtures.
+    var bootReader: @Sendable () -> [BootEvent] = {
+        RestartsCollector.collect(store: BootStore(dir: DailyLog.defaultDirectory, readOnly: true), queryLog: .none).events
+    }
+    /// Pushes events to subscribers and `wait_for_event` (MCPEventHub); idle until someone listens.
+    public var events: MCPEventHub?
+
+    public init(source: MCPDataSource) { self.source = source; events = .watching(source) }
 
     /// Shown to the model on `initialize` / `server/discover`.
     public static let instructions = """
-    FlightDeck is a macOS system monitor. Start with get_status for "why is my Mac slow / hot / loud / draining?": it \
+    FlightDeck is a macOS system monitor. For "what's wrong with this Mac?" call triage: every current problem ranked, \
+    with evidence and the tool to call next. Start with get_status for "why is my Mac slow / hot / loud / draining?": it \
     returns plain-English findings, the system's numbers, the top apps and which apps strain which subsystem. Then drill \
     down with list_processes, get_process and sample_stacks (why a process of the user's is busy or hung), history (the \
     black box: statistics over the last minutes or hours), recent_incidents (the Flight Log), diagnostic_reports (crashes \
@@ -49,7 +59,11 @@ public struct MCPTools: MCPToolProvider {
     To measure your own work (a build, a test run, a benchmark): call mark before and after it, then measure between \
     the two marks, optionally with process or app for that process tree's cost and compare_to for a baseline run \
     (see the measure_change prompt). query_metrics returns raw black-box time series; process_logs returns a process's \
-    unified-log messages. All tools are read-only except mark, which only adds to FlightDeck's own marks file. Values FlightDeck could not measure are marked "unavailable", never reported as 0.
+    unified-log messages. \
+    To be told when something happens (an incident opens or closes, a new finding, a crash/hang/panic report, a thermal \
+    change, low battery), subscribe to the resources flightdeck://events, flightdeck://incidents, flightdeck://findings, \
+    flightdeck://reports or flightdeck://status; each notification carries the event in _meta["app.flightdeck/event"]. \
+    Without notifications, call wait_for_event (it blocks up to 10 minutes; it can also wait for CPU to settle). All tools are read-only except mark, which only adds to FlightDeck's own marks file. Values FlightDeck could not measure are marked "unavailable", never reported as 0.
     """
 
     struct ArgError: Error { var message: String }
@@ -122,6 +136,8 @@ public struct MCPTools: MCPToolProvider {
             case "measure": out = try await measure(a)
             case "query_metrics": out = try await queryMetrics(a)
             case "process_logs": out = try await processLogs(a)
+            case "wait_for_event": out = try await waitForEvent(a)
+            case "triage": out = try await triage(a)
             default: return .error("Unknown tool \(name)")
             }
             return MCPToolResult(text: out.text)
@@ -251,7 +267,7 @@ public struct MCPTools: MCPToolProvider {
             MCPToolSpec(name: "peripherals", title: "Peripherals: link speeds and accessory batteries",
                         description: "Every USB and Thunderbolt/USB4 device with its negotiated link speed, what the device supports, what its port or hub supports, hubs in the chain, a drive's realistic maximum MB/s, and a plain-English diagnosis when it's linked slower than both ends could (e.g. an SSD stuck at USB 2 behind a USB 2-only cable or hub, a dock at 20 Gb/s instead of 40). Plus accessory batteries (Magic Mouse/Keyboard/Trackpad, AirPods per bud and case where macOS reports them) with an estimate of the time left from FlightDeck's saved history. Inferred capabilities are flagged. Takes about a second (one system_profiler call).",
                         inputSchema: Self.schema([])),
-        ] + Self.agentSpecs
+        ] + Self.agentSpecs + Self.eventSpecs
     }
 }
 

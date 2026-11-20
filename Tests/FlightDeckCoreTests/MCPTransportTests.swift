@@ -22,7 +22,8 @@ final class MCPTransportTests: XCTestCase {
         XCTAssertEqual(MCPHTTPGate.check(method: "POST", path: "/mcp", headers: headers(["origin": "http://127.0.0.1.evil.example"]), token: token)?.status, 403)
         XCTAssertEqual(MCPHTTPGate.check(method: "POST", path: "/mcp", headers: headers(["host": "rebind.example:9465"]), token: token)?.status, 403,
                        "DNS rebinding: a foreign name resolving to 127.0.0.1")
-        XCTAssertEqual(MCPHTTPGate.check(method: "GET", path: "/mcp", headers: headers(), token: token)?.status, 405)
+        XCTAssertEqual(MCPHTTPGate.check(method: "PUT", path: "/mcp", headers: headers(), token: token)?.status, 405)
+        XCTAssertNil(MCPHTTPGate.check(method: "GET", path: "/mcp", headers: headers(), token: token), "GET opens a session stream")
         XCTAssertEqual(MCPHTTPGate.check(method: "POST", path: "/other", headers: headers(), token: token)?.status, 404)
         XCTAssertEqual(MCPHTTPGate.check(method: "POST", path: "/mcp", headers: headers(), token: "")?.status, 503, "no token, no service")
         XCTAssertEqual(MCPHTTPGate.host(of: "[::1]:9465"), "[::1]")
@@ -119,9 +120,10 @@ final class MCPTransportTests: XCTestCase {
         XCTAssertEqual(p.terminationStatus, 0)
         let lines = String(decoding: data, as: UTF8.self).split(separator: "\n")
         XCTAssertEqual(lines.count, 3, "one line per request, none for the notification, nothing else on stdout")
-        let replies = try lines.map { try JSON.parse(Data($0.utf8)) }
+        // Requests are answered concurrently, so replies may come in any order.
+        let replies = try lines.map { try JSON.parse(Data($0.utf8)) }.sorted { ($0["id"]?.int ?? 0) < ($1["id"]?.int ?? 0) }
         XCTAssertEqual(replies.map { $0["id"]?.int }, [1, 2, 3])
-        XCTAssertEqual(replies[1]["result"]?["tools"]?.array?.count, 26)
+        XCTAssertEqual(replies[1]["result"]?["tools"]?.array?.count, 28)
         let text = try XCTUnwrap(replies[2]["result"]?["content"]?.array?.first?["text"]?.string)
         XCTAssertEqual(try JSON.parse(Data(text.utf8))["source"]?.string, "standalone")
     }
