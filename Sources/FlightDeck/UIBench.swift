@@ -38,6 +38,10 @@ enum UIBench {
         out("restarts-demo", height: 3000, RestartsView(model: RestartsModel(preview: DemoRestarts.report())))
         let restartsLive = RestartsModel.loadedForRender(blackBox: e.blackBox)
         out("restarts", height: 2600, RestartsView(model: restartsLive))
+        // The page-digest instruments in a cockpit and Ambient mode, demo then live (CockpitFeedsBench.swift).
+        let feedsLive = liveFeeds(engine: e, restarts: restartsLive.report)
+        for r in feedRenders(demoFeeds(), suffix: "-demo") + feedRenders(feedsLive, suffix: "") { out(r.name, width: r.width, height: r.height, r.view) }
+        if ProcessInfo.processInfo.environment["FD_RENDER_ONLY"] == "cockpit-pages" { exit(0) }
         if ProcessInfo.processInfo.environment["FD_RENDER_ONLY"] == "restarts" { exit(0) }   // quick iteration on this page
         // What Changed: the invented week (also filtered to apps), then this Mac: its saved log, read-only, plus one
         // inventory taken in memory so the tracked counts are current (nothing is written).

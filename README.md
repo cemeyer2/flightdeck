@@ -124,7 +124,7 @@ Is my Mac OK, now and over time?
 
 #### Drill down from Summary
 
-Click any instrument (a "›" in its corner, a pointing-hand cursor and a tooltip show where it goes) to open the detailed view behind it: CPU and CPU Cores open Performance › CPU; Memory, Memory Pressure and Swap open Performance › Memory; Disk, Network and Wi-Fi Signal, GPU, Energy and Battery & Charge, and Thermals and Fans open their Performance tabs; Top Processes opens Processes; the mini Stress Map opens the Stress Map. The annunciator lights and each finding already open their own causes.
+Click any instrument (a "›" in its corner, a pointing-hand cursor and a tooltip show where it goes) to open the detailed view behind it: CPU and CPU Cores open Performance › CPU; Memory, Memory Pressure and Swap open Performance › Memory; Disk, Network, GPU, Energy, Battery & Charge and Battery Health, and Thermals and Fans open their Performance tabs; Wi-Fi Signal opens Wi-Fi; Destinations, Camera & Mic open their pages; Restarts and Boot Time open Restarts & Crashes; Top Processes opens Processes; the mini Stress Map opens the Stress Map. The annunciator lights and each finding already open their own causes.
 
 #### Customizable cockpit
 
@@ -133,7 +133,27 @@ strip above each instrument with a drag handle, a size control (S = one column, 
 buttons and a remove (×) button, plus an "Add instrument" palette. Drag instruments onto each other to reorder them;
 **Done** leaves edit mode. Besides the classic Summary cards (annunciator, findings, CPU, Memory, Disk, Network, Energy,
 Thermals, GPU, Top Processes) there are CPU Cores (a per-core strip, or per-core tiles when large), Memory Pressure,
-Swap, Fans, Battery & Charge, Wi-Fi Signal, a static mini Stress Map, and Clock & Uptime. Layouts are named and saved
+Swap, Fans, Battery & Charge, Wi-Fi Signal, a static mini Stress Map, and Clock & Uptime. Five more digest the
+pages added in 1.5, each a gauge card that also works as an Ambient gauge:
+
+- **Destinations:** destinations new in the last 24 hours, the newest one named, and an amber "unusual traffic" line
+  when a destination carries several times its usual daily bytes; graph: first contacts per day, last 14 days.
+- **Restarts:** uptime, how the last session ended (clean, unexpected, kernel panic or not recorded; amber/red when not
+  clean) and days since the last unexpected shutdown; graph: session lengths of the last 20 boots.
+- **Boot Time:** this boot's boot → desktop time against the median of FlightDeck's saved earlier boots ("typical 25 s
+  · 35 s slower", amber when much slower); graph: the last 12 measured boots with the typical line.
+- **Battery Health:** health %, cycles (of the design count) and the month the trend reaches 80% (or "not enough
+  data", "not declining", "reached"); graph: daily health readings.
+- **Camera & Mic:** what is using the camera or microphone now (amber), or the last use and how long ago; graph:
+  minutes in use per hour over the last day.
+
+They read what the pages' models already keep and never read the disk or the log while drawing: Destinations
+rebuilds its report off the main thread at most every 5 minutes while shown, Battery Health rebuilds from the
+daily log's in-memory battery days every 30 minutes while shown, Restarts and Boot Time reuse the launch check's
+collection (about 30 s after launch, so until then they show uptime and "reading the boot history"), and Camera &
+Mic follows the camera/mic watch's own change events. In demo mode they show the pages' invented data. Wi-Fi had an
+instrument already (Wi-Fi Signal: RSSI, SNR, link rate, band); channel congestion needs a scan, which briefly takes
+the radio off its channel, so it stays on the Wi-Fi page. Layouts are named and saved
 as JSON in user defaults (`cockpitLayouts`); the layout menu switches between them (Default, Thermals, Network,
 Ambient, plus your own via Duplicate Layout) and resets one or all of them. Nothing is saved until you edit, and the
 Default layout is the classic Summary page, so the page looks the same until you change it.
@@ -142,7 +162,7 @@ Default layout is the classic Summary page, so the page looks the same until you
 
 Across the top of Summary, a cockpit-style grid of labelled lights (CPU, MEM, SWAP, THERM,
 DISK, STORAGE, NET, GPU, POWER, HANG, CRASH, AWAKE), each lit amber or red by the worst current finding in that
-subsystem. Hover to see why; click to jump to the cause.
+subsystem. CRASH also lights for an unexpected shutdown or kernel panic found by Restarts & Crashes. Hover to see why; click to jump to the cause.
 
 #### Ambient mode
 
@@ -975,6 +995,8 @@ or video, and never leaves this Mac.
   table is an AppKit `NSOutlineView` updated by diffing, for low overhead.
 - Cockpit and Ambient mode: the layout model (instrument kinds, sizes, layouts, JSON, grid packing, burn-in shift) is
   `FlightDeckCore/Cockpit.swift` and `CockpitStore.swift`, tested in `CockpitTests`; the views are `Views/Cockpit*.swift`
+  (the page-digest instruments: `PageDigests*.swift` in FlightDeckCore, tested in `PageDigestTests`, fed by
+  `CockpitFeeds.swift`)
   and `Views/AmbientView.swift`, the window is `AmbientWindow.swift`.
 
 Automation hooks: `open build/FlightDeck.app --args -destination "Processes" -theme green -replayIndex 10`.

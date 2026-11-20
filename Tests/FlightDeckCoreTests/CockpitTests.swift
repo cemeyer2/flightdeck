@@ -163,7 +163,7 @@ final class CockpitTests: XCTestCase {
 /// Summary drill-down: every navigating instrument names a real page (and a real Performance tab).
 final class CockpitDrillDownTests: XCTestCase {
     func testDrillDownTargetsAreRealPages() {
-        let pages = ["Processes", "Stress Map", "Performance"]
+        let pages = ["Processes", "Stress Map", "Performance", "Wi-Fi", "Destinations", "Restarts & Crashes", "Camera & Mic"]
         let tabs = ["CPU", "Memory", "Disk", "Network", "Energy", "Thermals", "GPU"]
         for k in InstrumentKind.allCases {
             guard let t = k.drillDown else { continue }

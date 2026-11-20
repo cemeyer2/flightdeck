@@ -128,12 +128,16 @@ public enum RestartsCollector {
     /// The launch check: collects with one log query (the current boot), then returns the restart findings not yet
     /// announced since the last check, and remembers them. On the first run only the last 24 hours count, so an old
     /// history doesn't become a burst of findings.
-    public static func launchCheck(store: BootStore, now: Date = Date()) -> [Finding] {
+    public static func launchCheck(store: BootStore, now: Date = Date()) -> [Finding] { launchCheckReport(store: store, now: now).findings }
+
+    /// The launch check, also returning the report it collected (the cockpit's Restarts and Boot Time instruments
+    /// reuse it rather than collecting again).
+    public static func launchCheckReport(store: BootStore, now: Date = Date()) -> (findings: [Finding], report: RestartsReport) {
         let r = collect(store: store, queryLog: .current, now: now)
         let since = store.lastCheck ?? now.addingTimeInterval(-86_400)
         let (f, keys) = RestartFindings.evaluate(events: r.events, panics: r.panics, announced: store.announced, since: since)
         store.markAnnounced(keys, checked: now)
         store.save(now: now)
-        return f
+        return (f, r)
     }
 }
