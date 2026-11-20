@@ -30,6 +30,8 @@ struct SummaryCard: View {
     var graphHeight: CGFloat = 70
     /// Single meter colour (see InstrumentReading.meterColor); nil keeps the usual level shading.
     var meterColor: Color? = nil
+    /// Tints the detail line (see InstrumentReading.detailColor); nil keeps it dim.
+    var detailColor: Color? = nil
 
     var body: some View {
         Panel(title: title) {
@@ -39,7 +41,7 @@ struct SummaryCard: View {
             }
             if showMeter { VFDMeter(fraction: fraction, segments: 30, color: meterColor) }
             HistoryGraph(traces: traces, maxValue: maxValue, minHeadroom: minHeadroom).frame(height: graphHeight)
-            Text(detail ?? "—").font(.system(size: 11, design: .monospaced)).foregroundStyle(p.dim).lineLimit(1)
+            Text(detail ?? "—").font(.system(size: 11, design: .monospaced)).foregroundStyle(detailColor ?? p.dim).lineLimit(1)
         }
     }
 }
@@ -129,7 +131,7 @@ struct AnnunciatorPanel: View {
         ("GPU", ["gpu:", "gpu-recovery", "gpu-memory"], "Performance:GPU"),
         ("POWER", ["unusual-power", "battery-health", "sleep-"], "Performance:Energy"),
         ("HANG", ["hang:", "report:Hang"], "Processes"),
-        ("CRASH", ["report:Crash"], "Flight Log"),
+        ("CRASH", ["report:Crash", "restart:"], "Flight Log"),   // restart: unexpected shutdowns and panics (RestartFindings)
         ("AWAKE", ["awake:"], "Processes"),
     ]
 

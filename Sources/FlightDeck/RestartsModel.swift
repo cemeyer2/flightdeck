@@ -27,6 +27,7 @@ final class RestartsModel: ObservableObject {
         let store = self.store
         let frames = Self.frames(blackBox)
         report = await Task.detached(priority: .utility) { RestartsCollector.collect(store: store, queryLog: .recent, blackBox: frames) }.value
+        if let report { CockpitFeeds.shared.restartsLoaded(report) }
     }
 
     /// Reads black-box frames (coarse tier: every 10 s for 24 h) for the collector, off the main thread.
@@ -50,8 +51,9 @@ final class RestartsModel: ObservableObject {
         let store = Self.store
         Task.detached(priority: .utility) {
             try? await Task.sleep(for: .seconds(30))
-            let found = RestartsCollector.launchCheck(store: store)
+            let (found, report) = RestartsCollector.launchCheckReport(store: store)
             if !found.isEmpty { RestartWatch.shared.add(found) }
+            await MainActor.run { CockpitFeeds.shared.restartsLoaded(report) }   // the cockpit reuses this collection
         }
     }
 }

@@ -70,7 +70,7 @@ struct AmbientView: View {
                 ForEach(rows, id: \.self) { row in
                     HStack(spacing: 22) {
                         ForEach(row) { k in
-                            if let r = e.reading(k, p) { AmbientGauge(r: r) }
+                            if let r = e.reading(k, p) { AmbientGauge(r: r) } else { FeedReading(kind: k, now: now) { AmbientGauge(r: $0) } }
                         }
                         ForEach(row.count..<cols, id: \.self) { _ in Color.clear.frame(maxWidth: .infinity) }
                     }
@@ -146,7 +146,7 @@ struct AmbientGauge: View {
                 .lineLimit(1).minimumScaleFactor(0.4)
             if r.showMeter { VFDMeter(fraction: r.fraction, segments: 32, color: r.meterColor, height: 16) }
             HistoryGraph(traces: r.traces, maxValue: r.maxValue, minHeadroom: r.minHeadroom).frame(minHeight: 40, maxHeight: 220)
-            Text(r.detail ?? "—").font(.system(size: 15, design: .monospaced)).foregroundStyle(p.dim).lineLimit(1)
+            Text(r.detail ?? "—").font(.system(size: 15, design: .monospaced)).foregroundStyle(r.detailColor ?? p.dim).lineLimit(1)
         }
         .padding(22)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

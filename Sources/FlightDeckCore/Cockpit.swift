@@ -6,72 +6,70 @@ import Foundation
 /// One kind of instrument the user can place in the cockpit. The raw value is what's stored in the layout JSON, so a
 /// case must never be renamed; a kind that a newer version saved and this one doesn't know is dropped on load
 /// (see `CockpitLayout.init(from:)`) instead of failing the whole layout.
+///
+/// Adding an instrument: append a case, give it one `spec` line, and draw it in the app (a gauge-type kind returns an
+/// InstrumentReading from `Engine.reading` or `CockpitFeeds.reading`; anything else gets a case in InstrumentView).
 public enum InstrumentKind: String, Codable, CaseIterable, Sendable, Identifiable {
     // What the Summary page showed before it became customizable, in that order.
     case annunciator, findings, cpu, memory, disk, network, energy, thermals, gpu, topProcesses
     // Added with the cockpit.
     case cpuCores, memoryPressure, swap, fans, battery, wifi, stressMap, clock
+    // Digests of the 1.5 pages (FlightDeckCore/PageDigests*.swift, drawn by Views/CockpitFeeds*.swift).
+    case destinations, restarts, bootTime, batteryHealth, cameraMic
 
     public var id: String { rawValue }
 
-    /// Name shown in the "Add instrument" palette (and as the panel title for most kinds).
-    public var title: String {
+    /// Everything the catalogue knows about one kind.
+    public struct Spec: Sendable {
+        /// Name shown in the "Add instrument" palette (and as the panel title for most kinds).
+        public var title: String
+        /// SF Symbol for the palette.
+        public var symbol: String
+        /// Where clicking the instrument goes: a navigation request in the app's "Destination[:Performance tab]" form
+        /// ("Performance:Energy", "Processes"). nil for instruments with no single detail page (the clock) or whose
+        /// rows already navigate individually (the annunciator lights, each finding).
+        public var drillDown: String?
+        /// Size a newly added instrument gets. The two banner-like kinds read best across the whole row.
+        public var defaultSize: InstrumentSize = .small
+        /// A single value with a meter and/or a history graph, which Ambient mode can show as one of its big gauges.
+        /// The lists and maps (findings, processes, cores, Stress Map) and the clock are not; Ambient has its own clock
+        /// and findings ticker.
+        public var isGauge = true
+    }
+
+    public var spec: Spec {
         switch self {
-        case .annunciator: "Annunciator Panel"; case .findings: "Current Findings"; case .cpu: "CPU"; case .memory: "Memory"
-        case .disk: "Disk"; case .network: "Network"; case .energy: "Energy"; case .thermals: "Thermals"; case .gpu: "GPU"
-        case .topProcesses: "Top Processes"; case .cpuCores: "CPU Cores"; case .memoryPressure: "Memory Pressure"
-        case .swap: "Swap"; case .fans: "Fans"; case .battery: "Battery & Charge"; case .wifi: "Wi-Fi Signal"
-        case .stressMap: "Stress Map"; case .clock: "Clock & Uptime"
+        case .annunciator: Spec(title: "Annunciator Panel", symbol: "light.beacon.max", defaultSize: .large, isGauge: false)
+        case .findings: Spec(title: "Current Findings", symbol: "stethoscope", defaultSize: .large, isGauge: false)
+        case .cpu: Spec(title: "CPU", symbol: "cpu", drillDown: "Performance:CPU")
+        case .memory: Spec(title: "Memory", symbol: "memorychip", drillDown: "Performance:Memory")
+        case .disk: Spec(title: "Disk", symbol: "internaldrive", drillDown: "Performance:Disk")
+        case .network: Spec(title: "Network", symbol: "network", drillDown: "Performance:Network")
+        case .energy: Spec(title: "Energy", symbol: "bolt.fill", drillDown: "Performance:Energy")
+        case .thermals: Spec(title: "Thermals", symbol: "thermometer.medium", drillDown: "Performance:Thermals")
+        case .gpu: Spec(title: "GPU", symbol: "cube.transparent", drillDown: "Performance:GPU")
+        case .topProcesses: Spec(title: "Top Processes", symbol: "list.number", drillDown: "Processes", isGauge: false)
+        case .cpuCores: Spec(title: "CPU Cores", symbol: "square.grid.3x3", drillDown: "Performance:CPU", defaultSize: .medium, isGauge: false)
+        case .memoryPressure: Spec(title: "Memory Pressure", symbol: "gauge.with.dots.needle.67percent", drillDown: "Performance:Memory")
+        case .swap: Spec(title: "Swap", symbol: "arrow.left.arrow.right", drillDown: "Performance:Memory")
+        case .fans: Spec(title: "Fans", symbol: "fanblades", drillDown: "Performance:Thermals")
+        case .battery: Spec(title: "Battery & Charge", symbol: "battery.75percent", drillDown: "Performance:Energy")
+        case .wifi: Spec(title: "Wi-Fi Signal", symbol: "wifi", drillDown: "Wi-Fi")
+        case .stressMap: Spec(title: "Stress Map", symbol: "circle.hexagongrid", drillDown: "Stress Map", defaultSize: .medium, isGauge: false)
+        case .clock: Spec(title: "Clock & Uptime", symbol: "clock", isGauge: false)
+        case .destinations: Spec(title: "Destinations", symbol: "point.3.connected.trianglepath.dotted", drillDown: "Destinations")
+        case .restarts: Spec(title: "Restarts", symbol: "restart.circle", drillDown: "Restarts & Crashes")
+        case .bootTime: Spec(title: "Boot Time", symbol: "power", drillDown: "Restarts & Crashes")
+        case .batteryHealth: Spec(title: "Battery Health", symbol: "battery.100percent.circle", drillDown: "Performance:Energy")
+        case .cameraMic: Spec(title: "Camera & Mic", symbol: "video", drillDown: "Camera & Mic")
         }
     }
 
-    /// SF Symbol for the palette.
-    public var symbol: String {
-        switch self {
-        case .annunciator: "light.beacon.max"; case .findings: "stethoscope"; case .cpu: "cpu"; case .memory: "memorychip"
-        case .disk: "internaldrive"; case .network: "network"; case .energy: "bolt.fill"; case .thermals: "thermometer.medium"
-        case .gpu: "cube.transparent"; case .topProcesses: "list.number"; case .cpuCores: "square.grid.3x3"
-        case .memoryPressure: "gauge.with.dots.needle.67percent"; case .swap: "arrow.left.arrow.right"; case .fans: "fanblades"
-        case .battery: "battery.75percent"; case .wifi: "wifi"; case .stressMap: "circle.hexagongrid"; case .clock: "clock"
-        }
-    }
-
-    /// Where clicking the instrument goes: a navigation request in the app's "Destination[:Performance tab]" form
-    /// ("Performance:Energy", "Processes"). nil for instruments with no single detail page (the clock) or whose rows
-    /// already navigate individually (the annunciator lights, each finding).
-    public var drillDown: String? {
-        switch self {
-        case .cpu, .cpuCores: "Performance:CPU"
-        case .memory, .memoryPressure, .swap: "Performance:Memory"
-        case .disk: "Performance:Disk"
-        case .network, .wifi: "Performance:Network"
-        case .energy, .battery: "Performance:Energy"
-        case .thermals, .fans: "Performance:Thermals"
-        case .gpu: "Performance:GPU"
-        case .topProcesses: "Processes"
-        case .stressMap: "Stress Map"
-        case .annunciator, .findings, .clock: nil
-        }
-    }
-
-    /// Size a newly added instrument gets. The two banner-like kinds read best across the whole row.
-    public var defaultSize: InstrumentSize {
-        switch self {
-        case .annunciator, .findings: .large
-        case .stressMap, .cpuCores: .medium
-        default: .small
-        }
-    }
-
-    /// True for kinds that are a single value with a meter and a history graph, which Ambient mode can show as one of
-    /// its big gauges. The lists and maps (findings, processes, cores, Stress Map) and the clock are not; Ambient has
-    /// its own clock and findings ticker.
-    public var isGauge: Bool {
-        switch self {
-        case .cpu, .memory, .disk, .network, .energy, .thermals, .gpu, .memoryPressure, .swap, .fans, .battery, .wifi: true
-        case .annunciator, .findings, .topProcesses, .cpuCores, .stressMap, .clock: false
-        }
-    }
+    public var title: String { spec.title }
+    public var symbol: String { spec.symbol }
+    public var drillDown: String? { spec.drillDown }
+    public var defaultSize: InstrumentSize { spec.defaultSize }
+    public var isGauge: Bool { spec.isGauge }
 }
 
 /// How much of a cockpit row an instrument takes: one column, two, or the whole row (see `CockpitGrid.span`).

@@ -17,6 +17,8 @@ struct InstrumentReading {
     /// One colour for every lit meter segment. Set where a full meter is good news (battery charge, Wi-Fi signal), so
     /// the usual warn/crit shading at the top end doesn't paint a full battery red.
     var meterColor: Color? = nil
+    /// Tints the detail line when it carries a warning (unusual traffic, an unexpected restart, a sensor in use).
+    var detailColor: Color? = nil
 }
 
 /// Fan speed as a share of its range. Needs the maximum; with a known minimum the range starts there (an idle fan
@@ -132,6 +134,8 @@ extension Engine {
                                      meterColor: p.accent)
         case .annunciator, .findings, .topProcesses, .cpuCores, .stressMap, .clock:
             return nil
+        case .destinations, .restarts, .bootTime, .batteryHealth, .cameraMic:
+            return nil   // page digests: CockpitFeeds.reading (Views/CockpitFeedReadings.swift)
         }
     }
 }

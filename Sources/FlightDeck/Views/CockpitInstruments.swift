@@ -28,7 +28,11 @@ struct InstrumentView: View {
         case .stressMap: StressMapInstrument(size: slot.size)
         case .clock: ClockInstrument(size: slot.size)
         default:
-            if let r = e.reading(slot.kind, p) { SummaryCard(r, graphHeight: Self.graphHeight(slot.size)) }
+            if let r = e.reading(slot.kind, p) {
+                SummaryCard(r, graphHeight: Self.graphHeight(slot.size))
+            } else {
+                FeedReading(kind: slot.kind) { SummaryCard($0, graphHeight: Self.graphHeight(slot.size)) }   // page digests
+            }
         }
     }
 }
@@ -38,7 +42,7 @@ extension SummaryCard {
     init(_ r: InstrumentReading, graphHeight: CGFloat = 70) {
         self.init(title: r.title, value: r.value, fraction: r.fraction, showMeter: r.showMeter, detail: r.detail,
                   traces: r.traces, maxValue: r.maxValue, minHeadroom: r.minHeadroom, graphHeight: graphHeight,
-                  meterColor: r.meterColor)
+                  meterColor: r.meterColor, detailColor: r.detailColor)
     }
 }
 
@@ -124,7 +128,8 @@ struct ClockInstrument: View {
 
     /// Boot time doesn't change while we run, so it's read once.
     /// This Mac's boot time; in demo mode an invented one (3 days 4 hours ago), so screenshots don't reveal real uptime.
-    static let bootTime = Demo.isEnabled ? Date().addingTimeInterval(-(3 * 86_400 + 4 * 3600 + 17 * 60)) : Sysctl.timeval("kern.boottime")
+    /// (The demo's uptime matches DemoRestarts' current boot, 2 h 20 min ago, so the Restarts instrument agrees.)
+    static let bootTime = Demo.isEnabled ? Date().addingTimeInterval(-(2 * 3600 + 1234)) : Sysctl.timeval("kern.boottime")
 
     var body: some View {
         let now = Date()
