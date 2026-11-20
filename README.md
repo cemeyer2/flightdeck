@@ -56,6 +56,7 @@ by showing which process and which subsystem is responsible.
     - [Installed Apps](#installed-apps)
     - [Startup Apps](#startup-apps)
     - [Peripherals](#peripherals)
+    - [Displays](#displays)
     - [Services](#services)
     - [Users](#users)
   - [Tools](#tools)
@@ -113,12 +114,12 @@ build is ad-hoc signed and the release notes explain how to open it past Gatekee
 The sidebar groups the pages as below (sections fold away; ⌘1–⌘9 jump to the first nine). Every page also has a
 demo-data version for screenshots (see Demo mode at the end).
 
-- **Overview:** Summary (the cockpit) · Stress Map · Flight Log · Trends · Checkup · Restarts & Crashes · What Changed
+- **Overview:** Summary (the cockpit) · Stress Map · Flight Log · Trends · Weekly Report · Checkup · Restarts & Crashes · What Changed
 - **Activity:** Performance (CPU, Memory, Disk, Network, Energy, Thermals, GPU) · Processes · Launches · Console · Camera & Mic
 - **Power:** Power & Freq · Sleep & Wake
-- **Network:** Network · Wi-Fi · Internet · Destinations · Connections · UPnP · UniFi
+- **Network:** Network · Wi-Fi · Internet · Destinations · Connections · UPnP · UniFi · Fleet
 - **Storage:** Disk Space · Backups
-- **System:** System Info · Peripherals · Installed Apps · Startup Apps · Services · Users
+- **System:** System Info · Peripherals · Displays · Installed Apps · Startup Apps · Services · Users
 - **Tools:** Rules · Developer · Benchmarks
 
 ### Overview
@@ -767,6 +768,38 @@ process listens on which port, flagging services open on all interfaces. It uses
 gives the app the socket table, and otherwise falls back to `lsof` (your own processes only) and says so; on macOS 27,
 netstat launched from an app returns no Internet sockets even though it works in Terminal.
 
+#### Displays
+
+Every connected display, and why it might not be running at its best. Per display:
+
+- **Identity:** name, built-in or external, vendor and model, manufacture week and year (EDID), size in inches,
+  a panel hint where something says so (mini-LED for a Liquid Retina XDR panel, OLED by name; never guessed), the GPU
+  driving it and which display is main.
+- **Mode and refresh:** "looks like" size in points, pixels and HiDPI scale, the native size, refresh rate, and
+  ProMotion / Adaptive-Sync with its range (NSScreen's refresh intervals). The full CoreGraphics mode list, grouped by
+  size, is one click away with native and current marked.
+- **HDR and colour:** HDR state, EDR headroom now against the potential, the reference headroom when a preset sets
+  one, the colour format on the wire (bit depth, RGB / YCbCr chroma) and the ColorSync profile; built-in brightness
+  (DisplayServices, read-only, resolved with `dlsym` and shown as unavailable if it's missing) with the backlight's
+  nits.
+- **Connection:** transport (this Mac's HDMI port, USB-C DisplayPort Alt Mode, Thunderbolt / USB4 tunnel, virtual
+  for AirPlay / Sidecar / DisplayLink), port, DisplayPort link rate × lanes with usable Gbit/s, DSC on or off, and the
+  HDMI version the display's input reports in its EDID.
+- **Diagnoses** in plain English, with the bandwidth sums behind them (CVT-RB2 / CTA-861 pixel clocks, DisplayPort
+  8b/10b and 128b/132b payloads, HDMI 1.4 / 2.0 TMDS and 2.1 FRL limits): stuck at 30 Hz because an HDMI 1.4 link or
+  input can't carry 4K at 60 Hz (594 MHz needed, 340 MHz available), a DisplayPort link trained on 2 of 4 lanes by a
+  hub, a 60 Hz mode that exists but isn't chosen, 4:2:2 / 4:2:0 chroma or 6-bit colour for lack of bandwidth, DSC in
+  use, HiDPI not offered at the current size, a scaled resolution, ProMotion turned off.
+- **This session:** connects, disconnects, mode and main-display changes as a timeline and a list, recorded from
+  CoreGraphics' reconfiguration callback from launch (no polling; kept in memory only).
+
+On Apple silicon the facts come from the display coprocessor's IORegistry nodes (`AppleCLCD2`
+timings and colour modes, `IOPortTransportStateDisplayPort` link state) and the EDID via `IOAVServiceCopyEDID`; Intel
+Macs get the CoreGraphics and NSScreen parts. The page reads when it appears and when macOS reports a display
+change, never on a timer. Limits: HDR reference presets are only readable through private APIs; YCbCr encoding codes
+are inferred (RGB is confirmed); with several external displays, links are listed without saying which display each
+drives.
+
 #### Services
 
 The launchd jobs in your login session: label, PID, running or stopped, the last exit status (non-zero ones stand out)
@@ -914,6 +947,7 @@ errors. It may contain personal paths and names, so review it before sharing.
 | `system_changes` | what FlightDeck's What Changed inventory found over the last N days or `since` a time: launch agents and daemons, system and kernel extensions, profiles and MDM, sharing services, apps, Homebrew, macOS updates; each with when, the item, signer and team, program and path, why it may matter and a notable flag; `kind` filter and `notable_only`. Reads the saved log, never takes an inventory |
 | `weekly_report` | one calendar week (`weeks_ago`: 0 = this week so far, 1 = last week): the headline, hours of high CPU / memory pressure / heat with the top incidents and apps, busiest apps, restarts, panics, freezes and crash reports, battery cycles, health and forecast change, startup-disk use, internet data and new destinations, plus the report as Markdown. Finished weeks come from the saved reports |
 | `backups` | Time Machine: state now and progress, each destination (kind, space and trend, last successful backup, backups kept, encryption), recent runs with duration, size and plain-English failure reasons, gaps, local snapshot count, limits. Read-only; never runs `log show` or mounts a disk |
+| `displays` | every display: identity, connection, current mode and refresh range, signal (timing, pixel clock, bit depth, chroma, DSC), DisplayPort link rate × lanes, HDR / EDR headroom, built-in brightness, diagnoses with bandwidth figures, and this session's connects and mode changes (app only). Never includes serial numbers |
 | `mark` | records a named timestamp (`label`) and returns its id and time, and whether the black box is recording. Writes only `~/Library/Application Support/Flightdeck/marks.json` (kept 48 h); marks show as flags on the Flight Log timeline |
 | `marks` | recent marks, newest first |
 | `measure` | what the Mac did between two marks, times, or a mark and now (within 24 h): CPU avg/p95/peak and CPU-seconds, memory and pressure, swap growth, disk and network totals, energy (Wh), hottest temperature and throttling, top processes and apps by CPU-seconds, peak memory, energy and disk. `process` or `app` gives that process tree's cost, children included; `compare_to` adds a baseline window, deltas and a verdict |

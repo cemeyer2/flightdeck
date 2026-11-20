@@ -72,6 +72,12 @@ enum UIBench {
         out("backups-demo", height: 2900, BackupsView(model: BackupsModel(preview: DemoBackups.report())))
         out("backups", height: 2600, BackupsView(model: BackupsModel.loadedForRender()))
         if ProcessInfo.processInfo.environment["FD_RENDER_ONLY"] == "backups" { exit(0) }
+        // Displays: the invented XDR panel and HDMI monitor stuck at 30 Hz (mode lists open), then this Mac's displays,
+        // read before building the view (CoreGraphics, IORegistry, NSScreen; nothing is changed).
+        out("displays-demo", height: 2600, DisplaysView(model: DisplaysModel(preview: DemoDisplays.report()), expandModes: true))
+        let displaysLive = DisplaysModel.loadedForRender()
+        out("displays", height: 1900, DisplaysView(model: displaysLive, expandModes: true))
+        if ProcessInfo.processInfo.environment["FD_RENDER_ONLY"] == "displays" { exit(0) }
         out("flightlog", FlightLogView())
         // The easter egg (Konami code): its boarding pass, mid-flight over an invented course, and the crash card.
         let course = TurbulenceModel.previewCourse()
