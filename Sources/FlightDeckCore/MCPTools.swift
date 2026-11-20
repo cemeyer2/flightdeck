@@ -35,7 +35,8 @@ public struct MCPTools: MCPToolProvider {
     and hangs), checkup (health and security checklist), temperatures (every sensor, fans, throttling), wifi (the Wi-Fi link's health and the last nearby-network scan), trends (daily history, before/after app and macOS updates) and \
     camera_mic (which apps used the camera or microphone, and when), network_destinations (which hosts each app talked to), \
     battery (health forecast and what's wearing the battery), restarts (boots, how each previous session ended, \
-    boot and login time) and panics (kernel panic reports with the likely culprit). \
+    boot and login time), panics (kernel panic reports with the likely culprit) and backups (Time Machine: status, \
+    destinations, recent runs with failure reasons, gaps). \
     To measure your own work (a build, a test run, a benchmark): call mark before and after it, then measure between \
     the two marks, optionally with process or app for that process tree's cost and compare_to for a baseline run \
     (see the measure_change prompt). query_metrics returns raw black-box time series; process_logs returns a process's \
@@ -102,6 +103,7 @@ public struct MCPTools: MCPToolProvider {
             case "network_destinations": out = try await networkDestinations(a)
             case "restarts": out = try await restarts(a)
             case "panics": out = try await panics(a)
+            case "backups": out = try await backups(a)
             case "mark": out = try await mark(a)
             case "marks": out = try await listMarks(a)
             case "measure": out = try await measure(a)
@@ -215,6 +217,9 @@ public struct MCPTools: MCPToolProvider {
             MCPToolSpec(name: "panics", title: "Kernel panics",
                         description: "Kernel panic reports from /Library/Logs/DiagnosticReports and its Retired folder, newest first: time, plain-English culprit (third-party driver, hung app or service, system hang, sleep/wake, hardware, memory, graphics, kernel), what to do, the panic string, panicked task and the kernel extensions in the backtrace.",
                         inputSchema: Self.schema([("days", Self.int("Days to look back.", 1, 90, 90))])),
+            MCPToolSpec(name: "backups", title: "Time Machine backups",
+                        description: "Time Machine's state now (idle, backing up with phase and progress, automatic backups off, not set up); each destination (name, network or local, free and used space and its weekly trend, last successful backup, backups kept, encryption, last verification); recent runs, newest first, with start, end, duration, size copied and, for failures, backupd's reason in plain English with a fix; stretches with no successful backup (gaps); local snapshot count; and what the sources can't tell. Run details come from what FlightDeck saved from the unified log while it ran. Read-only; never mounts a backup disk.",
+                        inputSchema: Self.schema([("days", Self.int("Days of runs and gaps to include, ending now.", 1, 90, 30))])),
         ] + Self.agentSpecs
     }
 }

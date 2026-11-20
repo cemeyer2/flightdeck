@@ -39,6 +39,11 @@ enum UIBench {
         let restartsLive = RestartsModel.loadedForRender(blackBox: e.blackBox)
         out("restarts", height: 2600, RestartsView(model: restartsLive))
         if ProcessInfo.processInfo.environment["FD_RENDER_ONLY"] == "restarts" { exit(0) }   // quick iteration on this page
+        // Backups: the invented NAS and travel SSD (backup in progress, a failed run, a gap), then this Mac's Time Machine
+        // (settings file, tmutil, a read of backupd's recent log messages; the saved history is only read).
+        out("backups-demo", height: 2900, BackupsView(model: BackupsModel(preview: DemoBackups.report())))
+        out("backups", height: 2600, BackupsView(model: BackupsModel.loadedForRender()))
+        if ProcessInfo.processInfo.environment["FD_RENDER_ONLY"] == "backups" { exit(0) }
         out("flightlog", FlightLogView())
         // The timeline with demo buckets and marks (as a coding agent's `mark` calls would leave them), handed in
         // because ImageRenderer doesn't run the panel's loading task.
