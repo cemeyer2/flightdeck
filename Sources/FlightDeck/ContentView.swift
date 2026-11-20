@@ -140,6 +140,7 @@ struct ContentView: View {
         .toolbar { ToolbarItemGroup(placement: .primaryAction) { ToolbarControls() } }
         .modifier(ErrorAlert())
         .modifier(PowerToolsOverlay())   // command palette (⌘K) and Capture Diagnostics sheet
+        .modifier(EasterEggOverlay())    // this version's easter egg (Konami code)
         .sheet(isPresented: $showWelcome) { WelcomeView().environmentObject(engine).environment(\.palette, p) }
         // Requests look like "Processes" or "Performance:GPU". Cleared immediately so the same request can be made again.
         .onChange(of: engine.navigationRequest) {

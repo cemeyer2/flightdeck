@@ -40,6 +40,13 @@ enum UIBench {
         out("restarts", height: 2600, RestartsView(model: restartsLive))
         if ProcessInfo.processInfo.environment["FD_RENDER_ONLY"] == "restarts" { exit(0) }   // quick iteration on this page
         out("flightlog", FlightLogView())
+        // The easter egg (Konami code): its boarding pass, mid-flight over an invented course, and the crash card.
+        let course = TurbulenceModel.previewCourse()
+        for (name, model) in [("turbulence-ready", TurbulenceModel(preview: course)),
+                              ("turbulence-flying", TurbulenceModel(preview: course, flyFor: 14)),
+                              ("turbulence-crashed", TurbulenceModel(preview: course, flyFor: 9, crash: true))] {
+            out(name, width: 1100, height: 700, TurbulenceView(engine: e, close: {}, preview: model))
+        }
         // The timeline with demo buckets and marks (as a coding agent's `mark` calls would leave them), handed in
         // because ImageRenderer doesn't run the panel's loading task.
         if let template = e.current {
