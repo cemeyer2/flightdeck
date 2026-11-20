@@ -21,6 +21,7 @@ enum Destination: String, CaseIterable, Identifiable, Hashable {
     case restarts = "Restarts & Crashes"
     case changes = "What Changed"
     case weeklyReport = "Weekly Report"
+    case backups = "Backups"
     var id: String { rawValue }
     var icon: String {
         switch self {
@@ -56,6 +57,7 @@ enum Destination: String, CaseIterable, Identifiable, Hashable {
         case .restarts: "restart.circle"
         case .changes: "clock.badge.exclamationmark"
         case .weeklyReport: "calendar.badge.clock"
+        case .backups: "clock.arrow.circlepath"
         }
     }
 }
@@ -76,7 +78,7 @@ enum SidebarSection: String, CaseIterable, Identifiable {
         case .activity: [.performance, .processes, .launches, .console, .cameraMic]
         case .power: [.power, .sleep]
         case .network: [.network, .wifi, .internet, .destinations, .connections, .upnp, .unifi]
-        case .storage: [.diskSpace]
+        case .storage: [.diskSpace, .backups]
         case .system: [.systemInfo, .peripherals, .apps, .startup, .services, .users]
         case .tools: [.rules, .developer, .benchmarks]
         case .more: Destination.allCases.filter { d in !Self.listed.contains(d) }
@@ -209,6 +211,7 @@ struct ContentView: View {
         case .restarts: RestartsView()
         case .changes: ChangesView()
         case .weeklyReport: WeeklyReportView()
+        case .backups: BackupsView()
         }
     }
 

@@ -142,13 +142,8 @@ public enum CheckupParse {
         public var latest: Date?
     }
 
-    public static func timeMachine(_ d: [String: Any]) -> TimeMachine {
-        let dests = d["Destinations"] as? [[String: Any]] ?? []
-        let latest = dests.flatMap { $0["SnapshotDates"] as? [Date] ?? [] }.max()
-        // AutoBackup is a Bool in some versions and an integer (0/1) in others.
-        let auto = (d["AutoBackup"] as? Bool) ?? (d["AutoBackup"] as? NSNumber).map { $0.intValue != 0 }
-        return TimeMachine(autoBackup: auto, destinations: dests.count, latest: latest)
-    }
+    /// Parsed by BackupParse.prefs, which the Backups page shares.
+    public static func timeMachine(_ d: [String: Any]) -> TimeMachine { timeMachine(prefs: BackupParse.prefs(d)) }
 
     /// `tmutil latestbackup` prints a path ending in "YYYY-MM-DD-HHMMSS.backup" (or a bare "YYYY-MM-DD-HHMMSS" folder on
     /// HFS+ destinations). The timestamp is local time.

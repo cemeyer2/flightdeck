@@ -60,6 +60,11 @@ enum UIBench {
         let weeklyLive = WeeklyReportModel.loadedForRender(engine: e)
         out("weekly", height: 1500, WeeklyReportView(model: weeklyLive))
         if ProcessInfo.processInfo.environment["FD_RENDER_ONLY"] == "weekly" { exit(0) }
+        // Backups: the invented NAS and travel SSD (backup in progress, a failed run, a gap), then this Mac's Time Machine
+        // (settings file, tmutil, a read of backupd's recent log messages; the saved history is only read).
+        out("backups-demo", height: 2900, BackupsView(model: BackupsModel(preview: DemoBackups.report())))
+        out("backups", height: 2600, BackupsView(model: BackupsModel.loadedForRender()))
+        if ProcessInfo.processInfo.environment["FD_RENDER_ONLY"] == "backups" { exit(0) }
         out("flightlog", FlightLogView())
         // The easter egg (Konami code): its boarding pass, mid-flight over an invented course, and the crash card.
         let course = TurbulenceModel.previewCourse()

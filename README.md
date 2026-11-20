@@ -49,6 +49,7 @@ by showing which process and which subsystem is responsible.
   - [Storage](#storage)
     - [Disk Space › Folder Scanner](#disk-space--folder-scanner)
     - [Disk Space › What's Using My Disk](#disk-space--whats-using-my-disk)
+    - [Backups](#backups)
   - [System](#system)
     - [System Info](#system-info)
     - [Installed Apps](#installed-apps)
@@ -115,7 +116,7 @@ demo-data version for screenshots (see Demo mode at the end).
 - **Activity:** Performance (CPU, Memory, Disk, Network, Energy, Thermals, GPU) · Processes · Launches · Console · Camera & Mic
 - **Power:** Power & Freq · Sleep & Wake
 - **Network:** Network · Wi-Fi · Internet · Destinations · Connections · UPnP · UniFi
-- **Storage:** Disk Space
+- **Storage:** Disk Space · Backups
 - **System:** System Info · Peripherals · Installed Apps · Startup Apps · Services · Users
 - **Tools:** Rules · Developer · Benchmarks
 
@@ -682,6 +683,32 @@ Personal data (backups, archives, Messages, Photos, VMs, container images) gets 
 invented disk and never runs a cleanup. Code: `Sources/FlightDeckCore/StorageBreakdown*.swift`, `SpaceHog*.swift`,
 `DirectorySizer.swift`, `CleanupPlanner.swift`; views in `Sources/FlightDeck/Views/StorageModel.swift` and friends.
 
+#### Backups
+
+*Is this Mac backed up?* Time Machine's state now (idle, backing up with phase, percent, bytes and files copied and
+time left, automatic backups off, or not set up), each backup disk (network share or local disk, free and used space
+with a free-space trend and "full in about N days", last successful backup, backups kept and the oldest, encryption,
+last verification), a 90-day history strip of completed backups, failed runs and gaps, the runs themselves (start,
+disk, outcome, duration, size copied), stretches with no successful backup ("9 days, Nov 1 → Nov 10"), why runs
+failed in plain English with what to do (e.g. `BACKUP_FAILED_DISCONNECTED_NETWORK`: the share went away mid-backup)
+plus the common reasons, and the local snapshots on the startup disk. Sources, none needing root or Full Disk Access:
+`/Library/Preferences/com.apple.TimeMachine.plist` (world-readable; completed backup dates per destination, as
+`tmutil listbackups` would print them, plus space, last result code, encryption and verification dates),
+`tmutil destinationinfo -X`, `tmutil status -X`, `tmutil listlocalsnapshots /`, and backupd's run messages in the
+unified log (`log show --info`, categories BackupJob, BackupEngine, BackupDispatching, ErrorEvaluator; scheduler
+"BACKUP_DELAYED" messages are ignored). Limits: backupd logs runs at the Info level, which macOS keeps only a day or two,
+so durations, sizes and failures are known only from when FlightDeck started reading them; FlightDeck saves them, the
+backup dates (which Time Machine thins to weekly after a month) and free-space points for 90 days in
+`~/Library/Application Support/Flightdeck/Backups/backups.json`. Gaps ending more than a month ago are only shown when
+over 8 days, since thinning would otherwise look like missed backups. Snapshot sizes need root and show as unknown.
+`tmutil listbackups`/`latestbackup` are not used: they need Full Disk Access and can mount a network disk. Cost: the
+settings file and tmutil are read every 15 minutes (milliseconds, nothing mounted) and the log every 6 hours over the
+hours since the last read, plus on page open; progress is re-read every minute only while a backup runs and the page
+is open. With automatic backups on and no successful backup for three missed intervals (at least 3 days), the finding
+"No successful Time Machine backup for N days" appears in the banner, alerts and Flight Log (a warning after 30 days)
+until the next backup. Demo mode shows an invented NAS and travel SSD. Code: `Sources/FlightDeckCore/Backup*.swift`,
+`BackupsCollector.swift`, `MCPBackupsOutput.swift`; views in `Sources/FlightDeck/Views/Backups*.swift`.
+
 ### System
 
 #### System Info
@@ -856,6 +883,7 @@ errors. It may contain personal paths and names, so review it before sharing.
 | `panics` | kernel panic reports: time, culprit, what to do, panic string, panicked task, kexts in the backtrace |
 | `system_changes` | what FlightDeck's What Changed inventory found over the last N days or `since` a time: launch agents and daemons, system and kernel extensions, profiles and MDM, sharing services, apps, Homebrew, macOS updates; each with when, the item, signer and team, program and path, why it may matter and a notable flag; `kind` filter and `notable_only`. Reads the saved log, never takes an inventory |
 | `weekly_report` | one calendar week (`weeks_ago`: 0 = this week so far, 1 = last week): the headline, hours of high CPU / memory pressure / heat with the top incidents and apps, busiest apps, restarts, panics, freezes and crash reports, battery cycles, health and forecast change, startup-disk use, internet data and new destinations, plus the report as Markdown. Finished weeks come from the saved reports |
+| `backups` | Time Machine: state now and progress, each destination (kind, space and trend, last successful backup, backups kept, encryption), recent runs with duration, size and plain-English failure reasons, gaps, local snapshot count, limits. Read-only; never runs `log show` or mounts a disk |
 | `mark` | records a named timestamp (`label`) and returns its id and time, and whether the black box is recording. Writes only `~/Library/Application Support/Flightdeck/marks.json` (kept 48 h); marks show as flags on the Flight Log timeline |
 | `marks` | recent marks, newest first |
 | `measure` | what the Mac did between two marks, times, or a mark and now (within 24 h): CPU avg/p95/peak and CPU-seconds, memory and pressure, swap growth, disk and network totals, energy (Wh), hottest temperature and throttling, top processes and apps by CPU-seconds, peak memory, energy and disk. `process` or `app` gives that process tree's cost, children included; `compare_to` adds a baseline window, deltas and a verdict |

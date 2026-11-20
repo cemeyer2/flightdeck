@@ -41,8 +41,9 @@ public struct MCPTools: MCPToolProvider {
     camera_mic (which apps used the camera or microphone, and when), network_destinations (which hosts each app talked to), \
     battery (health forecast and what's wearing the battery), restarts (boots, how each previous session ended, \
     boot and login time), panics (kernel panic reports with the likely culprit), system_changes (what was installed, \
-    updated, removed or reconfigured: launch agents, extensions, profiles, sharing, apps, Homebrew, macOS) and weekly_report (a week's digest: \
-    slowdowns, restarts, battery, storage, network, compared with the week before). \
+    updated, removed or reconfigured: launch agents, extensions, profiles, sharing, apps, Homebrew, macOS), weekly_report (a week's digest: \
+    slowdowns, restarts, battery, storage, network, compared with the week before) and backups (Time Machine: status, \
+    destinations, recent runs with failure reasons, gaps). \
     To measure your own work (a build, a test run, a benchmark): call mark before and after it, then measure between \
     the two marks, optionally with process or app for that process tree's cost and compare_to for a baseline run \
     (see the measure_change prompt). query_metrics returns raw black-box time series; process_logs returns a process's \
@@ -111,6 +112,7 @@ public struct MCPTools: MCPToolProvider {
             case "panics": out = try await panics(a)
             case "system_changes": out = try await systemChanges(a)
             case "weekly_report": out = try await weeklyReport(a)
+            case "backups": out = try await backups(a)
             case "mark": out = try await mark(a)
             case "marks": out = try await listMarks(a)
             case "measure": out = try await measure(a)
@@ -236,6 +238,9 @@ public struct MCPTools: MCPToolProvider {
             MCPToolSpec(name: "weekly_report", title: "Weekly Report",
                         description: "One calendar week (Monday to Sunday, local time) of how this Mac did, as on FlightDeck's Weekly Report page: a headline, hours of high CPU / memory pressure / heat from the Flight Log with the top incidents and the apps behind them, the busiest apps by CPU time, unexpected restarts, kernel panics, app freezes and crash reports, battery cycles used and health and 80%-forecast change, the startup disk's use and growth, internet data used and new destinations, and changes against the week before; plus the same report as Markdown text. Finished weeks come from the reports the app saved; the current week is built on the spot. Read-only.",
                         inputSchema: Self.schema([("weeks_ago", Self.int("0 = this week so far, 1 = last week, and so on.", 0, 104, 1))])),
+            MCPToolSpec(name: "backups", title: "Time Machine backups",
+                        description: "Time Machine's state now (idle, backing up with phase and progress, automatic backups off, not set up); each destination (name, network or local, free and used space and its weekly trend, last successful backup, backups kept, encryption, last verification); recent runs, newest first, with start, end, duration, size copied and, for failures, backupd's reason in plain English with a fix; stretches with no successful backup (gaps); local snapshot count; and what the sources can't tell. Run details come from what FlightDeck saved from the unified log while it ran. Read-only; never mounts a backup disk.",
+                        inputSchema: Self.schema([("days", Self.int("Days of runs and gaps to include, ending now.", 1, 90, 30))])),
         ] + Self.agentSpecs
     }
 }
