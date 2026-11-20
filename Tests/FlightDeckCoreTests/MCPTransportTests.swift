@@ -123,7 +123,7 @@ final class MCPTransportTests: XCTestCase {
         // Requests are answered concurrently, so replies may come in any order.
         let replies = try lines.map { try JSON.parse(Data($0.utf8)) }.sorted { ($0["id"]?.int ?? 0) < ($1["id"]?.int ?? 0) }
         XCTAssertEqual(replies.map { $0["id"]?.int }, [1, 2, 3])
-        XCTAssertEqual(replies[1]["result"]?["tools"]?.array?.count, 28)
+        XCTAssertEqual(replies[1]["result"]?["tools"]?.array?.count, 29)
         let text = try XCTUnwrap(replies[2]["result"]?["content"]?.array?.first?["text"]?.string)
         XCTAssertEqual(try JSON.parse(Data(text.utf8))["source"]?.string, "standalone")
     }

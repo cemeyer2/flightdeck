@@ -43,7 +43,13 @@ public enum Triage {
         if has("net", "wifi") { return ("network", "wifi", .object([])) }
         if has("battery", "unusual-power", "sleep-", "awake:") { return ("power", "battery", .object([])) }
         if has("restart:") { return ("restarts", "restarts", .object([])) }
+        if has("privacy:dest:") { return ("network", "network_destinations", .object([])) }
         if has("privacy:") { return ("privacy", "camera_mic", .object([])) }
+        if has("change:") { return ("changes", "system_changes", ["notable_only": true, "days": 7]) }
+        if has("backup") { return ("backups", "backups", .object([])) }
+        if has("usb-slow:", "accessory-low:") { return ("peripherals", "peripherals", .object([])) }
+        if has("display") { return ("displays", "displays", .object([])) }
+        if has("fleet:") { return ("fleet", "fleet", .object([])) }
         return ("system", "get_status", .object([]))
     }
 

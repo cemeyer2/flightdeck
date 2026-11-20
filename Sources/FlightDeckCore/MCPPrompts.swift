@@ -109,9 +109,66 @@ public enum MCPPrompts {
             """
             Give my Mac a health checkup with FlightDeck:
             1. Call checkup for security settings, updates, Time Machine, disk space, drive and battery health and stability.
-            2. Call trends for the last 30 days to spot anything getting worse (energy, memory, crashes, battery health).
-            3. Call diagnostic_reports for the last 7 days.
+            2. Call backups to confirm backups are actually succeeding (recent runs, failures, gaps, backup disk space).
+            3. Call system_changes with notable_only for the last 30 days, for anything unsigned or unexpected that was installed or set to run.
+            4. Call trends for the last 30 days to spot anything getting worse (energy, memory, crashes, battery health).
+            5. Call diagnostic_reports for the last 7 days.
             List what needs attention first, most important first, then briefly confirm what's fine.
+            """ + reporting
+        },
+        MCPPrompt(name: "what_changed", title: "What changed on my Mac?",
+                  description: "What was installed, updated, removed or set to run recently, with anything unusual explained.",
+                  arguments: [.init(name: "days", description: "How many days back (default 7)", required: false)]) { a in
+            let days = a["days"].flatMap { Int($0) }.map { min(max($0, 1), 90) } ?? 7
+            return """
+                Tell me what changed on my Mac in the last \(days) days, using FlightDeck:
+                1. Call system_changes with days \(days) for everything that changed: launch agents and daemons, system and kernel \
+                extensions, profiles, sharing settings, apps, Homebrew and macOS.
+                2. Call system_changes with notable_only and days 30 for anything flagged as unusual (unsigned, running from a hidden \
+                or temporary folder, a new extension or profile, sharing turned on).
+                3. For each notable launch item that is running now, call list_processes with its name to see what it is doing, and \
+                network_destinations to see whether it talks to the internet.
+                Group the answer: things worth a closer look first (with why), then ordinary updates and installs in one short list. \
+                Say whether each notable item looks like something I installed on purpose, judging by its signer and name.
+                """ + reporting
+        },
+        MCPPrompt(name: "backup_check", title: "Is my Mac backed up?",
+                  description: "Whether Time Machine is actually succeeding, what failed and why, and whether the backup disk is filling up.") { _ in
+            """
+            Check whether my Mac is properly backed up, using FlightDeck:
+            1. Call backups for Time Machine's state, each backup disk (space and trend, last successful backup), recent runs \
+            with failure reasons, and any gaps.
+            2. If backups are failing or there are gaps, call wifi (for a network backup disk) and checkup to see whether a \
+            network, sleep or disk problem explains it.
+            Answer first with yes or no and when the last good backup was, then any failures with the fix for each.
+            """ + reporting
+        },
+        MCPPrompt(name: "display_check", title: "Why does my display look wrong?",
+                  description: "Refresh rate, resolution, HDR and the video link for each display, with why one isn't running at its best.") { _ in
+            """
+            Check my displays with FlightDeck:
+            1. Call displays for every display's mode, refresh rate, HDR, colour and video link, with FlightDeck's diagnoses.
+            2. If an external display is connected through a dock, hub or adapter, call peripherals to see that device's link.
+            For each display, say whether it is running at its best (native resolution, full refresh rate, full colour). If not, \
+            explain why in plain terms (cable, adapter, port or setting) and what to buy or change.
+            """ + reporting
+        },
+        MCPPrompt(name: "weekly_review", title: "How did my Mac do this week?",
+                  description: "This week and last week compared: slowdowns, crashes, battery, storage, network.") { _ in
+            """
+            Review how my Mac has been doing, using FlightDeck:
+            1. Call weekly_report with weeks_ago 0 (this week so far) and with weeks_ago 1 (last week).
+            2. Call triage to see whether anything from those reports is still happening now.
+            Summarise in a few lines: the headline for each week, what got better or worse, and the one or two things I should do.
+            """ + reporting
+        },
+        MCPPrompt(name: "fleet_check", title: "How are my other Macs?",
+                  description: "The status of every Mac paired on FlightDeck's Fleet page, with any problems.") { _ in
+            """
+            Check on my other Macs with FlightDeck:
+            1. Call fleet for every paired Mac's status now: online or not, vital signs, worst problem, findings and recent incidents.
+            List the Macs that need attention first (what, since when), then one line for the rest. If a Mac is offline, say \
+            when it was last seen. If nothing is paired, tell me how to pair one.
             """ + reporting
         },
         MCPPrompt(name: "since_update", title: "Did an update make things worse?",

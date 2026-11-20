@@ -972,6 +972,7 @@ errors. It may contain personal paths and names, so review it before sharing.
 | `backups` | Time Machine: state now and progress, each destination (kind, space and trend, last successful backup, backups kept, encryption), recent runs with duration, size and plain-English failure reasons, gaps, local snapshot count, limits. Read-only; never runs `log show` or mounts a disk |
 | `displays` | every display: identity, connection, current mode and refresh range, signal (timing, pixel clock, bit depth, chroma, DSC), DisplayPort link rate × lanes, HDR / EDR headroom, built-in brightness, diagnoses with bandwidth figures, and this session's connects and mode changes (app only). Never includes serial numbers |
 | `peripherals` | USB and Thunderbolt/USB4 devices: negotiated vs supported link speed, hubs in the chain, a drive's realistic MB/s and why it's slower than it could be; accessory batteries with time left |
+| `fleet` | the Macs paired on the Fleet page, each asked for its status now: online or last seen, model, macOS, vital signs (CPU, memory, hottest temperature, startup disk, battery, uptime, thermal state), its worst problem, findings and recent incidents. Only what each Mac shares (redacted); up to about 6 s when one doesn't answer |
 | `mark` | records a named timestamp (`label`) and returns its id and time, and whether the black box is recording. Writes only `~/Library/Application Support/Flightdeck/marks.json` (kept 48 h); marks show as flags on the Flight Log timeline |
 | `marks` | recent marks, newest first |
 | `measure` | what the Mac did between two marks, times, or a mark and now (within 24 h): CPU avg/p95/peak and CPU-seconds, memory and pressure, swap growth, disk and network totals, energy (Wh), hottest temperature and throttling, top processes and apps by CPU-seconds, peak memory, energy and disk. `process` or `app` gives that process tree's cost, children included; `compare_to` adds a baseline window, deltas and a verdict |
@@ -983,8 +984,8 @@ errors. It may contain personal paths and names, so review it before sharing.
 
 *MCP prompts; Claude Code shows them as `/mcp__flightdeck__<name>`.* These run a whole investigation with
 those tools and report in plain English: `triage`, `diagnose_slow_mac`, `investigate_app` (needs `app`), `battery_drain`,
-`thermal_check`, `crash_triage`, `health_checkup`, `since_update` and `measure_change` (needs `command`; optional
-`process`). They only call FlightDeck's tools and tell the assistant to suggest, not perform, any fix; `measure_change`
+`thermal_check`, `crash_triage`, `health_checkup`, `since_update`, `what_changed` (optional `days`), `backup_check`,
+`display_check`, `weekly_review`, `fleet_check` and `measure_change` (needs `command`; optional `process`). They only call FlightDeck's tools and tell the assistant to suggest, not perform, any fix; `measure_change`
 also runs the workload you name, twice (baseline and with your change), between marks.
 
 ### Measuring your own work
