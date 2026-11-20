@@ -16,6 +16,7 @@ by showing which process and which subsystem is responsible.
     - [Stress Map](#stress-map)
     - [Diagnosis and Flight Log](#diagnosis-and-flight-log)
     - [Trends](#trends)
+    - [Weekly Report](#weekly-report)
     - [Checkup](#checkup)
     - [Restarts & Crashes](#restarts--crashes)
     - [Boot and login time](#boot-and-login-time)
@@ -185,6 +186,24 @@ vs 0"). After 5 days it learns what is **normal for this Mac** per app and raise
 it for 10 minutes ("Safari is using 3× its usual memory (usually ~1.8 GB)"). Performance › Energy and Trends show
 **where this charge went**: each app's share of the energy since the Mac was unplugged. Days FlightDeck didn't run are
 gaps, never zeros.
+
+#### Weekly Report
+
+A once-a-week digest of how this Mac did, for calendar weeks (Monday to Sunday, local time), built only from data
+FlightDeck already keeps: the daily log, the Flight Log, boot and panic records, app freezes, battery history,
+destinations and the startup disk. A headline ("A calm week", "A rough week: 1 kernel panic") sits over short sections,
+each line carrying its numbers and a link to the page with the details: **what slowed the Mac down** (hours of high CPU,
+memory pressure and heat from the Flight Log, the top incidents and the apps behind them, the busiest apps by CPU time,
+the hottest sensor), **restarts, panics and freezes**, **battery** (cycles used, health change, how the 80% forecast
+moved), **storage** (use, growth since the previous week's reading, days until full when free space is clearly
+shrinking), **network** (internet data counted, new destinations worth a look; browsers are left out) and **compared
+with the week before**. Sections without data are left out. A picker reaches every earlier week. Each week is saved as
+a small JSON file in `~/Library/Application Support/Flightdeck/Reports/`, rebuilt at most once a day (and when the page
+opens) until the week ends, so it stays readable after the raw data ages out; days whose incidents had already left the
+7-day Flight Log are flagged. **Save as PDF…** paginates the report onto US Letter pages; **Copy as Text** copies it as
+Markdown. Settings › Alerts › Weekly Report adds an opt-in notification (off by default; Monday 9:00 unless changed)
+that summarizes the week just ended and opens the page; if the Mac was asleep or FlightDeck wasn't running, it arrives
+at the next wake or launch.
 
 #### Checkup
 
@@ -787,6 +806,7 @@ errors. It may contain personal paths and names, so review it before sharing.
 | `network_destinations` | per app (optionally one app, or only destinations matching a host or IP), the remote hosts it talked to over 1–30 days: bytes in and out, connections, first and last seen, services, local or internet, name source, and new / unusual-volume flags |
 | `restarts` | every boot with how the session before it ended (clean / unexpected / kernel panic / unknown), the explanation, saved shutdown cause code with its certainty, evidence and an inferred flag; counts by cause; boot and login timing; recent app hangs; what the records can't tell. Never queries the unified log |
 | `panics` | kernel panic reports: time, culprit, what to do, panic string, panicked task, kexts in the backtrace |
+| `weekly_report` | one calendar week (`weeks_ago`: 0 = this week so far, 1 = last week): the headline, hours of high CPU / memory pressure / heat with the top incidents and apps, busiest apps, restarts, panics, freezes and crash reports, battery cycles, health and forecast change, startup-disk use, internet data and new destinations, plus the report as Markdown. Finished weeks come from the saved reports |
 | `mark` | records a named timestamp (`label`) and returns its id and time, and whether the black box is recording. Writes only `~/Library/Application Support/Flightdeck/marks.json` (kept 48 h); marks show as flags on the Flight Log timeline |
 | `marks` | recent marks, newest first |
 | `measure` | what the Mac did between two marks, times, or a mark and now (within 24 h): CPU avg/p95/peak and CPU-seconds, memory and pressure, swap growth, disk and network totals, energy (Wh), hottest temperature and throttling, top processes and apps by CPU-seconds, peak memory, energy and disk. `process` or `app` gives that process tree's cost, children included; `compare_to` adds a baseline window, deltas and a verdict |

@@ -39,6 +39,16 @@ enum UIBench {
         let restartsLive = RestartsModel.loadedForRender(blackBox: e.blackBox)
         out("restarts", height: 2600, RestartsView(model: restartsLive))
         if ProcessInfo.processInfo.environment["FD_RENDER_ONLY"] == "restarts" { exit(0) }   // quick iteration on this page
+        // Weekly Report: the invented busy week (and its PDF's first page), then this Mac's weeks from its saved data, built
+        // in memory before the view (nothing is saved). FD_RENDER_ONLY=weekly stops here.
+        let weeklyDemo = WeeklyReportModel.demo()
+        out("weekly-demo", height: 1500, WeeklyReportView(model: weeklyDemo))
+        if let r = weeklyDemo.selected, let pdf = WeeklyReportExport.pdf(WeeklyDigest.make(r, previous: weeklyDemo.previous(of: r))) {
+            try? pdf.write(to: URL(fileURLWithPath: dir).appendingPathComponent("weekly-demo.pdf")); print("wrote weekly-demo.pdf")
+        }
+        let weeklyLive = WeeklyReportModel.loadedForRender(engine: e)
+        out("weekly", height: 1500, WeeklyReportView(model: weeklyLive))
+        if ProcessInfo.processInfo.environment["FD_RENDER_ONLY"] == "weekly" { exit(0) }
         out("flightlog", FlightLogView())
         // The timeline with demo buckets and marks (as a coding agent's `mark` calls would leave them), handed in
         // because ImageRenderer doesn't run the panel's loading task.
