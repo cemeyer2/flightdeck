@@ -73,7 +73,9 @@ final class AccessoryBatteryTests: XCTestCase {
             s.record("Mouse", AccessoryReading(time: now.addingTimeInterval(-Double(d) * 86_400), levels: ["Main": 100 - d]))
         }
         s.prune(now: now)
-        let h = AccessoryStore(dir: dir, readOnly: true).history(since: now.addingTimeInterval(-60 * 86_400), now: now)["Mouse"] ?? []
+        let h = AccessoryStore(dir: dir, readOnly: true).history(since: now.addingTimeInterval(-60 * 86_400 - 60), now: now)["Mouse"] ?? []
+        // A minute of slack: saved times lose their fraction of a second, so the reading exactly 60 days back could
+        // otherwise land just before `since`.
         XCTAssertEqual(h.count, 7, "60 days back to today, every 10 days")
         let files = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
         XCTAssertLessThanOrEqual(files.count, 4)
