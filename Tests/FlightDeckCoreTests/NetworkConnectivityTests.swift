@@ -39,11 +39,11 @@ final class NetworkConnectivityTests: XCTestCase {
         let a = Analyzer()
         run(a, from: 0, to: 60) { _ in [self.iface("en9")] }
         XCTAssertTrue(connectivity(a.findings).isEmpty, "healthy link raises nothing")
-        let fs = run(a, from: 60, to: 100) { _ in [self.iface("en9", addrs: ["fe80::1c2b:3d4e:5f60:7182"])] }
-        let f = try XCTUnwrap(fs.first { $0.id == "net-noip:en9" }, "an address lost for 40 s on an active link is a finding")
+        let fs = run(a, from: 60, to: 130) { _ in [self.iface("en9", addrs: ["fe80::1c2b:3d4e:5f60:7182"])] }
+        let f = try XCTUnwrap(fs.first { $0.id == "net-noip:en9" }, "an address lost for 70 s on an active link is a finding")
         XCTAssertEqual(f.severity, .warning)
         XCTAssertTrue(f.title.contains("en9"))
-        XCTAssertLessThan(f.since.timeIntervalSince(t0.addingTimeInterval(60)), 20, "since is when the address went, not when it was reported")
+        XCTAssertLessThan(f.since.timeIntervalSince(t0.addingTimeInterval(60)), 5, "since is when the address went, not when it was reported")
     }
 
     /// A DHCP renewal can drop the address for a few seconds; that must not look like an outage.
@@ -59,16 +59,16 @@ final class NetworkConnectivityTests: XCTestCase {
     func testFindingClearsWhenAddressReturns() {
         let a = Analyzer()
         run(a, from: 0, to: 30) { _ in [self.iface("en9")] }
-        run(a, from: 30, to: 90) { _ in [self.iface("en9", addrs: [])] }
+        run(a, from: 30, to: 120) { _ in [self.iface("en9", addrs: [])] }
         XCTAssertNotNil(a.findings.first { $0.id == "net-noip:en9" })
-        run(a, from: 90, to: 95) { _ in [self.iface("en9")] }
+        run(a, from: 120, to: 125) { _ in [self.iface("en9")] }
         XCTAssertNil(a.findings.first { $0.id == "net-noip:en9" })
     }
 
     /// Self-assigned 169.254.x.x is DHCP failure by definition, so it is reported even if the interface never had a lease.
     func testSelfAssignedAddressIsReportedWithoutHistory() throws {
         let a = Analyzer()
-        let fs = run(a, from: 0, to: 40) { _ in [self.iface("en9", addrs: ["169.254.77.12", "fe80::1"])] }
+        let fs = run(a, from: 0, to: 80) { _ in [self.iface("en9", addrs: ["169.254.77.12", "fe80::1"])] }
         let f = try XCTUnwrap(fs.first { $0.id == "net-noip:en9" })
         XCTAssertTrue(f.title.lowercased().contains("self-assigned"))
     }
@@ -106,6 +106,27 @@ final class NetworkConnectivityTests: XCTestCase {
         XCTAssertTrue(connectivity(a.findings).isEmpty)
     }
 
+    /// Joining a network: Wi-Fi has link at once, and 802.1X plus DHCP can take 40 s. The previous network's lease doesn't count.
+    func testSlowNetworkJoinIsNotReported() {
+        let a = Analyzer()
+        run(a, from: 0, to: 30) { _ in [self.iface("en0")] }                                        // worked before
+        run(a, from: 30, to: 60) { _ in [self.iface("en0", link: false, addrs: [])] }                // moved
+        let fs = run(a, from: 60, to: 100) { _ in [self.iface("en0", addrs: [])] }                  // 40 s of auth and DHCP
+        XCTAssertTrue(connectivity(fs).isEmpty)
+        let after = run(a, from: 100, to: 160) { _ in [self.iface("en0")] }
+        XCTAssertTrue(connectivity(after).isEmpty)
+    }
+
+    /// On an IPv6-only network there is no IPv4 address by design: a caution that says IPv4, not a warning about the IP address.
+    func testNoIPv4WithGlobalIPv6IsOnlyACaution() throws {
+        let a = Analyzer()
+        run(a, from: 0, to: 30) { _ in [self.iface("en0")] }
+        let fs = run(a, from: 30, to: 120) { _ in [self.iface("en0", addrs: ["2001:db8:1::5", "fe80::1"])] }
+        let f = try XCTUnwrap(fs.first { $0.id == "net-noip:en0" })
+        XCTAssertEqual(f.severity, .caution)
+        XCTAssertTrue(f.title.contains("IPv4")); XCTAssertTrue(f.detail?.contains("IPv6-only") == true)
+    }
+
     // MARK: receive stall
 
     /// Transmit keeps counting while nothing is received for 40 s on a link that is up and addressed.
@@ -135,6 +156,36 @@ final class NetworkConnectivityTests: XCTestCase {
         let a = Analyzer()
         let fs = run(a, from: 0, to: 120) { s in [self.iface("en9", inPkts: 5000, outPkts: 5000 + UInt64(s / 30))] }
         XCTAssertTrue(connectivity(fs).isEmpty)
+    }
+
+    /// A quiet segment where the Mac sends a keep-alive every 20 s is idle, however long it lasts: the outbound count is
+    /// per 30 s window, not cumulative since the last inbound packet.
+    func testSlowOutboundTrickleOverMinutesIsNotAStall() {
+        let a = Analyzer()
+        let fs = run(a, from: 0, to: 900) { s in [self.iface("en9", inPkts: 5000, outPkts: 5000 + UInt64(s / 20))] }
+        XCTAssertTrue(connectivity(fs).isEmpty)
+        XCTAssertTrue(connectivity(a.findings).isEmpty)
+    }
+
+    /// Once real outbound traffic resumes during the silence, the stall is reported, and clears when something arrives.
+    func testStallAfterLongQuietSpellAndRecovery() {
+        let a = Analyzer()
+        run(a, from: 0, to: 600) { s in [self.iface("en9", inPkts: 5000, outPkts: 5000 + UInt64(s / 20))] }
+        let fs = run(a, from: 600, to: 660) { s in [self.iface("en9", inPkts: 5000, outPkts: 5030 + UInt64(s - 600) * 3)] }
+        XCTAssertNotNil(fs.first { $0.id == "net-rx-stall:en9" })
+        let ok = run(a, from: 660, to: 665) { s in [self.iface("en9", inPkts: 5000 + UInt64(s - 659), outPkts: 5300)] }
+        XCTAssertTrue(connectivity(ok).isEmpty)
+    }
+
+    /// Packets counted at the adapter can't show software drops, and the finding must say so where the user reads it.
+    func testReceiveStallFindingStatesItsLimit() throws {
+        let a = Analyzer()
+        run(a, from: 0, to: 30) { s in [self.iface("en9", inPkts: 1000 + UInt64(s) * 10, outPkts: 1000 + UInt64(s) * 10)] }
+        let fs = run(a, from: 30, to: 80) { s in [self.iface("en9", inPkts: 1300, outPkts: 1000 + UInt64(s) * 10)] }
+        let d = try XCTUnwrap(fs.first { $0.id == "net-rx-stall:en9" }?.detail)
+        XCTAssertTrue(d.contains("before any VPN, network filter or security software"))
+        XCTAssertTrue(d.contains("cannot see traffic"))
+        XCTAssertTrue(d.contains("the cause is higher up, in software"))
     }
 
     func testCountersMissingDoNotFire() {
@@ -251,6 +302,7 @@ final class NetworkConnectivityTests: XCTestCase {
         let text = try String(contentsOf: url, encoding: .utf8)
         for c in NetworkEvidence.commands(interface: "lo0") { XCTAssertTrue(text.contains("### \(c.title)"), c.title) }
         XCTAssertTrue(text.contains("### VPN, filter and security processes"))
+        XCTAssertTrue(text.contains("How to read this") && text.contains("counted before any VPN, network filter or security software"))
         XCTAssertTrue(try XCTUnwrap(summary).hasPrefix("lo0:"))
     }
 

@@ -17,7 +17,9 @@ extension MCPTools {
         let rows: [JSON] = all.prefix(limit).map { i in
             ["start": F.time(i.start), "duration": F.duration((i.end ?? now).timeIntervalSince(i.start)), "ongoing": i.end == nil ? true : nil,
              "severity": F.severity(i.severity), "title": .str(i.title), "detail": i.detail.map(JSON.str),
-             "stack_summary": i.evidenceSummary.map(JSON.str)]
+             // Stack samples for hangs and hogs; for network incidents, the state saved with them (a file the user can open).
+             (i.key.hasPrefix("net-") ? "evidence_summary" : "stack_summary"): i.evidenceSummary.map(JSON.str),
+             "evidence_file": i.evidencePath.flatMap { FileManager.default.fileExists(atPath: $0) ? JSON.str($0) : nil }]
         }
         let ongoing = all.filter { $0.end == nil }.count
         let summary = all.isEmpty ? "No incidents in the last \(hours) h." : "\(all.count) incident\(all.count == 1 ? "" : "s") in the last \(hours) h" + (ongoing > 0 ? ", \(ongoing) ongoing." : ".")

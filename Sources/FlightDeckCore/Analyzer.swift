@@ -440,17 +440,20 @@ public final class Analyzer {
         var hadAddress = false
         /// When the link came up with no usable address, while that still holds.
         var noAddressSince: Date?
-        /// Input packet count at the last sample where it changed, when that was, and the output count then.
+        /// Input packet count at the last sample where it changed, and when that was.
         var lastIn: UInt64?
         var inChangedAt: Date?
-        var outAtInChange: UInt64?
+        /// Output packet counts since then, kept for the last `receiveStallSeconds` (plus the sample just before it).
+        var outHistory: [(time: Date, out: UInt64)] = []
     }
 
-    /// An address must be missing this long, and nothing may arrive for this long while packets go out, before it is
-    /// reported: a DHCP renewal or a quiet link must not raise anything.
-    static let noAddressSeconds: TimeInterval = 15
+    /// An address must be missing this long (counted from link-up, so joining a network doesn't count) before it is
+    /// reported: Wi-Fi reports link as soon as it associates, and 802.1X plus DHCP on a new network can take 30 s or more.
+    /// The real failure lasts until a reboot, so waiting costs little.
+    static let noAddressSeconds: TimeInterval = 60
+    /// Nothing may arrive for this long, while at least `receiveStallMinOut` packets went out in the same window.
     static let receiveStallSeconds: TimeInterval = 30
-    /// Packets sent since the last received one, below which a silent interface is idle rather than stalled.
+    /// Packets sent within the window, below which a silent interface is idle (a few mDNS or ARP packets) rather than stalled.
     static let receiveStallMinOut: UInt64 = 20
 
     /// Wired and Wi-Fi adapters (en*), not the virtual and peer-to-peer interfaces (awdl, llw, anpi, bridge, ap, utun, lo).
@@ -470,8 +473,9 @@ public final class Analyzer {
     ///  - `net-noip:<if>`: no usable IPv4 address for `noAddressSeconds`, on an interface that had one earlier or that
     ///    has a self-assigned address. An unplugged port, Wi-Fi switched off, or a port that never had a lease raise nothing.
     ///  - `net-rx-stall:<if>`: with an address, no packet received for `receiveStallSeconds` although at least
-    ///    `receiveStallMinOut` went out. Counted at the driver, so it separates a dead receive path from traffic that
-    ///    arrives and is dropped higher up (a filter or tunnel), which this rule does not see.
+    ///    `receiveStallMinOut` went out in that window. The counters are the adapter's, so a packet counts as received
+    ///    before any VPN, network filter or security software sees it: this rule finds a dead adapter, driver, cable or
+    ///    port, and cannot see traffic that arrives and is dropped higher up. Its finding says so.
     /// `since` of each result is when the condition began, so the incident starts there.
     private func connectivityFindings(_ s: Snapshot, at t: Date) -> [Finding] {
         var out: [Finding] = []
@@ -480,7 +484,7 @@ public final class Analyzer {
             seen.insert(i.name)
             var st = links[i.name] ?? LinkState()
             defer { links[i.name] = st }
-            guard i.linkActive == true else { st.noAddressSince = nil; st.lastIn = nil; st.inChangedAt = nil; st.outAtInChange = nil; continue }
+            guard i.linkActive == true else { st.noAddressSince = nil; st.lastIn = nil; st.inChangedAt = nil; st.outHistory = []; continue }
 
             let v4 = Self.ipv4State(i.addresses)
             if v4.routable { st.hadAddress = true; st.noAddressSince = nil }
@@ -488,27 +492,38 @@ public final class Analyzer {
             else { st.noAddressSince = nil }
             if let n = st.noAddressSince, t.timeIntervalSince(n) >= Self.noAddressSeconds {
                 let selfAssigned = v4.selfAssigned
+                // A global IPv6 address may mean an IPv6-only network, so that case is a caution, not a warning.
+                let hasIPv6 = i.addresses.contains { $0.contains(":") && ($0.hasPrefix("2") || $0.hasPrefix("3")) }
                 out.append(Finding(
-                    id: "net-noip:\(i.name)", severity: .warning, icon: "network.slash",
-                    title: selfAssigned ? "\(i.name) has a self-assigned address: DHCP got no answer" : "\(i.name) has link but lost its IP address",
-                    detail: "The connection is up, but this interface has no usable IPv4 address, so nothing can connect through it. "
-                        + "If this happens on several interfaces at once, and other devices on the network are fine, the cause is on this Mac "
+                    id: "net-noip:\(i.name)", severity: hasIPv6 && !selfAssigned ? .caution : .warning, icon: "network.slash",
+                    title: selfAssigned ? "\(i.name) has a self-assigned address: DHCP got no answer"
+                        : hasIPv6 ? "\(i.name) has link but lost its IPv4 address" : "\(i.name) has link but lost its IP address",
+                    detail: "The connection is up, but this interface has no usable IPv4 address"
+                        + (hasIPv6 && !selfAssigned ? " (it still has an IPv6 address, so this may simply be an IPv6-only network)" : ", so nothing can connect through it")
+                        + ". If this happens on several interfaces at once, and other devices on the network are fine, the cause is on this Mac "
                         + "(a VPN, network filter or security agent) and not the network.",
                     since: n, destination: "Performance:Network"))
             }
 
-            guard v4.routable, let inP = i.inPackets, let outP = i.outPackets else { st.lastIn = nil; st.inChangedAt = nil; st.outAtInChange = nil; continue }
+            guard v4.routable, let inP = i.inPackets, let outP = i.outPackets else { st.lastIn = nil; st.inChangedAt = nil; st.outHistory = []; continue }
             if st.lastIn != inP || st.inChangedAt == nil {   // a counter that moved (or reset) restarts the silence
-                st.lastIn = inP; st.inChangedAt = t; st.outAtInChange = outP
-            } else if let at = st.inChangedAt, let o0 = st.outAtInChange, t.timeIntervalSince(at) >= Self.receiveStallSeconds,
-                      outP >= o0, outP - o0 >= Self.receiveStallMinOut {
-                out.append(Finding(
-                    id: "net-rx-stall:\(i.name)", severity: .warning, icon: "network.slash",
-                    title: "\(i.name) stopped receiving packets while still sending",
-                    detail: "Nothing has arrived for \(Int(t.timeIntervalSince(at))) s although \(outP - o0) packets went out. Even an idle working link receives "
-                        + "broadcast traffic, so this points at the adapter, its driver, the cable or the switch port. "
-                        + "If packets do arrive but connections still fail, look higher up (VPN, network filter, security software).",
-                    since: at, destination: "Performance:Network"))
+                st.lastIn = inP; st.inChangedAt = t; st.outHistory = [(t, outP)]
+            } else {
+                st.outHistory.append((t, outP))
+                // Keep the newest sample at or before the window start, and everything after it.
+                let start = t.addingTimeInterval(-Self.receiveStallSeconds)
+                if let k = st.outHistory.lastIndex(where: { $0.time <= start }), k > 0 { st.outHistory.removeFirst(k) }
+                if let at = st.inChangedAt, t.timeIntervalSince(at) >= Self.receiveStallSeconds,
+                   let base = st.outHistory.first, base.time <= start, outP >= base.out, outP - base.out >= Self.receiveStallMinOut {
+                    out.append(Finding(
+                        id: "net-rx-stall:\(i.name)", severity: .warning, icon: "network.slash",
+                        title: "\(i.name) stopped receiving packets while still sending",
+                        detail: "Nothing has arrived for \(Int(t.timeIntervalSince(at))) s although \(outP - base.out) packets went out in the last \(Int(Self.receiveStallSeconds)) s. "
+                            + "An idle working link still receives broadcast traffic, so this points at the adapter, its driver, the cable or the switch port. "
+                            + "This counts packets at the adapter, before any VPN, network filter or security software sees them, so it cannot see traffic "
+                            + "those drop: if connections fail but this finding is absent, the packets are arriving and the cause is higher up, in software.",
+                        since: at, destination: "Performance:Network"))
+                }
             }
         }
         links = links.filter { seen.contains($0.key) }   // `defer` has already stored this pass's state

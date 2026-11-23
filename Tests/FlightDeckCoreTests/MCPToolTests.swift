@@ -178,6 +178,27 @@ final class MCPToolTests: XCTestCase {
         XCTAssertEqual(j["incidents"]?.array?.map { $0["title"]?.string ?? "" }, ["Hang", "Old"])
     }
 
+    /// A network incident carries the saved network state, not call stacks: its summary is not called a stack summary and
+    /// the file is offered, but only while it still exists (evidence is pruned after a week).
+    func testRecentIncidentsNetworkEvidence() async throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("fd-net-\(UUID().uuidString).txt")
+        try "state".write(to: file, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: file) }
+        let src = FakeSource()
+        func inc(_ key: String, path: String) -> Incident {
+            Incident(id: UUID(), key: key, severity: .warning, icon: "x", title: key, detail: nil, destination: nil,
+                     start: now.addingTimeInterval(-600), end: nil, evidencePath: path, evidenceSummary: "en9: link active, no IPv4 address, no default route on en9")
+        }
+        src.incidentList = [inc("net-noip:en9", path: file.path), inc("net-rx-stall:en0", path: "/nonexistent/gone.txt")]
+        let rows = try await call(tools(src), "recent_incidents")["incidents"]?.array ?? []
+        let present = try XCTUnwrap(rows.first { $0["title"]?.string == "net-noip:en9" })
+        XCTAssertEqual(present["evidence_summary"]?.string, "en9: link active, no IPv4 address, no default route on en9")
+        XCTAssertNil(present["stack_summary"], "not stacks")
+        XCTAssertEqual(present["evidence_file"]?.string, file.path)
+        let gone = try XCTUnwrap(rows.first { $0["title"]?.string == "net-rx-stall:en0" })
+        XCTAssertNil(gone["evidence_file"], "a pruned file is not offered")
+    }
+
     func testDiagnosticReports() async throws {
         let src = FakeSource()
         src.reportList = [DiagnosticReport(path: "/x/Safari-1.ips", kind: .crash, process: "Safari", time: now.addingTimeInterval(-100), summary: "EXC_BAD_ACCESS"),

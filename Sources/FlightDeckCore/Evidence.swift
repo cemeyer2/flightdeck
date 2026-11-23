@@ -159,6 +159,9 @@ public enum NetworkEvidence {
     public static func capture(interface: String, incident: UUID, directory: URL = EvidenceStore.directory, timeout: TimeInterval = 5) -> (URL, String?)? {
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         var report = "Network state for \(interface), captured \(Date())\n"
+            + "\nHow to read this: the packet counters below are the adapter's, counted before any VPN, network filter or security software "
+            + "sees a packet. Counters that keep rising while connections fail mean the traffic reaches this Mac and is lost higher up, in "
+            + "software (see the connections and processes at the end); counters that stop mean the adapter, driver, cable or port.\n"
         var ifconfig = "", routes = ""
         for c in commands(interface: interface) {
             let out = Shell.run(c.path, c.args, timeout: timeout)
