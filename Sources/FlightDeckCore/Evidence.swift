@@ -109,3 +109,68 @@ public enum EvidenceStore {
         }
     }
 }
+
+/// State of the network stack, saved when an interface loses its address or stops receiving (`net-noip:` and
+/// `net-rx-stall:` incidents). A reboot clears all of this, so it is taken while the incident is open. Nothing here needs
+/// root. Each command has a short timeout because several of them (scutil, systemextensionsctl) can stall during an outage.
+public enum NetworkEvidence {
+    /// Process names (lowercased substrings) of VPNs, network filters and security agents worth listing next to the state.
+    static let agentKeywords = ["zscaler", "crowdstrike", "falcon", "globalprotect", "pangp", "cyberark", "idira", "tailscale",
+                                "wireguard", "openvpn", "vpn", "networkserviceproxy", "nesessionmanager", "configd", "symptomsd"]
+
+    static func commands(interface: String) -> [(title: String, path: String, args: [String])] { [
+        ("ifconfig \(interface)", "/sbin/ifconfig", [interface]),
+        ("interface counters (netstat -I \(interface) -b -d)", "/usr/sbin/netstat", ["-I", interface, "-b", "-d"]),
+        ("DHCP packet (ipconfig getpacket \(interface))", "/usr/sbin/ipconfig", ["getpacket", interface]),
+        ("ipconfig getsummary \(interface)", "/usr/sbin/ipconfig", ["getsummary", interface]),
+        ("routes (netstat -rn)", "/usr/sbin/netstat", ["-rn"]),
+        ("neighbours (arp -an)", "/usr/sbin/arp", ["-an"]),
+        ("VPN and network extension connections (scutil --nc list)", "/usr/sbin/scutil", ["--nc", "list"]),
+        ("DNS (scutil --dns)", "/usr/sbin/scutil", ["--dns"]),
+        ("service order (networksetup -listnetworkserviceorder)", "/usr/sbin/networksetup", ["-listnetworkserviceorder"]),
+        ("system extensions (systemextensionsctl list)", "/usr/bin/systemextensionsctl", ["list"]),
+    ] }
+
+    /// `ps` lines for VPN, filter and security agents, with their age and CPU, from the full `ps` output.
+    static func agentProcesses(_ ps: String) -> String {
+        let lines = ps.split(separator: "\n", omittingEmptySubsequences: true)
+        let hits = lines.dropFirst().filter { l in let low = l.lowercased(); return agentKeywords.contains { low.contains($0) } }
+        return ([lines.first.map(String.init) ?? ""] + hits.map(String.init)).joined(separator: "\n")
+    }
+
+    /// One line for the Flight Log: the link, addresses and default route of `interface` at capture time.
+    static func summarize(interface: String, ifconfig: String, routes: String) -> String {
+        var link = "link unknown"
+        if ifconfig.contains("status: active") { link = "link active" } else if ifconfig.contains("status: inactive") { link = "link inactive" }
+        let v4 = ifconfig.split(separator: "\n").compactMap { l -> String? in
+            let w = l.split(whereSeparator: { $0 == " " || $0 == "\t" })   // ifconfig indents its detail lines with a tab
+            return w.count >= 2 && w[0] == "inet" ? String(w[1]) : nil
+        }
+        let gateway = routes.split(separator: "\n").compactMap { l -> String? in
+            let w = l.split(whereSeparator: { $0 == " " || $0 == "\t" })
+            return w.count >= 4 && w[0] == "default" && w.last == Substring(interface) ? String(w[1]) : nil
+        }.first
+        return "\(interface): \(link), " + (v4.isEmpty ? "no IPv4 address" : "IPv4 " + v4.joined(separator: ", "))
+            + ", " + (gateway.map { "default route via \($0)" } ?? "no default route on \(interface)")
+    }
+
+    /// Runs the commands and stores the report as `<incident UUID>-network-<interface>.txt`; returns (file, summary).
+    /// Blocks for as long as the commands take (each is capped at `timeout`), so call it on the evidence queue.
+    public static func capture(interface: String, incident: UUID, directory: URL = EvidenceStore.directory, timeout: TimeInterval = 5) -> (URL, String?)? {
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        var report = "Network state for \(interface), captured \(Date())\n"
+        var ifconfig = "", routes = ""
+        for c in commands(interface: interface) {
+            let out = Shell.run(c.path, c.args, timeout: timeout)
+            report += "\n### \(c.title)\n" + (out ?? "(no output: command failed or timed out after \(Int(timeout)) s)\n")
+            if c.path == "/sbin/ifconfig" { ifconfig = out ?? "" }
+            if c.args == ["-rn"] { routes = out ?? "" }
+        }
+        let ps = Shell.run("/bin/ps", ["-axo", "pid,etime,%cpu,state,comm"], timeout: timeout)
+        report += "\n### VPN, filter and security processes\n" + (ps.map(agentProcesses) ?? "(ps failed)") + "\n"
+        let name = interface.replacingOccurrences(of: "/", with: "_")
+        let url = directory.appendingPathComponent("\(incident.uuidString)-network-\(name).txt")
+        do { try report.write(to: url, atomically: true, encoding: .utf8) } catch { return nil }
+        return (url, summarize(interface: interface, ifconfig: ifconfig, routes: routes))
+    }
+}

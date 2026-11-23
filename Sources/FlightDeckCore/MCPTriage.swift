@@ -40,6 +40,8 @@ public enum Triage {
         if has("mem", "swap", "leak:", "usual-mem") { return ("memory", "list_processes", ["sort": "memory", "by_app": true]) }
         if has("thermal", "cpu-throttled", "cpu-speed-limit", "fan:", "temp-alert:") { return ("thermal", "temperatures", .object([])) }
         if has("disk", "drive:") { return ("disk", "checkup", .object([])) }
+        // No address or no packets: the Flight Log has the network state captured when it began.
+        if has("net-noip:", "net-rx-stall:") { return ("network", "recent_incidents", ["hours": 24, "min_severity": "warning"]) }
         if has("net", "wifi") { return ("network", "wifi", .object([])) }
         if has("battery", "unusual-power", "sleep-", "awake:") { return ("power", "battery", .object([])) }
         if has("restart:") { return ("restarts", "restarts", .object([])) }
