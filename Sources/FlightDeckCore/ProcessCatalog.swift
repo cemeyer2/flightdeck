@@ -132,13 +132,21 @@ public struct ProcessCatalog: Sendable {
     public func entry(id: String) -> ProcessExplanation? { byID[id] }
 
     /// FlightDeck's own process is FlightDeck wherever it runs from (~/Applications, Downloads, a build folder), so the
-    /// inspector never calls it a lookalike of itself. Any other PID goes through `lookup(name:path:signature:)`.
+    /// inspector never calls it a lookalike of itself; so is another PID running the same executable (`--mcp`, the
+    /// Chrome native host). Any other process goes through `lookup(name:path:signature:)`.
     public func lookup(pid: Int32, name: String, path: String, signature: ProcessDetails.Signature?) -> ProcessMatch {
-        if pid == getpid(), let me = byID[Self.selfID] { return .known(me, by: .path, pathVerified: true) }
+        lookup(pid: pid, name: name, path: path, signature: signature, ownExecutable: Self.ownExecutable)
+    }
+
+    func lookup(pid: Int32, name: String, path: String, signature: ProcessDetails.Signature?, ownExecutable: String?) -> ProcessMatch {
+        let mine = pid == getpid() || (!path.isEmpty && path == ownExecutable)
+        if mine, let me = byID[Self.selfID] { return .known(me, by: .path, pathVerified: true) }
         return lookup(name: name, path: path, signature: signature)
     }
 
     static let selfID = "flightdeck"
+    /// This process's executable with symlinks resolved, as process paths are reported.
+    static let ownExecutable = Bundle.main.executableURL?.resolvingSymlinksInPath().path
 
     /// Which entry this process gets. Precedence, first hit wins: exact path, longest path prefix, exact name, longest
     /// name prefix, then (only with a signature, and only when nothing else matched) bundle ID. A signature can change
@@ -184,8 +192,9 @@ public struct ProcessCatalog: Sendable {
     }
 
     /// The lookalike guard. Apple entries are vouched for only in macOS's own folders, with an unreadable path, or with
-    /// a valid Apple signature. Vendor entries matched by path fail only on a signing-team mismatch; matched by name, the
-    /// path must be unreadable or inside one of the entry's own locations.
+    /// a valid Apple signature. Vendor entries matched by path fail only on a signing-team mismatch; matched by name, a
+    /// valid signature from the entry's team vouches for any location, and without one the path must be unreadable or
+    /// inside one of the entry's own locations.
     private func judge(_ e: ProcessExplanation, _ key: MatchKey, path: String, signature: ProcessDetails.Signature?) -> ProcessMatch {
         if e.isApple {
             if path.isEmpty { return .known(e, by: key, pathVerified: false) }
@@ -193,8 +202,10 @@ public struct ProcessCatalog: Sendable {
             return .lookalike(e, .location)
         }
         if let s = signature, !e.teamIDs.isEmpty, !(s.teamID.map(e.teamIDs.contains) ?? false) { return .lookalike(e, .signer) }
+        let signedByTeam = signature?.valid == true && !e.teamIDs.isEmpty
         switch key {
         case .path, .pathPrefix: return .known(e, by: key, pathVerified: true)
+        case _ where signedByTeam: return .known(e, by: key, pathVerified: true)
         default:
             if path.isEmpty { return .known(e, by: key, pathVerified: false) }
             let own = e.paths.contains(path) || e.pathPrefixes.contains { path.hasPrefix($0) }

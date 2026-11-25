@@ -260,6 +260,27 @@ final class ProcessCatalogTests: XCTestCase {
         XCTAssertTrue(isLookalike(c.lookup(pid: getpid() + 1, name: "FlightDeck", path: odd, signature: nil)))
     }
 
+    /// Another PID running FlightDeck's own executable (--mcp, the Chrome native host) is FlightDeck too.
+    func testOwnExecutableIsKnown() {
+        let c = ProcessCatalog.shared
+        let odd = NSHomeDirectory() + "/Downloads/FlightDeck.app/Contents/MacOS/FlightDeck"
+        let mcp = c.lookup(pid: getpid() + 1, name: "FlightDeck", path: odd, signature: nil, ownExecutable: odd)
+        XCTAssertEqual(mcp.known?.id, "flightdeck"); XCTAssertEqual(verified(mcp), true)
+        XCTAssertTrue(isLookalike(c.lookup(pid: getpid() + 1, name: "FlightDeck", path: odd, signature: nil, ownExecutable: "/elsewhere/FlightDeck")))
+    }
+
+    /// A name match outside the vendor's folders is vouched for by a valid signature from the vendor's team.
+    func testVendorNameVouchedForBySignature() {
+        let c = ProcessCatalog.shared
+        let path = NSHomeDirectory() + "/Applications/iTerm.app/Contents/MacOS/iTerm2"
+        let ok = c.lookup(name: "iTerm2", path: path, signature: Self.sig(team: "H7V7XYVQ7D"))
+        XCTAssertEqual(ok.known?.id, "dev-iterm2"); XCTAssertEqual(verified(ok), true)
+        XCTAssertEqual(reason(c.lookup(name: "iTerm2", path: path, signature: Self.sig(team: "WRONGTEAM"))), .signer)
+        XCTAssertEqual(reason(c.lookup(name: "iTerm2", path: path, signature: Self.sig())), .signer)
+        XCTAssertEqual(reason(c.lookup(name: "iTerm2", path: path, signature: Self.sig(valid: false, team: "H7V7XYVQ7D"))), .location)
+        XCTAssertEqual(reason(c.lookup(name: "iTerm2", path: path, signature: nil)), .location)
+    }
+
     func testKnownFactsLaunchedByStartupItem() {
         let s = AnalyzerTests().proc("agent", path: "/Library/Vendor/agent", pid: 9)
         let job = StartupItem(label: "com.vendor.agent", path: "/Library/LaunchAgents/com.vendor.agent.plist", program: "/Library/Vendor/agent",
