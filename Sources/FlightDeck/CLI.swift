@@ -33,6 +33,11 @@ enum CLI {
     /// Parses `CommandLine.arguments` and runs the first matching mode. Does not return if a mode ran.
     static func handle() {
         let a = CommandLine.arguments
+        switch ChromeHostArgv.mode(a) {   // Chrome native-messaging host (ChromeHost.swift); before anything that prints
+        case .host(let origin): ChromeHost.run(origin: origin)
+        case .rejected: exit(64)
+        case .notHost: break
+        }
         // The `n` arguments following `flag`, or nil if the flag is absent or too few arguments follow it.
         func value(_ flag: String, _ n: Int = 1) -> [String]? {
             guard let i = a.firstIndex(of: flag), i + n < a.count else { return nil }

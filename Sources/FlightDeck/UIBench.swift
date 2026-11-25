@@ -235,6 +235,10 @@ enum UIBench {
             let mem = MemoryBreakdownReader.read(pid: getpid(), ownedByUser: true)
             out("inspector-memory", height: 900, MemoryBreakdownPanel(model: model, result: mem))
         }
+        out("chrome-tabs-inspector", width: 700, height: 320, VStack(alignment: .leading, spacing: 12) {   // invented tabs (DemoChromeTabs)
+            ForEach(Array(DemoChromeTabs.labels.enumerated()), id: \.offset) { _, a in if let l = ChromeTabLabel(a) { ChromeTabHeaderName(label: l) } }
+            ChromeTabsInspectorSection(attribution: DemoChromeTabs.labels[1])
+        })
         // Camera & Mic: invented sessions (no listeners, nothing written) in each range, then this Mac: its saved history,
         // read-only, and one reading of the devices (never opens a camera or microphone). Models are built first.
         let cmDemo = CameraMicModel(preview: DemoCameraMic.sessions(now: Date()), live: DemoCameraMic.live(now: Date()))

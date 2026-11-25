@@ -139,6 +139,7 @@ struct InspectorView: View {
             // MaybeScroll so the window still renders in off-screen captures, where a ScrollView draws empty.
             MaybeScroll {
                 VStack(spacing: 12) {
+                    if let a = chromeTabs, !a.entries.isEmpty { ChromeTabsInspectorSection(attribution: a) }   // ChromeTabsInspector.swift
                     graphs
                     Picker("", selection: $tab) { ForEach(InspectorTab.allCases) { Text($0.rawValue).tag($0) } }
                         .pickerStyle(.segmented).labelsHidden()
@@ -167,7 +168,7 @@ struct InspectorView: View {
         .alert("\(confirm?.1 ?? "") “\(s?.name ?? "")”?", isPresented: Binding(get: { confirm != nil }, set: { if !$0 { confirm = nil } })) {
             Button(confirm?.1 ?? "OK", role: .destructive) { if let c = confirm { send(c.0) }; confirm = nil }
             Button("Cancel", role: .cancel) { confirm = nil }
-        } message: { Text("PID \(model.identity.pid). Unsaved work in this process may be lost.") }
+        } message: { Text("PID \(model.identity.pid). Unsaved work in this process may be lost." + (chromeTabs.flatMap(ChromeTabText.killWarning).map { "\n\($0)" } ?? "")) }
         .alert("Action failed", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) { Button("OK") {} } message: { Text(error ?? "") }
     }
 
@@ -179,7 +180,9 @@ struct InspectorView: View {
             AppIcon(path: s?.path ?? "").frame(width: 40, height: 40)
             VStack(alignment: .leading, spacing: 3) {
                 HStack {
-                    Text(s?.name ?? "—").font(.system(size: 17, weight: .semibold))
+                    if let l = chromeTabs.flatMap(ChromeTabLabel.init) { ChromeTabHeaderName(label: l) } else {
+                        Text(s?.name ?? "—").font(.system(size: 17, weight: .semibold))
+                    }
                     if model.exited { Text("EXITED").font(.caption.bold()).padding(.horizontal, 6).background(Capsule().fill(p.crit.opacity(0.3))) }
                     if let sig = model.details?.signature {
                         Label(sig.summary, systemImage: sig.valid ? "checkmark.seal" : "exclamationmark.triangle")
@@ -206,6 +209,7 @@ struct InspectorView: View {
                 Button("Sample Stacks (3 s)") { tab = .stacks; model.sampleStacks(seconds: 3) }
                 Button("Reveal in Finder") { if let s { NSWorkspace.shared.selectFile(s.path, inFileViewerRootedAtPath: "") } }.disabled(s?.path.isEmpty ?? true)
                 Button("Copy Summary") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(summaryText(s), forType: .string) }
+                    .help(chromeTabs == nil ? "Copies a text summary" : "Copies a text summary, including the Chrome tabs in this process (site and title, not the address)")
             }.frame(width: 100).disabled(model.exited)
         }
         .padding(14).background(p.panel).overlay(alignment: .bottom) { Divider() }
@@ -448,6 +452,7 @@ struct InspectorView: View {
         out += String(format: "CPU %.1f%%, memory %@, threads %d, CPU time %@\n", s.cpu, Fmt.bytes(s.memory), s.threads, Fmt.duration(s.cpuTime))
         if let a = model.details?.arguments.value { out += "Arguments: \(a.joined(separator: " "))\n" }
         if let sig = model.details?.signature { out += "Signature: \(sig.summary)\n" }
+        if let a = chromeTabs, !a.entries.isEmpty { out += ChromeTabText.summaryLines(a) + "\n" }   // site and title, never the URL
         return out
     }
 }

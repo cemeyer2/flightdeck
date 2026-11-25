@@ -64,5 +64,6 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   </dict></array>
 </dict></plist>
 PLIST
+cp -R Extensions/Chrome "$APP/Contents/Resources/ChromeExtension"   # Chrome tabs companion extension (ChromeTabsService)
 codesign --force --deep --sign - "$APP"
 echo "Built $APP"

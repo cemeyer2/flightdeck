@@ -53,7 +53,11 @@ public struct ProcessQuery: Sendable {
     }
 
     /// True if every term matches (AND). An empty query matches everything.
-    public func matches(_ p: ProcessSample) -> Bool {
+    public func matches(_ p: ProcessSample) -> Bool { matches(p, extraText: nil) }
+
+    /// The same, where `extraText` (lowercased) is more text a plain text term may match, such as a Chrome renderer's
+    /// tab hosts and titles; the other terms ignore it, so "youtube cpu>5" finds a busy renderer showing YouTube.
+    public func matches(_ p: ProcessSample, extraText: String?) -> Bool {
         terms.allSatisfy { term in
             switch term {
             case .compare(let f, let op, let v):
@@ -83,6 +87,7 @@ public struct ProcessQuery: Sendable {
             case .hung: return p.notResponding == true
             case .restricted: return p.restricted
             case .text(let s): return p.name.lowercased().contains(s) || p.path.lowercased().contains(s) || p.user.lowercased() == s || "\(p.pid)" == s
+                || extraText?.contains(s) == true
             }
         }
     }

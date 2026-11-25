@@ -79,13 +79,17 @@ struct ProcessesView: View {
             }.padding(10)
             // Double-click opens the inspector, except on synthetic app-group rows (negative PIDs).
             ProcessOutline(frameTime: e.current?.time, processes: visibleProcesses, tree: view == "tree", byApp: view == "apps", filter: filter, palette: p, selection: $selection, menu: nsMenu,
-                           onOpen: { if $0.pid > 0 { AppActions.openInspector?($0.identity) } })
+                           onOpen: { if $0.pid > 0 { AppActions.openInspector?($0.identity) } },
+                           tabLabels: e.mode == .live ? e.chromeTabs : [:])   // live tabs never label replayed rows
             if let selected, selected.pid > 0 { ProcessDetailBar(s: selected, actions: { AnyView(actions(selected)) }) }
         }
         .alert("\(confirm?.2 ?? "") “\(confirm?.0.name ?? "")”?", isPresented: Binding(get: { confirm != nil }, set: { if !$0 { confirm = nil } })) {
             Button(confirm?.2 ?? "OK", role: .destructive) { if let c = confirm { send(c.1, c.0) }; confirm = nil }
             Button("Cancel", role: .cancel) { confirm = nil }
-        } message: { Text("PID \(confirm?.0.pid ?? 0). Unsaved work in this process may be lost.") }
+        } message: {   // a renderer's live tabs close with it (never named while replaying)
+            Text("PID \(confirm?.0.pid ?? 0). Unsaved work in this process may be lost."
+                 + ((e.mode == .live ? confirm.flatMap { e.chromeTabs[$0.0.identity] } : nil).flatMap(ChromeTabText.killWarning).map { "\n\($0)" } ?? ""))
+        }
         .alert("\(confirmApp?.1 == true ? "Force Quit" : "Quit") “\(confirmApp?.0.localizedName ?? "")”?",
                isPresented: Binding(get: { confirmApp != nil }, set: { if !$0 { confirmApp = nil } })) {
             Button(confirmApp?.1 == true ? "Force Quit" : "Quit", role: .destructive) {

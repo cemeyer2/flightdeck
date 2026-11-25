@@ -138,6 +138,11 @@ final class EngineMCPSource: MCPDataSource, @unchecked Sendable {
             return (saved.filter { $0.start != today.start } + [today], t.known())
         }.value
     }
+    /// Live Chrome tabs reduced to hosts (none in demo mode, with the feature off, with nothing connected or with a
+    /// setup error: MCP then says "unavailable" once instead of a column of nulls).
+    func chromeTabs() async -> ChromeTabsView? {
+        await MainActor.run { ChromeTabsService.shared.servesTabs ? ChromeTabsView(engine?.chromeTabs ?? [:]) : nil }
+    }
 }
 
 /// Settings section for the MCP server, kept here so SettingsView only gains one line.

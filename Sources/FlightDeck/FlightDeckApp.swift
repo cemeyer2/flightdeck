@@ -137,6 +137,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         if !Demo.isEnabled { Alerts.shared.start() }   // demo mode never posts notifications
+        ChromeTabsService.shared.startIfEnabled()   // no-op in demo mode
     }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
         if !hasVisibleWindows { AppActions.showMain() }
@@ -280,6 +281,7 @@ struct SettingsView: View {
             tab {
                 MetricsExportSection()
                 MCPSection()
+                ChromeTabsSettingsSection()
             }
             .tabItem { Label("Integrations", systemImage: "puzzlepiece.extension") }
             tab { AboutSettingsSection() }
