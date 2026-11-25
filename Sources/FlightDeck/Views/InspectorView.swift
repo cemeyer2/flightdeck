@@ -49,7 +49,7 @@ final class InspectorModel: ObservableObject {
     /// Re-matches against the catalog (cheap: dictionary lookups) and publishes only a change.
     private func updateAbout() {
         guard let s = sample else { return }
-        let m = ProcessCatalog.shared.lookup(name: s.name, path: s.path, signature: details?.signature)
+        let m = ProcessCatalog.shared.lookup(pid: identity.pid, name: s.name, path: s.path, signature: details?.signature)
         if m != about { about = m }
         if m.known == nil, startupItems == nil, !loadingStartupItems {
             loadingStartupItems = true
@@ -296,7 +296,6 @@ struct InspectorView: View {
         }
     }
 
-    /// Label/value grid row; nil values render as "—" (unavailable), never as an empty or zero value.
     /// "What is this?": the catalog's explanation, or for a lookalike or unknown process only facts FlightDeck knows.
     @ViewBuilder func whatIsThis(_ s: ProcessSample?) -> some View {
         Panel(title: "What is this?") {
@@ -309,8 +308,8 @@ struct InspectorView: View {
                         ForEach(ProcessCatalogText.inspectorRows(e), id: \.label) { r in row(r.label, r.value) }
                     }.font(.system(size: 12))
                     if !verified { Text("Matched by name only").font(.caption).foregroundStyle(p.dim) }
-                case .lookalike(let e):
-                    Text(ProcessCatalogText.lookalikeSentence(e, path: s?.path ?? "")).font(.system(size: 12)).foregroundStyle(p.warn)
+                case .lookalike(let e, let reason):
+                    Text(ProcessCatalogText.lookalikeSentence(e, reason: reason, path: s?.path ?? "")).font(.system(size: 12)).foregroundStyle(p.warn)
                         .fixedSize(horizontal: false, vertical: true)
                     knownFacts(s)
                 case .unknown:
@@ -330,6 +329,7 @@ struct InspectorView: View {
         }
     }
 
+    /// Label/value grid row; nil values render as "—" (unavailable), never as an empty or zero value.
     func row(_ k: String, _ v: String?) -> some View {
         GridRow {
             Text(k).foregroundStyle(p.dim)

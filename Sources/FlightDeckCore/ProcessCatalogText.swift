@@ -52,13 +52,19 @@ public enum ProcessCatalogText {
         return t
     }
 
-    /// The inspector's note for a lookalike (shown nowhere else): what it's named like and where it actually is.
-    public static func lookalikeSentence(_ e: ProcessExplanation, path: String) -> String {
+    /// The inspector's note for a lookalike (shown nowhere else): what it's named like, and either where it actually is
+    /// or that someone else signed it.
+    public static func lookalikeSentence(_ e: ProcessExplanation, reason: LookalikeReason, path: String) -> String {
         let home = NSHomeDirectory()
         let shown = !home.isEmpty && path.hasPrefix(home + "/") ? "~" + path.dropFirst(home.count) : path
         let owner = e.isApple ? "macOS" : e.makerName
-        let keeps = e.isApple ? "where macOS keeps it" : "where \(owner) installs it"
-        return "Named like \(owner)'s \(e.names.first ?? e.title) (\(e.title)), but it isn't \(keeps): \(shown)."
+        let what = e.names.first.map { $0 == e.title ? e.title : "\($0) (\(e.title))" } ?? e.title
+        let but: String
+        switch reason {
+        case .location: but = e.isApple ? "it isn't where macOS keeps it" : "it isn't where \(owner) installs it"
+        case .signer: but = "it isn't signed by \(e.isApple ? "Apple" : owner)"
+        }
+        return "Named like \(owner)'s \(what), but \(but)" + (shown.isEmpty ? "." : ": \(shown).")
     }
 
     /// The inspector's "What is this?" rows, in order, omitting any without a value. Managed entries show the IT advice

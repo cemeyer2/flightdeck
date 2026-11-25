@@ -46,6 +46,7 @@ final class ProcessCatalogTests: XCTestCase {
     func key(_ m: ProcessMatch) -> MatchKey? { if case .known(_, let k, _) = m { return k }; return nil }
     func verified(_ m: ProcessMatch) -> Bool? { if case .known(_, _, let v) = m { return v }; return nil }
     func isLookalike(_ m: ProcessMatch) -> Bool { if case .lookalike = m { return true }; return false }
+    func reason(_ m: ProcessMatch) -> LookalikeReason? { if case .lookalike(_, let r) = m { return r }; return nil }
 
     /// Each step beats the next: exact path, path prefix, exact name, name prefix, bundle ID.
     func testPrecedence() {
@@ -81,6 +82,9 @@ final class ProcessCatalogTests: XCTestCase {
         XCTAssertEqual(id(real), "mdworker"); XCTAssertEqual(verified(real), true)
         XCTAssertTrue(isLookalike(c.lookup(name: "mdworker_shared", path: "/Users/x/Downloads/mdworker_shared", signature: nil)))
         XCTAssertTrue(isLookalike(c.lookup(name: "mdworker_shared", path: "/usr/local/bin/mdworker_shared", signature: nil)))
+        XCTAssertEqual(reason(c.lookup(name: "mdworker_shared", path: "/usr/local/bin/mdworker_shared", signature: nil)), .location)
+        XCTAssertTrue(isLookalike(c.lookup(name: "mdworker_shared", path: "/System/Volumes/Data/Users/x/mdworker_shared", signature: nil)),
+                      "the writable Data volume is not one of macOS's own folders")
         XCTAssertEqual(verified(c.lookup(name: "mdworker_shared", path: "", signature: nil)), false)
         XCTAssertEqual(id(c.lookup(name: "mdworker_shared", path: "/opt/odd/mdworker_shared", signature: Self.sig(apple: true, valid: true))), "mdworker")
         // a lookalike is never reported as known anywhere
@@ -96,13 +100,15 @@ final class ProcessCatalogTests: XCTestCase {
         let ok = c.lookup(name: "chrome", path: "/opt/x/chrome", signature: Self.sig(team: "EQHXZ8M8AV", id: "com.google.Chrome"))
         XCTAssertEqual(id(ok), "chrome"); XCTAssertEqual(key(ok), .bundleID)
         // a path-prefix match with a signature from another team is a lookalike too
-        XCTAssertTrue(isLookalike(c.lookup(name: "Google Chrome", path: Self.chromeMain, signature: Self.sig(team: "WRONGTEAM"))))
+        XCTAssertEqual(reason(c.lookup(name: "Google Chrome", path: Self.chromeMain, signature: Self.sig(team: "WRONGTEAM"))), .signer)
+        XCTAssertEqual(reason(c.lookup(name: "worker", path: "/opt/x/worker", signature: Self.sig(apple: false, valid: true, id: "com.apple.mdworker_shared"))), .signer)
     }
 
     /// A vendor's name somewhere odd is not the vendor's program.
     func testVendorNameAtOddPathIsLookalike() {
         let c = Self.fixture()
         XCTAssertTrue(isLookalike(c.lookup(name: "Dropbox", path: "/Users/x/Downloads/Dropbox", signature: nil)))
+        XCTAssertEqual(reason(c.lookup(name: "Dropbox", path: "/Users/x/Downloads/Dropbox", signature: nil)), .location)
         let hidden = c.lookup(name: "Dropbox", path: "", signature: nil)
         XCTAssertEqual(id(hidden), "dropbox"); XCTAssertEqual(verified(hidden), false)
         XCTAssertEqual(verified(c.lookup(name: "Dropbox", path: "/Applications/Dropbox.app/Contents/MacOS/Dropbox", signature: nil)), true)
@@ -182,8 +188,8 @@ final class ProcessCatalogTests: XCTestCase {
         let d = ProcessCatalogText.findingDetail(known(m), defaultAction: action)
         XCTAssertTrue(d.hasPrefix(m.findingNote)); XCTAssertTrue(d.hasSuffix(ProcessCatalogText.managedAction))
         XCTAssertEqual(ProcessCatalogText.findingDetail(.unknown, defaultAction: action), action)
-        XCTAssertEqual(ProcessCatalogText.findingDetail(.lookalike(m), defaultAction: action), action)
-        XCTAssertNil(ProcessCatalogText.findingNote(.lookalike(m)))
+        XCTAssertEqual(ProcessCatalogText.findingDetail(.lookalike(m, .location), defaultAction: action), action)
+        XCTAssertNil(ProcessCatalogText.findingNote(.lookalike(m, .signer)))
         XCTAssertEqual(ProcessCatalogText.findingNote(known(m)), m.findingNote)
     }
 
@@ -227,9 +233,31 @@ final class ProcessCatalogTests: XCTestCase {
 
     func testLookalikeSentence() {
         let e = Self.fixture().entry(id: "mdworker")!
-        XCTAssertEqual(ProcessCatalogText.lookalikeSentence(e, path: NSHomeDirectory() + "/Downloads/mdworker"),
+        XCTAssertEqual(ProcessCatalogText.lookalikeSentence(e, reason: .location, path: NSHomeDirectory() + "/Downloads/mdworker"),
                        "Named like macOS's mdworker_shared (Title mdworker), but it isn't where macOS keeps it: ~/Downloads/mdworker.")
-        XCTAssertTrue(ProcessCatalogText.lookalikeSentence(e, path: "/usr/local/bin/mdworker").hasSuffix(": /usr/local/bin/mdworker."))
+        XCTAssertTrue(ProcessCatalogText.lookalikeSentence(e, reason: .location, path: "/usr/local/bin/mdworker").hasSuffix(": /usr/local/bin/mdworker."))
+        XCTAssertEqual(ProcessCatalogText.lookalikeSentence(e, reason: .signer, path: "/opt/x/worker"),
+                       "Named like macOS's mdworker_shared (Title mdworker), but it isn't signed by Apple: /opt/x/worker.")
+    }
+
+    /// A re-signed binary at the vendor's own path is described by its signer, not its location, and an entry without a
+    /// name key isn't named twice.
+    func testLookalikeSentenceSigner() {
+        let c = Self.fixture()
+        let m = c.lookup(name: "Google Chrome", path: Self.chromeMain, signature: Self.sig(team: "WRONGTEAM"))
+        guard case .lookalike(let e, let r) = m else { return XCTFail("expected a lookalike, got \(m)") }
+        XCTAssertEqual(r, .signer)
+        XCTAssertEqual(ProcessCatalogText.lookalikeSentence(e, reason: r, path: Self.chromeMain),
+                       "Named like Google's Title chrome, but it isn't signed by Google: \(Self.chromeMain).")
+    }
+
+    /// FlightDeck's own PID is FlightDeck wherever it runs from; any other PID goes through the lookalike guard.
+    func testOwnProcessIsKnown() {
+        let c = ProcessCatalog.shared
+        let odd = NSHomeDirectory() + "/Downloads/FlightDeck.app/Contents/MacOS/FlightDeck"
+        let me = c.lookup(pid: getpid(), name: "FlightDeck", path: odd, signature: nil)
+        XCTAssertEqual(me.known?.id, "flightdeck"); XCTAssertEqual(verified(me), true)
+        XCTAssertTrue(isLookalike(c.lookup(pid: getpid() + 1, name: "FlightDeck", path: odd, signature: nil)))
     }
 
     func testKnownFactsLaunchedByStartupItem() {

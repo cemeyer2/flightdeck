@@ -65,12 +65,16 @@ public enum MatchKey: String, Sendable {
     case path, pathPrefix = "path_prefix", name, namePrefix = "name_prefix", bundleID = "bundle_id"
 }
 
+/// Why a process is only a lookalike: it isn't where the entry's program lives, or it's where it lives but signed by
+/// someone else.
+public enum LookalikeReason: Sendable, Hashable { case location, signer }
+
 public enum ProcessMatch: Sendable, Hashable {
     /// `pathVerified` is false when the path was unreadable and the match rests on the name alone.
     case known(ProcessExplanation, by: MatchKey, pathVerified: Bool)
     /// Named like a catalogued program but not where (or not signed by whom) it should be. Shown only in the inspector;
     /// everywhere else it is treated exactly like an unknown process.
-    case lookalike(ProcessExplanation)
+    case lookalike(ProcessExplanation, LookalikeReason)
     case unknown
 
     /// The entry, for a vouched-for match only.
@@ -127,6 +131,15 @@ public struct ProcessCatalog: Sendable {
 
     public func entry(id: String) -> ProcessExplanation? { byID[id] }
 
+    /// FlightDeck's own process is FlightDeck wherever it runs from (~/Applications, Downloads, a build folder), so the
+    /// inspector never calls it a lookalike of itself. Any other PID goes through `lookup(name:path:signature:)`.
+    public func lookup(pid: Int32, name: String, path: String, signature: ProcessDetails.Signature?) -> ProcessMatch {
+        if pid == getpid(), let me = byID[Self.selfID] { return .known(me, by: .path, pathVerified: true) }
+        return lookup(name: name, path: path, signature: signature)
+    }
+
+    static let selfID = "flightdeck"
+
     /// Which entry this process gets. Precedence, first hit wins: exact path, longest path prefix, exact name, longest
     /// name prefix, then (only with a signature, and only when nothing else matched) bundle ID. A signature can change
     /// whether an entry is vouched for, or find one when nothing else did, but never picks a different entry than the
@@ -140,7 +153,7 @@ public struct ProcessCatalog: Sendable {
         if let e = namePrefixes.first(where: { name.hasPrefix($0.0) })?.1 { return judge(e, .namePrefix, path: path, signature: signature) }
         if let s = signature, let id = s.identifier, let e = byBundleID[id] {
             let ok = e.isApple ? (s.isApple && s.valid) : (s.valid && s.teamID.map(e.teamIDs.contains) == true)
-            return ok ? .known(e, by: .bundleID, pathVerified: true) : .lookalike(e)
+            return ok ? .known(e, by: .bundleID, pathVerified: true) : .lookalike(e, .signer)
         }
         return .unknown
     }
@@ -177,15 +190,15 @@ public struct ProcessCatalog: Sendable {
         if e.isApple {
             if path.isEmpty { return .known(e, by: key, pathVerified: false) }
             if Platform.isPlatformPath(path) || signature.map({ $0.isApple && $0.valid }) == true { return .known(e, by: key, pathVerified: true) }
-            return .lookalike(e)
+            return .lookalike(e, .location)
         }
-        if let s = signature, !e.teamIDs.isEmpty, !(s.teamID.map(e.teamIDs.contains) ?? false) { return .lookalike(e) }
+        if let s = signature, !e.teamIDs.isEmpty, !(s.teamID.map(e.teamIDs.contains) ?? false) { return .lookalike(e, .signer) }
         switch key {
         case .path, .pathPrefix: return .known(e, by: key, pathVerified: true)
         default:
             if path.isEmpty { return .known(e, by: key, pathVerified: false) }
             let own = e.paths.contains(path) || e.pathPrefixes.contains { path.hasPrefix($0) }
-            return own ? .known(e, by: key, pathVerified: true) : .lookalike(e)
+            return own ? .known(e, by: key, pathVerified: true) : .lookalike(e, .location)
         }
     }
 }
