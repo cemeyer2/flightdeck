@@ -27,6 +27,12 @@ final class InspectorModel: ObservableObject {
     /// Output of the last `/usr/bin/sample` run, if any.
     @Published var stacks: String?
     @Published var sampling = false
+    /// What the process catalog says about this process: by name and path first, then rechecked with the signature once
+    /// the details load (which can turn a match into a lookalike, never into a different entry).
+    @Published private(set) var about: ProcessMatch = .unknown
+    /// launchd jobs, for the "Launched by" fact about a process the catalog doesn't know. Loaded once, on demand.
+    @Published private(set) var startupItems: [StartupItem]?
+    private var loadingStartupItems = false
     private var bag: AnyCancellable?
     private var lastDetails = Date.distantPast
     private weak var engine: Engine?
@@ -36,7 +42,22 @@ final class InspectorModel: ObservableObject {
         history = engine.processHistory.series(identity)
         sample = engine.liveSnapshot?.processes.first { $0.identity == identity }
         bag = engine.$liveSnapshot.compactMap { $0 }.sink { [weak self] s in self?.ingest(s) }
+        updateAbout()
         refreshDetails()
+    }
+
+    /// Re-matches against the catalog (cheap: dictionary lookups) and publishes only a change.
+    private func updateAbout() {
+        guard let s = sample else { return }
+        let m = ProcessCatalog.shared.lookup(pid: identity.pid, name: s.name, path: s.path, signature: details?.signature)
+        if m != about { about = m }
+        if m.known == nil, startupItems == nil, !loadingStartupItems {
+            loadingStartupItems = true
+            Task.detached(priority: .utility) {
+                let items = Launchd.startupItems(includeLoginItems: false)
+                await MainActor.run { self.startupItems = items }
+            }
+        }
     }
 
     /// Called for every live snapshot on the main actor (via the Combine sink in init).
@@ -46,6 +67,7 @@ final class InspectorModel: ObservableObject {
         // start time (PID recycled) or no process at all counts as exited.
         if p == nil { exited = ProcessSampler.identity(of: identity.pid) != identity }
         if let p { sample = p; exited = false }
+        updateAbout()
         history = engine?.processHistory.series(identity) ?? []
         // A child must have started after this process; an older process with the same ppid would be a leftover from a
         // previous owner of the PID.
@@ -63,7 +85,7 @@ final class InspectorModel: ObservableObject {
         let pid = identity.pid, path = sample?.path ?? ""
         Task.detached(priority: .utility) {
             let d = ProcessInspector.details(pid: pid, path: path)
-            await MainActor.run { self.previousCounters = self.details?.counters; self.details = d }
+            await MainActor.run { self.previousCounters = self.details?.counters; self.details = d; self.updateAbout() }
         }
     }
 
@@ -117,6 +139,7 @@ struct InspectorView: View {
             // MaybeScroll so the window still renders in off-screen captures, where a ScrollView draws empty.
             MaybeScroll {
                 VStack(spacing: 12) {
+                    if let a = chromeTabs, !a.entries.isEmpty { ChromeTabsInspectorSection(attribution: a) }   // ChromeTabsInspector.swift
                     graphs
                     Picker("", selection: $tab) { ForEach(InspectorTab.allCases) { Text($0.rawValue).tag($0) } }
                         .pickerStyle(.segmented).labelsHidden()
@@ -145,7 +168,7 @@ struct InspectorView: View {
         .alert("\(confirm?.1 ?? "") “\(s?.name ?? "")”?", isPresented: Binding(get: { confirm != nil }, set: { if !$0 { confirm = nil } })) {
             Button(confirm?.1 ?? "OK", role: .destructive) { if let c = confirm { send(c.0) }; confirm = nil }
             Button("Cancel", role: .cancel) { confirm = nil }
-        } message: { Text("PID \(model.identity.pid). Unsaved work in this process may be lost.") }
+        } message: { Text("PID \(model.identity.pid). Unsaved work in this process may be lost." + (chromeTabs.flatMap(ChromeTabText.killWarning).map { "\n\($0)" } ?? "")) }
         .alert("Action failed", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) { Button("OK") {} } message: { Text(error ?? "") }
     }
 
@@ -157,13 +180,16 @@ struct InspectorView: View {
             AppIcon(path: s?.path ?? "").frame(width: 40, height: 40)
             VStack(alignment: .leading, spacing: 3) {
                 HStack {
-                    Text(s?.name ?? "—").font(.system(size: 17, weight: .semibold))
+                    if let l = chromeTabs.flatMap(ChromeTabLabel.init) { ChromeTabHeaderName(label: l) } else {
+                        Text(s?.name ?? "—").font(.system(size: 17, weight: .semibold))
+                    }
                     if model.exited { Text("EXITED").font(.caption.bold()).padding(.horizontal, 6).background(Capsule().fill(p.crit.opacity(0.3))) }
                     if let sig = model.details?.signature {
                         Label(sig.summary, systemImage: sig.valid ? "checkmark.seal" : "exclamationmark.triangle")
                             .font(.caption).foregroundStyle(sig.valid ? p.dim : p.warn)
                     }
                 }
+                if let e = model.about.known { Text(e.title).font(.caption).foregroundStyle(p.dim).lineLimit(1) }
                 Text(s?.path.isEmpty == false ? s!.path : "path unavailable").font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(p.dim).lineLimit(1).truncationMode(.middle).textSelection(.enabled)
             }
@@ -183,6 +209,7 @@ struct InspectorView: View {
                 Button("Sample Stacks (3 s)") { tab = .stacks; model.sampleStacks(seconds: 3) }
                 Button("Reveal in Finder") { if let s { NSWorkspace.shared.selectFile(s.path, inFileViewerRootedAtPath: "") } }.disabled(s?.path.isEmpty ?? true)
                 Button("Copy Summary") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(summaryText(s), forType: .string) }
+                    .help(chromeTabs == nil ? "Copies a text summary" : "Copies a text summary, including the Chrome tabs in this process (site and title, not the address)")
             }.frame(width: 100).disabled(model.exited)
         }
         .padding(14).background(p.panel).overlay(alignment: .bottom) { Divider() }
@@ -228,6 +255,7 @@ struct InspectorView: View {
     /// code signature and the process tree.
     @ViewBuilder func overview(_ s: ProcessSample?) -> some View {
         let d = model.details
+        whatIsThis(s)
         Panel(title: "Process") {
             Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 5) {
                 row("PID / parent", s.map { "\($0.pid) / \($0.ppid)" })
@@ -237,13 +265,14 @@ struct InspectorView: View {
                 row("Energy", s?.energyWatts.map { String(format: "%.2f W", $0) })
                 row("Idle wake-ups", s.map { String(format: "%.0f /s", $0.wakeups) })
                 // Disk counters of restricted (other-user/protected) processes can't be read, so show "—" rather than 0.
-                row("Disk total", s.map { $0.restricted ? nil : "read \(Fmt.bytes($0.diskRead)) · written \(Fmt.bytes($0.diskWritten))" } ?? nil)
+                row("Disk total", s.map { $0.valuesUnreadable ? nil : "read \(Fmt.bytes($0.diskRead)) · written \(Fmt.bytes($0.diskWritten))" } ?? nil)
                 row("Network total", s?.network.map { "↓ \(Fmt.bytes($0.totalIn)) · ↑ \(Fmt.bytes($0.totalOut)) · \($0.connections) connections" })
                 row("Priority (nice)", d?.nice.map { "\($0)" })
                 row("Working directory", d?.cwd.value)
                 row("Arguments", d?.arguments.value?.joined(separator: " "))
             }.font(.system(size: 12, design: .monospaced)).textSelection(.enabled)
         }
+        if let s { HelperInspectorPanel(sample: s) }   // other users' processes only, while the helper is on
         if let c = d?.counters { StatisticsPanel(c: c, prev: model.previousCounters, s: s) }
         if let sig = d?.signature {
             Panel(title: "Code signature") {
@@ -269,6 +298,39 @@ struct InspectorView: View {
                     }.buttonStyle(.plain).foregroundStyle(p.accent)
                 }
             }.font(.system(size: 12, design: .monospaced))
+        }
+    }
+
+    /// "What is this?": the catalog's explanation, or for a lookalike or unknown process only facts FlightDeck knows.
+    @ViewBuilder func whatIsThis(_ s: ProcessSample?) -> some View {
+        Panel(title: "What is this?") {
+            VStack(alignment: .leading, spacing: 6) {
+                switch model.about {
+                case .known(let e, _, let verified):
+                    Text(e.title).font(.system(size: 13, weight: .semibold))
+                    Text(e.summary).font(.system(size: 12)).fixedSize(horizontal: false, vertical: true)
+                    Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 5) {
+                        ForEach(ProcessCatalogText.inspectorRows(e), id: \.label) { r in row(r.label, r.value) }
+                    }.font(.system(size: 12))
+                    if !verified { Text("Matched by name only").font(.caption).foregroundStyle(p.dim) }
+                case .lookalike(let e, let reason):
+                    Text(ProcessCatalogText.lookalikeSentence(e, reason: reason, path: s?.path ?? "")).font(.system(size: 12)).foregroundStyle(p.warn)
+                        .fixedSize(horizontal: false, vertical: true)
+                    knownFacts(s)
+                case .unknown:
+                    knownFacts(s)
+                }
+            }.textSelection(.enabled)
+        }
+    }
+
+    @ViewBuilder func knownFacts(_ s: ProcessSample?) -> some View {
+        if let s {
+            let facts = ProcessFacts.lines(s, signature: model.details?.signature, ancestry: model.details?.ancestry ?? [],
+                                           startupItems: model.startupItems ?? [])
+            Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 5) {
+                ForEach(facts, id: \.label) { r in row(r.label, r.value) }
+            }.font(.system(size: 12))
         }
     }
 
@@ -387,10 +449,9 @@ struct InspectorView: View {
     /// Plain-text summary for the clipboard (Actions › Copy Summary).
     func summaryText(_ s: ProcessSample?) -> String {
         guard let s else { return "" }
-        var out = "\(s.name) (PID \(s.pid), parent \(s.ppid), user \(s.user))\n\(s.path)\n"
-        out += String(format: "CPU %.1f%%, memory %@, threads %d, CPU time %@\n", s.cpu, Fmt.bytes(s.memory), s.threads, Fmt.duration(s.cpuTime))
-        if let a = model.details?.arguments.value { out += "Arguments: \(a.joined(separator: " "))\n" }
-        if let sig = model.details?.signature { out += "Signature: \(sig.summary)\n" }
+        // Never the helper's contents of another user's process (they are live-only).
+        var out = ProcessSummaryText.make(s, details: model.details)
+        if let a = chromeTabs, !a.entries.isEmpty { out += ChromeTabText.summaryLines(a) + "\n" }   // site and title, never the URL
         return out
     }
 }

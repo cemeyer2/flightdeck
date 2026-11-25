@@ -34,6 +34,11 @@ public enum Connections {
     /// (p pid, c command, f fd, P protocol, n name, T TCP info). Returns [] if lsof can't run.
     public static func list() -> [ConnectionItem] {
         guard let out = Shell.run("/usr/sbin/lsof", ["-nP", "-i", "-FpcPnT"], timeout: 15) else { return [] }
+        return parse(out)
+    }
+
+    /// Parses `lsof -nP -i -FpcPnT` output (the app's own run, or the root helper's).
+    static func parse(_ out: String) -> [ConnectionItem] {
         var items: [ConnectionItem] = []
         var pid: Int32 = 0, cmd = "", proto = "", name = "", state = ""
         var seen: [String: Int] = [:]

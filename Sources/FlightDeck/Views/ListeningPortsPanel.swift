@@ -7,7 +7,7 @@ import FlightDeckCore
 
 struct ListeningPortsPanel: View {
     @Environment(\.palette) var p
-    @StateObject var loader = Loader { ListeningPorts.scan() }
+    @StateObject var loader = Loader { ListeningPorts.scan(helper: HelperModel.currentSession()) }
     @AppStorage("listeningPortsExpanded") private var expanded = true
 
     var body: some View {
@@ -38,8 +38,11 @@ struct ListeningPortsPanel: View {
         if let s = loader.value {
             // No `fixedSize(vertical:)`: inside the DisclosureGroup that let a near-zero width measurement report a huge
             // minimum height, which pushed the whole window's content (sidebar included) off screen.
-            Text(coverageText(s.coverage)).font(.system(size: 11)).foregroundStyle(p.dim).lineLimit(3)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            HStack {
+                Text(coverageText(s.coverage) + (s.viaHelper ? " Read by the helper." : "")).font(.system(size: 11)).foregroundStyle(p.dim).lineLimit(3)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                if case .ownProcessesOnly = s.coverage { HelperAccessButton() }
+            }
             // A fixed-height scrolling grid so the sockets table below keeps most of the window.
             MaybeScroll {
                 Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 4) {
@@ -71,7 +74,7 @@ struct ListeningPortsPanel: View {
         case .allProcesses:
             "Every process's listening sockets, from netstat. \"All interfaces\" means other devices on the network can connect unless the firewall blocks them."
         case .ownProcessesOnly(let why):
-            "Your own processes only: \(why), so this list comes from lsof, which can't see other users' or system services' sockets without root."
+            "Your own processes only: \(why), so this list comes from lsof, which can't see other users' or system services' sockets without root\(HelperAccessButton.offNote)."
         case .failed(let why):
             "Couldn't list listening ports: \(why)."
         }

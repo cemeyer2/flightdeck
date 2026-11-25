@@ -32,9 +32,9 @@ enum ChangeService {
     /// One check: read, compare, save, raise findings for notable changes. Blocking.
     @discardableResult
     static func check(_ store: ChangeStore) -> [ChangeEvent]? {
-        guard let events = store.check() else { return nil }
+        guard let events = store.check(helper: HelperModel.currentSession()) else { return nil }
         let f = ChangeFindings.findings(events)
-        if !f.isEmpty { ChangeWatch.shared.add(f) }
+        if !f.isEmpty { ChangeWatch.shared.add(f, dashboard: ChangeFindings.dashboardFindings(events)) }
         DispatchQueue.main.async { NotificationCenter.default.post(name: didCheck, object: nil) }
         return events
     }

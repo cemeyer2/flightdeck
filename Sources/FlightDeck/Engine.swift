@@ -22,13 +22,16 @@ final class Engine: ObservableObject {
     @Published private(set) var current: Snapshot?
     /// Always the latest live sample, even while replaying (menu bar, Dock, alerts).
     @Published private(set) var liveSnapshot: Snapshot?
+    /// Chrome tabs per renderer, beside the live sample (never inside it: tab data stays in memory). Demo mode sets it.
+    @Published var chromeTabs: [ProcessIdentity: ChromeTabAttribution] = [:]
+    private let chromeStore = ChromeTabsService.sharedStore, chromeResolver = ChromeTabsResolver()
     /// Graph history, oldest first, always `historyLength` long. `nil` entries are gaps (sampling was paused, or a hole
     /// in a replayed recording); graphs draw them as breaks rather than interpolating across. Processes are trimmed to the top 12
     /// by CPU to keep the array light; use `current` for the full list.
     @Published private(set) var frames: [Snapshot?] = Array(repeating: nil, count: Engine.historyLength)
     /// Pausing closes every open incident (we can't tell how long they lasted while unobserved); resuming pushes a
     /// gap so graphs show the unobserved stretch as a break.
-    @Published var paused = false { didSet { if !paused { pushGap() } else { queue.async { [incidentLog] in incidentLog.closeAll(at: Date()) } } } }
+    @Published var paused = false { didSet { if !paused { pushGap() } else { queue.async { [incidentLog, webFeed] in let now = Date(); incidentLog.closeAll(at: now); webFeed.closeAll(at: now) } } } }
     /// Sample interval in seconds while a window is visible.
     @AppStorage("interval") var interval: Double = 1.0 { didSet { restartTimer() } }
     /// Whether FlightDeck's own process is included in the process list.
@@ -74,6 +77,9 @@ final class Engine: ObservableObject {
     var unmutedLiveFindings: [Finding] { (liveFindings + reportFindings + sleepFindings).filter { !Alerts.shared.isMuted($0) } }
     /// Findings about the last sleep (many dark wakes, battery drain), from the power log after each wake.
     @Published private(set) var sleepFindings: [Finding] = []
+    /// The latest sample as the web dashboard may serve it; nil while the dashboard is off. Not @Published: only the
+    /// dashboard reads it, when its stream sink fires on `liveSnapshot`.
+    private(set) var webDashboard: WebDashboardData?
 
     /// Reads the power log off the main thread and refreshes `sleepFindings`.
     private func refreshSleepFindings() {
@@ -134,6 +140,8 @@ final class Engine: ObservableObject {
     /// Last `incidentLog.revision` published to `incidents`, so the log is only copied to the main actor when it changed.
     nonisolated(unsafe) private var incidentRevision = -1
     nonisolated(unsafe) private var lastIncidentSave = Date()
+    /// The web dashboard's own findings and incidents, which carry no helper values (see WebDashboardFeed).
+    nonisolated private let webFeed = WebDashboardFeed()
     // Evidence capture (confined to `queue`): one capture at a time, at most one per finding every 10 minutes.
     nonisolated(unsafe) private var evidenceBusy = false
     nonisolated(unsafe) private var lastEvidence: [String: Date] = [:]
@@ -185,7 +193,13 @@ final class Engine: ObservableObject {
         applyProbe()
         MetricsEndpoint.shared.configure(engine: self)   // Prometheus endpoint, if turned on in Settings
         MCPEndpoint.shared.configure(engine: self)       // MCP server for AI assistants, if turned on in Settings
+        // Optional root helper: its session fills in other users' counters while unlocked (never in demo mode).
+        if !Demo.isEnabled {
+            HelperModel.shared.onSessionChange = { [queue, sampler] s in queue.async { sampler.processes.helper = s } }
+            let s = HelperModel.currentSession(); queue.async { [sampler] in sampler.processes.helper = s }
+        }
         FleetService.shared.configure(engine: self)      // Fleet: share this Mac (if on) and poll paired Macs
+        WebDashboardEndpoint.shared.configure(engine: self)   // web dashboard for browsers on the local network, if turned on
         CameraMicService.start()   // camera & microphone listeners (event-driven; nothing in demo mode)
         PeripheralsService.start()   // plug/unplug notifications and accessory battery readings (nothing in demo mode)
         let r = rules; queue.async { [ruleEngine] in ruleEngine.rules = r }
@@ -194,6 +208,7 @@ final class Engine: ObservableObject {
         refreshSleepFindings()
         RestartsModel.launchCheck()   // once, ~30 s after launch: unexpected shutdowns and panics since the last check
         ChangeService.start()   // What Changed: an inventory ~90 s after launch, then every 15 minutes (nothing in demo mode)
+        ReleaseCheckModel.shared.start()   // update checks: hourly wake, checks only if on in Settings › About (nothing in demo mode)
         BackupService.start()   // Time Machine check every 15 min (log every 6 h); nothing in demo mode
         if !Demo.isEnabled { DisplayHistory.shared.start() }   // display connects and mode changes this session (callback, no polling)
         NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
@@ -392,7 +407,7 @@ final class Engine: ObservableObject {
 
     private func applyThresholds() {
         let cpu = appCPUThreshold
-        queue.async { [analyzer] in analyzer.thresholds.appCPU = cpu }
+        queue.async { [analyzer, webFeed] in analyzer.thresholds.appCPU = cpu; webFeed.thresholds.appCPU = cpu }
     }
 
     /// Maps a CPU index to performance/efficiency core kind (for per-core graphs).
@@ -426,24 +441,34 @@ final class Engine: ObservableObject {
         let includeSelf = self.includeSelf
         let visible = uiVisible
         let front = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        let web = WebDashboardEndpoint.shared.isOn
         resumeSuspended()
-        queue.async { [sampler, analyzer, incidentLog, ruleEngine, dailyLog] in
+        queue.async { [sampler, analyzer, incidentLog, ruleEngine, dailyLog, chromeStore, chromeResolver, webFeed] in
             sampler.processes.includeSelf = includeSelf
             sampler.networkInterval = visible ? 0 : 5   // per-process network every 5 s while no window is visible
             sampler.background = !visible
             let s = sampler.sample()
+            var tabs: [ProcessIdentity: ChromeTabAttribution] = [:]
+            if !chromeStore.isEmpty {   // feature off or nothing connected: zero added work
+                chromeStore.prune(liveBrowsers: Set(s.processes.map(\.identity)))
+                tabs = chromeResolver.resolve(processes: s.processes, tables: chromeStore.tables())
+            }
             self.processHistory.record(s.processes)
             self.launchLog.ingest(s.processes, at: s.time)
             // Respawn loops and baseline findings ("3× its usual memory") join the Analyzer's, so they reach the banner,
             // alerts and the Flight Log the same way.
-            let found = analyzer.ingest(s) + dailyLog.ingest(s) + self.launchLog.findings(now: s.time) + self.thermal.ingest(s)
+            // The web dashboard gets the same sources (each is evaluated once), minus per-app baselines and changes only
+            // the helper could read: see WebDashboardFeed.
+            let analyzed = analyzer.ingest(s), baselines = dailyLog.ingest(s)
+            let before = self.launchLog.findings(now: s.time) + self.thermal.ingest(s)
                 + CameraMicService.findings(now: s.time)   // opt-in camera & mic alerts
                 + DestinationService.findings(now: s.time)   // opt-in "new destination" alerts
                 + RestartWatch.shared.findings(now: s.time)   // one-shot: unexpected shutdown or panic since last launch
-                + ChangeWatch.shared.findings(now: s.time)   // notable changes: unsigned launch agent, new extension or profile…
-                + BackupWatch.shared.findings()   // no successful Time Machine backup for days (refreshed every 15 min)
+            let changes = ChangeWatch.shared.findings(now: s.time)   // notable changes: unsigned launch agent, new extension or profile…
+            let after = BackupWatch.shared.findings()   // no successful Time Machine backup for days (refreshed every 15 min)
                 + FleetWatch.shared.findings()   // a paired Mac in trouble (set by the Fleet poll)
                 + PeripheralsService.findings(now: s.time)   // once per plug-in: slow drive; once per discharge: low accessory
+            let found = analyzed + baselines + before + changes + after
             self.chargeCurve.ingest(s)
             ruleEngine.frontmostPID = front
             let firings = ruleEngine.evaluate(s)
@@ -454,6 +479,8 @@ final class Engine: ObservableObject {
             if s.time.timeIntervalSince(self.lastIncidentSave) > 60 { incidentLog.save(); self.lastIncidentSave = s.time }
             let log: [Incident]? = incidentLog.revision != self.incidentRevision ? incidentLog.incidents : nil
             self.incidentRevision = incidentLog.revision
+            let webData = webFeed.ingest(s, enabled: web, analyzed: analyzed,
+                                         others: web ? before + ChangeWatch.shared.dashboardFindings(now: s.time) + after : [])
             Task { @MainActor in
                 // publish only real changes (each publish re-evaluates every observing view)
                 if found.map(\.signature) != self.liveFindings.map(\.signature) { self.liveFindings = found }
@@ -461,6 +488,8 @@ final class Engine: ObservableObject {
                 Alerts.shared.evaluate(found + self.reportFindings + self.sleepFindings, now: s.time)
                 firings.forEach { self.execute($0) }
                 if let log { self.incidents = log }
+                if tabs != self.chromeTabs { self.chromeTabs = tabs }
+                self.webDashboard = webData   // before `ingest`, whose liveSnapshot update feeds dashboard streams
                 self.ingest(s)
             }
         }
@@ -662,7 +691,7 @@ final class Engine: ObservableObject {
     }
 
     /// Clears the persisted incident log on the queue and the published copy immediately.
-    func clearIncidents() { queue.async { [incidentLog] in incidentLog.clear() } ; incidents = [] }
+    func clearIncidents() { queue.async { [incidentLog, webFeed] in incidentLog.clear(); webFeed.clearIncidents() } ; incidents = [] }
 
     func clearBlackBox() { blackBoxQueue.async { [blackBox] in blackBox.clear() } }
 

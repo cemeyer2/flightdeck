@@ -137,6 +137,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         if !Demo.isEnabled { Alerts.shared.start() }   // demo mode never posts notifications
+        ChromeTabsService.shared.startIfEnabled()   // no-op in demo mode
     }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
         if !hasVisibleWindows { AppActions.showMain() }
@@ -272,15 +273,22 @@ struct SettingsView: View {
                 Text("FlightDeck sends no data off this Mac. It only uses the network when you ask: latency pings (if on above), "
                      + "device discovery while the Network or UPnP page is open, scans and traceroutes you start there, and your "
                      + "UniFi console once you've set it up, and speed tests you run or schedule (against Apple's test servers). The metrics and MCP servers listen on this Mac only. "
-                     + "Fleet (if you share this Mac or pair with one) talks only to your paired Macs on the local network.")
+                     + "Fleet (if you share this Mac or pair with one) talks only to your paired Macs on the local network."
+                     + " Update checks, if on in Settings › About, ask GitHub once a day for the latest release; Check Now there asks once when clicked, even with them off."
+                     + " The web dashboard (off by default) serves this Mac's readings to browsers on your local network, and only there unless you allow more.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             .tabItem { Label("Network", systemImage: "network") }
             tab {
                 MetricsExportSection()
                 MCPSection()
+                ChromeTabsSettingsSection()
+                WebDashboardSection()
+                HelperSettingsSection()
             }
             .tabItem { Label("Integrations", systemImage: "puzzlepiece.extension") }
+            tab { AboutSettingsSection() }
+            .tabItem { Label("About", systemImage: "info.circle") }
         }
         .frame(width: 600, height: 560)
         // Poll black box disk usage while Settings is open; it changes as samples are written.

@@ -67,31 +67,6 @@ public struct AppUsage: Sendable, Identifiable, Hashable {
     }
 }
 
-/// Plain-English explanations for well-known macOS background work, used as the detail text of analyzer findings
-/// so a busy system daemon reads as expected work rather than a problem.
-public enum KnownProcess {
-    static let table: [(match: [String], text: String)] = [
-        (["mds", "mds_stores", "mdworker", "mdworker_shared", "mdsync"], "Spotlight is indexing files. It finishes on its own, usually after big copies or updates."),
-        (["backupd", "backupd-helper"], "Time Machine is backing up."),
-        (["photoanalysisd", "photolibraryd", "mediaanalysisd"], "Photos is analysing your library (faces, scenes). It runs mostly when the Mac is idle or charging."),
-        (["softwareupdated", "softwareupdate_download_service", "mobileassetd"], "macOS is downloading or preparing a software update."),
-        (["kernel_task"], "kernel_task is macOS itself. High CPU here is often deliberate: it keeps the CPU busy to slow other work and cool the Mac down."),
-        (["WindowServer"], "WindowServer draws everything on screen. It rises with many windows, displays, or animations."),
-        (["bird", "cloudd", "fileproviderd", "nsurlsessiond"], "iCloud is syncing files."),
-        (["XprotectService", "XProtect", "syspolicyd", "trustd"], "macOS is scanning apps for malware or checking signatures."),
-        (["corespotlightd", "suggestd", "knowledge-agent"], "macOS is updating Siri and Spotlight suggestions."),
-        (["Google Chrome Helper", "Google Chrome Helper (Renderer)"], "Chrome runs each tab and extension as a separate helper process."),
-        (["com.apple.WebKit.WebContent"], "A Safari (or WebKit) tab or web view is busy."),
-        (["coreaudiod"], "The audio system is busy."),
-        (["launchd"], "launchd starts and stops system services."),
-    ]
-    /// Exact (case-sensitive) process-name lookup; nil for anything not in the table.
-    public static func explain(_ name: String) -> String? {
-        table.first { $0.match.contains(name) }?.text
-    }
-}
-
-
 /// Exact per-app totals from cumulative per-process counters (CPU time, energy, disk bytes) in recorded frames.
 /// The black box keeps only the busiest processes and, in its 24 h tier, one frame per 10 s; integrating *rates* over
 /// that undercounts and is biased by bursts. A cumulative counter's difference between any two appearances of the same

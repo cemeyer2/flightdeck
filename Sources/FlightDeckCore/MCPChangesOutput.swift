@@ -15,8 +15,9 @@ extension MCPTools {
         let limit = try a.int("limit", default: 100, 1...500)
         let report = await Task.detached(priority: .utility) { ChangeStore(dir: ChangeStore.defaultDirectory, readOnly: true).report }.value
         let from = since ?? now().addingTimeInterval(-Double(days) * 86_400)
-        return Self.systemChangesJSON(report, since: from, kinds: Set(kinds.compactMap { k in ChangeCategory.allCases.first { $0.slug == k } }),
-                                      notableOnly: notable, limit: limit, now: now())
+        let json = Self.systemChangesJSON(report, since: from, kinds: Set(kinds.compactMap { k in ChangeCategory.allCases.first { $0.slug == k } }),
+                                          notableOnly: notable, limit: limit, now: now())
+        return withHelper(json, await source.helperAccess())
     }
 
     static func parseTime(_ s: String) -> Date? {

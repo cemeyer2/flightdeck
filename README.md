@@ -65,6 +65,7 @@ by showing which process and which subsystem is responsible.
     - [Benchmarks](#benchmarks)
 - [Recording and replay](#recording-and-replay)
 - [Everywhere in the app](#everywhere-in-the-app)
+  - [System-wide details (privileged helper)](#system-wide-details-privileged-helper)
 - [Integrations](#integrations)
 - [Measurement principles](#measurement-principles)
 - [Known limits](#known-limits)
@@ -90,6 +91,7 @@ These are taken in demo mode, which feeds the real UI invented data (a busy "Dem
 | ![Displays](docs/screenshots/displays.jpg) **Displays:** modes, ProMotion, HDR and the video link, with why it's stuck at 30 Hz | ![Peripherals](docs/screenshots/peripherals.jpg) **Peripherals:** link speeds with what's slowing a drive down, and accessory batteries |
 | ![Developer](docs/screenshots/developer.jpg) **Developer:** dev servers, containers, Homebrew services, builds and toolchains | ![Rules](docs/screenshots/rules.jpg) **Rules:** automatic responses to sustained problems |
 | ![Cockpit editing](docs/screenshots/cockpit-edit.jpg) **Cockpit editing:** add, remove, reorder and resize instruments; save layouts | ![Ambient mode](docs/screenshots/ambient.jpg) **Ambient mode:** a dim full-screen instrument panel for a second display |
+| ![Web dashboard](docs/screenshots/web-dashboard.jpg) **Web dashboard:** this Mac's live readings in a phone's browser, read-only | |
 
 ## Build & run
 
@@ -289,7 +291,7 @@ FlightDeck takes an inventory, compares it with the previous one and records eac
   program each runs, whether it starts at login or boot, who signed it;
 - **system extensions** (`systemextensionsctl list`) and loaded **kernel extensions** (`kmutil showloaded`), third-party only;
 - **configuration profiles**: your user's profiles (`profiles list`), DEP/MDM enrollment and the managed-settings
-  domains in `/Library/Managed Preferences`. Profiles installed for the whole Mac can only be listed with root;
+  domains in `/Library/Managed Preferences`. Profiles installed for the whole Mac can only be listed with root (the [helper](#system-wide-details-privileged-helper), while unlocked);
 - **sharing services**: Remote Login, Screen Sharing, File Sharing, Remote Apple Events and Internet Sharing on or
   off (launchd's override database);
 - **apps** outside `/System` (the Installed Apps inventory): installed, updated or removed, with version, bundle ID,
@@ -303,7 +305,7 @@ why it may matter. Notable changes are flagged and raised once as findings: unsi
 program in a temporary, shared, hidden or home folder, a new third-party system or kernel extension, a new profile or
 managed setting, an MDM enrollment, a sharing service turned on. The first inventory is the baseline and raises
 nothing, as does a category the first time it can be read. Items link to Startup Apps, Installed Apps or Checkup.
-Login items and SMAppService background items aren't tracked (listing them needs Automation permission or root).
+Login items and SMAppService background items aren't tracked (listing them needs Automation permission or root), except while the [helper](#system-wide-details-privileged-helper) is unlocked.
 
 ### Activity
 
@@ -332,6 +334,15 @@ parent and children, user, start time, CPU time, energy, wake-ups, arguments, wo
 and TCP state, threads (CPU, state, priority, times), the environment, and call-stack sampling via
 `/usr/bin/sample` to see why it's busy or hung. Actions: quit, force quit, suspend, resume, lower priority (nice).
 Anything macOS doesn't let a normal user read for other users' processes is shown as unavailable.
+
+**What is this process?** The inspector's "What is this?" panel, the Processes tooltips (and "What Is This?" in a row's
+menu), findings and the MCP `get_process` tool explain what a process is, who makes it, when it's normally busy and
+whether quitting it helps. The explanations come from a catalog bundled with FlightDeck, so nothing is looked up
+online, and each entry cites the man page, launchd plist or documentation it was written from. A process the catalog
+doesn't know shows only facts FlightDeck already has (signer, app, what launched it). Security and device-management
+software is marked "Managed by your organisation" and is never suggested for quitting. Other users' and system
+processes are matched by name only unless the privileged helper is installed and FlightDeck is unlocked. A program
+named like part of macOS but running from somewhere else is flagged in the inspector.
 
 #### Connection quality
 
@@ -617,7 +628,7 @@ name or IP). The process inspector's Network tab shows the same list for the ins
 
 #### Connections
 
-Your processes' network sockets as a sortable, filterable table (process, PID, protocol, local and remote address,
+Your processes' network sockets (every process's, with the [helper](#system-wide-details-privileged-helper) unlocked) as a sortable, filterable table (process, PID, protocol, local and remote address,
 state), refreshed every few seconds, with the listening-ports panel on top (see Known limits for what it can see).
 
 #### UPnP
@@ -701,7 +712,7 @@ bar, from `diskutil apfs list -plist` and `diskutil info -plist /` (no root): yo
 for important usage" minus available), the sealed macOS volume, Preboot, Recovery, swap (VM), Update, APFS overhead and
 free, each explained. What Storage settings calls "System Data" is mostly the Data volume's caches, snapshots and app
 files, and this view says so. Local Time Machine snapshots (`tmutil listlocalsnapshots /`) are listed with dates; their
-sizes need root, so they show as unknown. Below that, **known space hogs**: app caches, logs, the Trash, old downloads,
+sizes need root, so they show as unknown (unless the [helper](#system-wide-details-privileged-helper) is unlocked). Below that, **known space hogs**: app caches, logs, the Trash, old downloads,
 iPhone/iPad backups, Xcode DerivedData, archives, device support and previews, simulator devices and runtimes (`simctl`
 from the selected Xcode, never the `xcrun` shim, which can pop up an install dialog), Docker/OrbStack/Colima disk images,
 the Homebrew cache (`brew --cache`), npm/Yarn/pnpm/pip/Cargo/Gradle caches, Mail downloads, Messages attachments, the
@@ -830,7 +841,7 @@ and domain, with a running-only filter and a Copy Label action.
 #### Users
 
 Who is logged in (console and remote sessions, with login times) and resource use by user. Other users' processes
-need root to measure, which the page says.
+need root to measure, which the page says (with the [helper](#system-wide-details-privileged-helper) unlocked, they are included).
 
 ### Tools
 
@@ -905,9 +916,9 @@ elapsed time, and which apps' CPU use changed.
 
 ### Settings and appearance
 
-Settings has five tabs: **General** (theme, Dock icon, sample interval, temperature unit °C/°F, Stress Map animation,
+Settings has six tabs: **General** (theme, Dock icon, sample interval, temperature unit °C/°F, Stress Map animation,
 menu bar), **Alerts** (notifications, thresholds, mutes, temperature and camera/mic alerts), **Recording** (the black
-box), **Network** (latency probe, speed-test schedule, UniFi) and **Integrations** (Prometheus and MCP). Themes: Light,
+box), **Network** (latency probe, speed-test schedule, UniFi), **Integrations** (Prometheus and MCP) and **About** (version, update checks). Themes: Light,
 Dark, **System** (follows macOS's appearance and switches with it), and four single-hue phosphor looks (green, amber,
 blue, mono). FlightDeck › About shows the version.
 
@@ -940,6 +951,42 @@ command (record, save or replay the black box, open a flight log, capture diagno
 reports from the last 24 hours, 2-second stack samples of the busiest and any hung app of yours, and recent unified-log
 errors. It may contain personal paths and names, so review it before sharing.
 
+### Update checks
+
+*Settings › About, off by default.* When on, FlightDeck asks `api.github.com` once a day for the latest stable release;
+the request carries no version or device data, and nothing is downloaded. Check Now asks once, even with it off. The
+result shows in Settings › About with a link to the release page, and a new version posts one notification (only while
+the master Alerts switch is on; the Settings notice shows either way). Never in demo mode or on development builds.
+
+### System-wide details (privileged helper)
+
+*Settings › Integrations › System-wide details. Off by default.* macOS lets an app see only your own processes in full.
+Turning on "Allow FlightDeck to read system-wide details (installs a helper that runs as root)" registers a small,
+read-only helper (macOS asks you to allow it in System Settings › Login Items). Once an administrator unlocks it,
+FlightDeck also shows other users' and system processes' CPU, memory, disk, energy and wake-ups (and the Users page's
+totals), every process's listening ports and connections, local snapshot sizes, configuration profiles installed for
+the whole Mac and Login Items background items; the inspector shows other processes' arguments, working folder, open
+files and sockets live, and can sample their stacks or memory once on request (the process pauses briefly;
+WindowServer, launchd, kernel_task, coreaudiod and loginwindow are never sampled). Values from the helper say "via
+helper" in tooltips.
+
+- **Developer ID builds only.** The helper runs as root, so FlightDeck only installs it from a build signed with a
+  Developer ID. Locally built copies and the current GitHub release downloads are ad-hoc signed and show
+  "Needs a signed build"; everything else works as usual. A Developer ID copy run from Downloads or a disk image shows "Move
+  FlightDeck to Applications first".
+- **Administrator unlock.** Root data appears only after "View all processes…" (Processes, Connections, the inspector)
+  or Unlock in Settings, and macOS's administrator name-and-password dialog; any account can unlock with an
+  administrator's credentials. The unlock lasts until FlightDeck quits, or until Lock. Nothing prompts at launch, and an
+  AI agent can never trigger the prompt.
+- **Read-only.** No request can change anything, signal a process or run anything but a fixed list of Apple tools.
+- **Contents are never saved.** Arguments, environment, open files, stacks and memory breakdowns read through the helper
+  are shown live only: never in recordings, the black box, the Flight Log, Fleet, Prometheus, Copy Summary or evidence
+  files. Counters (CPU, memory, disk, energy) persist like today's values. The web dashboard never shows helper data.
+- **AI assistants (MCP)** get counters while FlightDeck is unlocked, and other processes' contents only with "Let AI
+  agents read other processes' details" turned on (off by default); outputs say `"helper": "off" | "locked" |
+  "unlocked"`. While FlightDeck is unlocked, any program running as you can use MCP (or `FlightDeck --mcp`) to read
+  those counters.
+
 ## Integrations
 
 ### AI assistants (MCP)
@@ -953,7 +1000,7 @@ errors. It may contain personal paths and names, so review it before sharing.
 | `triage` | one call for "what's wrong right now?": every current problem (findings, ongoing Flight Log incidents, crashes/hangs/panics of the last 24 h, unexpected restarts of the last 7 days, memory pressure, heat, a full disk, low battery) ranked by severity, each with evidence numbers and the next tool to call with its arguments; plus the headline readings |
 | `get_status` | findings in plain English, CPU/memory/swap/disk/network/power/thermal/GPU, top apps by CPU, memory and energy, Stress Map top causes |
 | `list_processes` | processes or apps as a table; `sort`, `limit`, `filter` (the Processes filter syntax, e.g. `cpu>50 user:root`), `by_app` |
-| `get_process` | one PID: identity, path, user, parent chain, CPU, memory, energy, disk, network, listening ports, open files, code signature; optional arguments/files/sockets/threads |
+| `get_process` | one PID: identity, path, user, parent chain, CPU, memory, energy, disk, network, listening ports, open files, code signature; optional arguments/files/sockets/threads; about (what the process is, from FlightDeck's catalog) |
 | `sample_stacks` | 1–5 s of `/usr/bin/sample` on one of *your* processes: main-thread summary and heaviest path |
 | `recent_incidents` | the Flight Log over the last N hours |
 | `diagnostic_reports` | macOS crash, hang, memory-kill and resource-limit reports, with counts by kind and process |
@@ -1103,6 +1150,27 @@ pressure, swap, disk and network rates, system watts, hottest temperature, therm
 the top 20 processes by CPU (`name`, `pid` labels). Unmeasured values are omitted, never exported as 0. It does no work
 between scrapes.
 
+### Web dashboard
+
+*Settings › Integrations › Web dashboard, off by default.* FlightDeck serves a live, read-only page to browsers on your
+local network at `http://<this Mac's address>:9466/` (port configurable; Settings shows the addresses, a Copy button
+for each and a QR code for a phone). It shows the annunciator, current findings, CPU, memory, thermals, disk, network,
+energy and battery with 30-minute sparklines, and the busiest apps by name with their CPU, memory and energy. The page
+is labelled with the name you set in Settings, which defaults to the model name ("MacBook Pro"), never the computer
+name. `/api/state` returns the same data as JSON and `/api/stream` as Server-Sent Events.
+
+- **Who can connect.** By default, only addresses on the local network, arriving over Wi-Fi or Ethernet. "Allowed
+  addresses" narrows that to listed addresses and ranges (`192.168.1.0/24`, `192.168.1.42`, `fd00::/8`), with one-click
+  suggestions: this Mac's subnets, your UniFi console's networks if UniFi is set up, and "Allow my tailnet" when
+  Tailscale is detected. Under Advanced, "Allow addresses outside the local network" lets listed non-local addresses in
+  too, with a warning; without it they are ignored even when listed.
+- **What it says plainly:** "No password and no encryption. Anyone on an allowed network can see this Mac's readings,
+  findings and the names of running apps. Read-only: nothing can be changed from the browser."
+- **What it never shows:** PIDs, paths, user names, command lines, camera and microphone use, network destinations,
+  Chrome tabs, anything only the privileged helper can see, or process contents. Findings are redacted as for Fleet.
+- **Cost:** nothing runs while no browser is open beyond the listening socket; an open page gets each published sample
+  (every 5 s while FlightDeck has no window open).
+
 ### Command line
 
 The app binary doubles as a CLI
@@ -1123,6 +1191,45 @@ flightdeck --bench-ui [N]           # render every main view off-screen N times 
 
 Six themes: Light, Dark, Green, Amber, Blue, Mono.
 
+### Chrome tabs
+
+Chrome runs each tab in a helper process, so the Processes page normally shows a dozen rows all called
+`Google Chrome Helper (Renderer)`. With **Chrome tabs** on (Settings › Integrations, off by default) and the small
+**FlightDeck Tabs** extension loaded in Google Chrome, those rows name the tab instead:
+`youtube.com — Lofi beats to study to (Chrome tab)`. A process that hosts several tabs shows the first one plus
+"+2 more tabs" (the tooltip lists them all), a frame from another site shows as `ads.example.net — frame in youtube.com
+tab`, and extension processes as `Chrome extension process`. The process inspector lists every tab in the process with
+its address, the quit confirmation says which tabs would close, the Processes filter matches tab sites and titles, and a
+Chrome CPU finding gains a line such as "Mostly: youtube.com — Lofi (120%)". A process shared by several tabs is shown
+with its whole CPU figure, marked shared, never split between them.
+
+Setting it up (Load unpacked):
+
+1. Turn on Chrome tabs in Settings › Integrations and click **Set up…**. FlightDeck copies the extension to
+   `~/Library/Application Support/Flightdeck/ChromeExtension`, shows that folder in Finder and opens
+   `chrome://extensions`.
+2. In `chrome://extensions`, turn on **Developer mode**, click **Load unpacked** and choose the `ChromeExtension` folder.
+   Chrome shows warnings about developer-mode extensions; that is expected for an extension loaded this way.
+3. The status line moves from "Waiting for the extension" to "Connected, N tabs". If it never connects, your
+   organisation may block developer mode or unpacked extensions (`chrome://policy`).
+
+When FlightDeck is updated with a newer extension, Settings says "Extension updated — click Reload for FlightDeck Tabs
+in chrome://extensions". Turning Chrome tabs off removes everything FlightDeck installed (the native-messaging manifest
+and the copied folder); remove FlightDeck Tabs in `chrome://extensions` yourself.
+
+**About Chrome's "Read your browsing history" warning.** Chrome shows it for any extension with the `tabs` and
+`webNavigation` permissions, which FlightDeck Tabs needs to see which tab runs in which process. Those, plus
+`nativeMessaging` to talk to FlightDeck, are its only permissions: it has no access to page content and accepts no
+messages from websites or other extensions. It sends the tab list only to FlightDeck on this Mac. FlightDeck keeps tab
+titles and addresses in memory while it runs; they are never saved (not in the black box, recordings, the Flight Log,
+notifications or Fleet) and never leave the Mac. AI assistants (MCP) see only site names; an IP address shows as "IP
+address", and a single-label name (`wiki`, `localhost`) or one ending in `.local`, `.lan`, `.internal` or `.home.arpa`
+shows as "local network host". Other names, including company intranet names such as `jira.corp.example.com`, are
+passed on as they are. **Copy Summary** in the inspector includes each tab's site and title, never its address.
+
+Google Chrome stable only; FlightDeck must run from a bundled `FlightDeck.app` (not a `swift build` binary) and not from
+a disk image.
+
 ## Measurement principles
 
 - **No invented zeros.** Every value is `Measured<T>`, either `.value` or `.unavailable(reason)`. Unmeasured
@@ -1132,9 +1239,8 @@ Six themes: Light, Dark, Green, Amber, Blue, Mono.
 - **Light in the background.** With no FlightDeck window on screen, view updates stop (graphs catch up instantly when you return) and sampling drops to every 2 s (Settings); the black box, findings and alerts keep running. Background cost is about 2.5% of one core.
 - **Self-monitoring.** FlightDeck appears in its own process list by default (Settings → toggle).
 - **Identity-safe actions.** Signals are sent only if the PID still has the same start time (`ProcessIdentity`).
-- **Private by design.** FlightDeck sends no data anywhere. By default it makes no network requests at all; the only exception is the opt-in latency probe (Settings › Network › Network quality), which pings your router and one host you choose. The opt-in Prometheus and MCP servers only accept connections from this Mac.
-
-- **Private by design.** FlightDeck sends no data anywhere. By default it makes no network requests at all; the exceptions are the opt-in latency probe (Settings › Network › Network quality), which pings your router and one host you choose, and the UniFi view, which talks only to the console you configure (and, while nothing is configured, checks whether your router looks like one). The Camera & Mic history records only that a device was in use, never audio
+- **Chrome tabs stay in memory.** Tab titles and URLs are never saved or shared; AI assistants see sites, not pages, and IP addresses and local network names (single-label, or ending in .local, .lan, .internal or .home.arpa) are generalised; other intranet names are not.
+- **Private by design.** FlightDeck sends no data anywhere. By default it makes no network requests at all; the exceptions are the opt-in latency probe (Settings › Network › Network quality), which pings your router and one host you choose, the UniFi view, which talks only to the console you configure (and, while nothing is configured, checks whether your router looks like one), and update checks (Settings › About, off by default), which ask GitHub once a day for the latest release; Check Now there asks once when clicked, even with them off. The opt-in Prometheus and MCP servers only accept connections from this Mac. The opt-in web dashboard serves this Mac's readings unencrypted and without a password to allowed addresses — the local network unless you allow your tailnet or, under Advanced, other addresses. The optional root helper's process contents are never saved; MCP gets them only with their own setting on. The Camera & Mic history records only that a device was in use, never audio
 or video, and never leaves this Mac.
 
 ## Known limits
@@ -1146,7 +1252,8 @@ or video, and never leaves this Mac.
 - Live CPU and GPU clocks come from IOReport (Performance › GPU › CPU clusters); Power & Freq shows the DVFS tables.
 - Connections lists only your own processes' sockets, since `lsof` runs without root. The listening-ports panel would
   list every process's via `netstat`, but macOS gives an ad-hoc-signed app an empty socket table, so it falls back to
-  your own processes (and says so).
+  your own processes (and says so). The [helper](#system-wide-details-privileged-helper) lifts both limits while
+  unlocked, on Developer ID builds only.
 - The Network, UPnP and Internet pages need macOS's Local Network permission. macOS ties that permission to the app's
   signature, and an ad-hoc-signed build gets a new one each time it's rebuilt, so a rebuilt copy may need to be allowed
   again (System Settings › Privacy & Security › Local Network). Without it the ARP table and Bonjour come back empty.
@@ -1162,6 +1269,19 @@ or video, and never leaves this Mac.
 - The CPU speed limit comes from `pmset -g therm`, which runs only while Performance › Thermals is open, so throttling
   by the power manager is only seen (and only counted toward "time throttled") then; thermal pressure and the GPU
   heat cap are tracked all the time.
+- Chrome tabs: work in Chrome's shared processes (the GPU process, which decodes video, and the network service) isn't
+  attributed to tabs. Google Chrome stable only. A renderer shared by several tabs isn't split between them, and a
+  label can lag a navigation within the same process by about a second.
+- The web dashboard is plain HTTP: anything on the network path can read it. Over a tailnet the tunnel encrypts it in
+  transit, but every allowed tailnet device can read it.
+- macOS's application firewall, if on, asks once whether FlightDeck may accept incoming connections, and asks again
+  after an ad-hoc-signed rebuild.
+- A router port forward to the dashboard is refused by its Host check, even with Advanced on. Tailnet access works by
+  IP address, not by MagicDNS name.
+- A raw TCP forwarder run on this Mac (`ssh -R`, socat) can expose the dashboard, since its clients reach it as this
+  Mac itself.
+- VPN peers aren't "local" for the dashboard even when their addresses are private.
+- Refused dashboard connections are logged to Console under the category `web-dashboard`.
 
 ## Layout
 

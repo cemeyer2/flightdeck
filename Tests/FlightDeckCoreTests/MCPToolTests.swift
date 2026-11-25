@@ -146,6 +146,43 @@ final class MCPToolTests: XCTestCase {
         XCTAssertTrue(missing.isError); XCTAssertTrue(missing.text.contains("pid is required"))
     }
 
+    /// `about` says what a process is from the catalog; a lookalike reads exactly like an unknown process (E3).
+    func testGetProcessAbout() async throws {
+        let src = FakeSource(); var s = snapshot()
+        s.processes += [proc("mdworker_shared", path: ProcessCatalogTests.mdworkerPath, pid: 50, cpu: 1, mem: 1 << 20),
+                        proc("falcond", path: "/Library/CS/falcond", pid: 51, cpu: 1, mem: 1 << 20),
+                        proc("mdworker_shared", path: NSHomeDirectory() + "/Downloads/mdworker_shared", pid: 52, cpu: 1, mem: 1 << 20),
+                        proc("coreaudiod", path: "", pid: 53, cpu: 1, mem: 1 << 20),
+                        proc("Google Chrome", path: ProcessCatalogTests.chromeMain, pid: 54, cpu: 1, mem: 1 << 20)]
+        src.snap = s
+        var t = tools(src); t.catalog = ProcessCatalogTests.fixture()
+        func about(_ pid: Int32) async throws -> JSON? { try await call(t, "get_process", ["pid": .int(Int(pid))])["about"] }
+        let a0 = try await about(50), m0 = try await about(51)
+        let a = try XCTUnwrap(a0)
+        XCTAssertEqual(a["known"]?.bool, true)
+        XCTAssertEqual(a["title"]?.string, "Title mdworker")
+        XCTAssertEqual(a["summary"]?.string, "Summary of mdworker.")
+        XCTAssertEqual(a["maker"]?.string, "Apple")
+        XCTAssertEqual(a["maker_is_apple"]?.bool, true)
+        XCTAssertEqual(a["managed"]?.bool, false)
+        XCTAssertEqual(a["busy_when"]?.string, "Busy after mdworker work.")
+        XCTAssertEqual(a["quit"]?.string, "relaunches")
+        XCTAssertEqual(a["what_to_do"], .null)
+        XCTAssertEqual(a["matched_by"]?.string, "name")
+        XCTAssertEqual(a["path_verified"]?.bool, true)
+        let m = try XCTUnwrap(m0)
+        XCTAssertEqual(m["managed"]?.bool, true); XCTAssertEqual(m["maker_is_apple"]?.bool, false); XCTAssertEqual(m["maker"]?.string, "CrowdStrike")
+        let look = try await about(52)
+        XCTAssertEqual(look, ["known": false])
+        let r = await t.call("get_process", arguments: ["pid": 52])
+        XCTAssertFalse(r.text.contains("Named like"))
+        let unknown = try await about(getpid()), nameOnly = try await about(53)
+        XCTAssertEqual(unknown, ["known": false])
+        XCTAssertEqual(nameOnly?["path_verified"]?.bool, false)
+        let app = try await about(54)
+        XCTAssertEqual(app?["quit"]?.string, "app", "an ordinary app the user opened")
+    }
+
     func testSampleStacksOnlyOwnProcesses() async throws {
         let src = FakeSource(); src.snap = snapshot()
         let t = tools(src)

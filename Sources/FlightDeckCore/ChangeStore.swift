@@ -54,10 +54,10 @@ public final class ChangeStore: @unchecked Sendable {
     }
 
     /// Reads this Mac, compares and saves. Returns nil if a check is already running. Blocking; call off the main thread.
-    public func check(now: Date = Date()) -> [ChangeEvent]? {
+    public func check(now: Date = Date(), helper: HelperSession? = nil) -> [ChangeEvent]? {
         guard checking.try() else { return nil }
         defer { checking.unlock() }
-        let events = ingest(ChangeReaders.read(previous: latest, now: now))
+        let events = ingest(ChangeReaders.read(previous: latest, now: now, helper: helper))
         save()
         return events
     }
@@ -93,18 +93,35 @@ public enum ChangeFindings {
                            title: e.summary, detail: e.reasons.joined(separator: "; ").capitalizedFirst, since: e.detected, destination: destination)
         }
     }
+
+    /// The same, for the web dashboard, which may show nothing the helper read: changes to Mac-wide profiles and Login
+    /// Items background records are left out (a user-readable computer-level profile has the same scope and is left
+    /// out too).
+    public static func dashboardFindings(_ events: [ChangeEvent]) -> [Finding] {
+        findings(events.filter { e in
+            !([e.item] + [e.previous].compactMap { $0 }).contains { ChangeReaders.isHelperProfile($0) || ChangeReaders.isBackgroundItem($0) }
+        })
+    }
 }
 
 /// Holds the session's change findings for the sampling loop (thread-safe); each drops out `linger` after it was raised.
+/// The web dashboard's own set (`ChangeFindings.dashboardFindings`) is kept beside them.
 public final class ChangeWatch: @unchecked Sendable {
     public static let shared = ChangeWatch()
     private let lock = NSLock()
-    private var current: [(Finding, Date)] = []
-    public func add(_ f: [Finding], at now: Date = Date()) { lock.lock(); current += f.map { ($0, now) }; lock.unlock() }
+    private var current: [(Finding, Date)] = [], dashboard: [(Finding, Date)] = []
+    public func add(_ f: [Finding], dashboard d: [Finding], at now: Date = Date()) {
+        lock.lock(); current += f.map { ($0, now) }; dashboard += d.map { ($0, now) }; lock.unlock()
+    }
     public func findings(now: Date = Date()) -> [Finding] {
         lock.lock(); defer { lock.unlock() }
         current.removeAll { now.timeIntervalSince($0.1) > ChangeFindings.linger }
         return current.map(\.0)
+    }
+    public func dashboardFindings(now: Date = Date()) -> [Finding] {
+        lock.lock(); defer { lock.unlock() }
+        dashboard.removeAll { now.timeIntervalSince($0.1) > ChangeFindings.linger }
+        return dashboard.map(\.0)
     }
 }
 

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- FlightDeck's optional root helper, registered with SMAppService.daemon. Started on demand by an XPC lookup of its
+     Mach service and exits when idle, so there is no RunAtLoad or KeepAlive. bundle.sh copies this to
+     Contents/Library/LaunchDaemons/app.flightdeck.Flightdeck.helper.plist. -->
+<plist version="1.0"><dict>
+  <key>Label</key><string>app.flightdeck.Flightdeck.helper</string>
+  <key>BundleProgram</key><string>Contents/Library/LaunchServices/app.flightdeck.Flightdeck.helper</string>
+  <key>MachServices</key><dict><key>app.flightdeck.Flightdeck.helper</key><true/></dict>
+  <key>AssociatedBundleIdentifiers</key><array><string>app.flightdeck.Flightdeck</string></array>
+  <!-- SpawnConstraint: release.sh inserts one here for Developer ID builds, pinning the helper to the team ID. -->
+</dict></plist>

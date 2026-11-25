@@ -1,6 +1,7 @@
 import Foundation
 import Darwin
 import Security
+import FlightDeckHelperProtocol
 
 // Slow, on-demand process details for the inspector (InspectorView refreshes them on a detached utility task), plus
 // stack sampling via /usr/bin/sample and the nice-value action. Unlike ProcessSampler this is never run per tick.
@@ -42,6 +43,9 @@ public struct ProcessDetails: Sendable {
         public var isApple: Bool
         public var valid: Bool
         public var hardenedRuntime: Bool
+        /// The signature satisfies `anchor apple generic` with `teamID` as the leaf certificate's OU, so the team ID is
+        /// Apple-issued. A self-signed certificate can carry any OU, so only this lets a team ID vouch for a process.
+        public var teamAnchored: Bool
         /// One-line description for the inspector. With no certificate chain and no team ID the signature is ad-hoc.
         public var summary: String {
             if !valid { return "Not signed or signature invalid" }
@@ -96,30 +100,16 @@ public enum ProcessInspector {
     /// Arguments and environment from the KERN_PROCARGS2 sysctl. Only readable for the user's own processes (EINVAL
     /// otherwise, reported as "not permitted"); the environment may be truncated by the kernel's buffer limit.
     static func argsAndEnv(_ pid: Int32) -> (Measured<[String]>, Measured<[String]>) {
-        // Buffer layout: Int32 argc, then the exec path (NUL-terminated), NUL padding to alignment, then argc argv strings
-        // followed by the envp strings, each NUL-terminated. The first sysctl call only reports the needed size.
+        // The first sysctl call only reports the needed size; HelperParsers.procArgs walks the buffer.
         var mib: [Int32] = [CTL_KERN, KERN_PROCARGS2, pid]
         var size = 0
         guard sysctl(&mib, 3, nil, &size, nil, 0) == 0, size > 0 else { return (.unavailable("not permitted"), .unavailable("not permitted")) }
         var buf = [UInt8](repeating: 0, count: size)
-        guard sysctl(&mib, 3, &buf, &size, nil, 0) == 0, size > 4 else { return (.unavailable("not permitted"), .unavailable("not permitted")) }
-        let argc = Int(buf.withUnsafeBytes { $0.load(as: Int32.self) })
-        var i = 4
-        while i < size && buf[i] != 0 { i += 1 }        // exec path
-        while i < size && buf[i] == 0 { i += 1 }        // padding
-        // After the padding come exactly `argc` NUL-terminated arguments (an empty argument is just a NUL, so they must be
-        // counted, not skipped), then the environment's NUL-terminated strings, ended by an empty string.
-        func next() -> String? {
-            guard i < size else { return nil }
-            let start = i
-            while i < size && buf[i] != 0 { i += 1 }
-            defer { i += 1 }
-            return String(decoding: buf[start..<min(i, size)], as: UTF8.self)
+        guard sysctl(&mib, 3, &buf, &size, nil, 0) == 0,
+              let parsed = HelperParsers.procArgs(Array(buf.prefix(size))) else {
+            return (.unavailable("not permitted"), .unavailable("not permitted"))
         }
-        var args: [String] = []
-        while args.count < argc, let a = next() { args.append(a) }
-        var env: [String] = []
-        while let e = next(), !e.isEmpty { env.append(e) }
+        let (args, env) = parsed
         // macOS only exposes the environment for the calling process itself; for others the buffer simply ends after the
         // arguments. That's "hidden", not "no variables".
         if env.isEmpty && pid != getpid() { return (.value(args), .unavailable("macOS hides other processes' environment")) }
@@ -271,9 +261,29 @@ public enum ProcessInspector {
         var req: SecRequirement?
         SecRequirementCreateWithString("anchor apple" as CFString, [], &req)
         let isApple = req.map { SecStaticCodeCheckValidity(code, quick, $0) == errSecSuccess } ?? false
-        return .init(identifier: d[kSecCodeInfoIdentifier as String] as? String, teamID: d[kSecCodeInfoTeamIdentifier as String] as? String,
+        let teamID = d[kSecCodeInfoTeamIdentifier as String] as? String
+        return .init(identifier: d[kSecCodeInfoIdentifier as String] as? String, teamID: teamID,
                      // 0x10000 is kSecCodeSignatureRuntime (hardened runtime) in the code-signing flags.
-                     authority: names, isApple: isApple, valid: valid, hardenedRuntime: flags & 0x10000 != 0)
+                     authority: names, isApple: isApple, valid: valid, hardenedRuntime: flags & 0x10000 != 0,
+                     teamAnchored: teamID.map { anchored(code, team: $0, flags: quick) } ?? false)
+    }
+
+    /// Whether the code at `path` (or its .app bundle) is signed with an Apple-issued certificate for `team`.
+    static func isAnchored(_ path: String, team: String) -> Bool {
+        var code: SecStaticCode?
+        let target = AppUsage.bundle(of: path) ?? path
+        guard SecStaticCodeCreateWithPath(URL(fileURLWithPath: target) as CFURL, [], &code) == errSecSuccess, let code else { return false }
+        return anchored(code, team: team, flags: SecCSFlags(rawValue: kSecCSDoNotValidateExecutable | kSecCSDoNotValidateResources))
+    }
+
+    /// `anchor apple generic` with the leaf's OU as the team matches Developer ID certificates, which are issued to
+    /// that team. Mac App Store apps don't match: their leaf is Apple's own, so its OU isn't the developer's team. A team ID is 10 letters and digits, so anything else is refused rather than put in the requirement.
+    private static func anchored(_ code: SecStaticCode, team: String, flags: SecCSFlags) -> Bool {
+        guard !team.isEmpty, team.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber) }) else { return false }
+        var req: SecRequirement?
+        guard SecRequirementCreateWithString("anchor apple generic and certificate leaf[subject.OU] = \"\(team)\"" as CFString, [], &req) == errSecSuccess,
+              let req else { return false }
+        return SecStaticCodeCheckValidity(code, flags, req) == errSecSuccess
     }
 
     /// The parent chain from `pid` up to launchd (PID 1) or kernel_task, starting with the process itself. Capped at 64

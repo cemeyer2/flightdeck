@@ -43,6 +43,29 @@ final class InspectorTests: XCTestCase {
             XCTAssertNil(d.environment.value, "another user's environment must be unavailable, not empty")
         }
     }
+
+    /// A team ID counts only on an Apple-issued certificate for that team: an Apple platform binary (no team) and an
+    /// ad-hoc signed copy are not anchored to any team; a Developer ID app, when installed, is anchored to its own team only.
+    func testTeamAnchored() throws {
+        XCTAssertFalse(ProcessInspector.isAnchored("/bin/ls", team: "ABCDE12345"))
+        XCTAssertEqual(ProcessInspector.signature("/bin/ls")?.teamAnchored, false)
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("fd-adhoc-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let bin = dir.appendingPathComponent("ls").path
+        try FileManager.default.copyItem(atPath: "/bin/ls", toPath: bin)
+        _ = Shell.run("/usr/bin/codesign", ["--force", "--sign", "-", bin])
+        XCTAssertEqual(ProcessInspector.signature(bin)?.valid, true)
+        XCTAssertFalse(ProcessInspector.isAnchored(bin, team: "ABCDE12345"))
+        // Spliced in unchecked, this makes a valid requirement that /bin/ls satisfies ("… or always or …").
+        XCTAssertFalse(ProcessInspector.isAnchored("/bin/ls", team: "X\" or always or certificate leaf[subject.OU] = \"X"),
+                       "a team ID is never spliced into the requirement unchecked")
+        let chrome = "/Applications/Google Chrome.app"
+        guard FileManager.default.fileExists(atPath: chrome) else { throw XCTSkip("no Developer ID app to check") }
+        XCTAssertTrue(ProcessInspector.isAnchored(chrome, team: "EQHXZ8M8AV"))
+        XCTAssertFalse(ProcessInspector.isAnchored(chrome, team: "ABCDE12345"))
+        XCTAssertEqual(ProcessInspector.signature(chrome)?.teamAnchored, true)
+    }
 }
 
 /// NVMe SMART health.

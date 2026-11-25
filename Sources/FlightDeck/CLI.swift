@@ -3,6 +3,7 @@
 // starts normally (so does a mode whose arguments are missing or incomplete).
 import Foundation
 import FlightDeckCore
+import FlightDeckHelperProtocol
 
 /// Command-line interface of the app binary (FlightDeck.app/Contents/MacOS/FlightDeck):
 ///   --snapshot [--json] [--top N]   one warmed-up sample: summary + findings (or full JSON)
@@ -12,7 +13,7 @@ import FlightDeckCore
 ///   --stats <trace>                 summary statistics of a recording
 ///   --json-stream [interval] [--top N]   one JSON snapshot per line, every `interval` seconds, until killed
 ///   --mcp                           MCP server over stdin/stdout for AI assistants (see MCPStdio)
-/// Developer-only (not in `usage`): --render-views <dir> and --bench-ui [renders], see UIBench.
+/// Developer-only (not in `usage`): --render-views <dir> and --bench-ui [renders], see UIBench, --web-demo <port>.
 @MainActor
 enum CLI {
     static let usage = """
@@ -33,6 +34,11 @@ enum CLI {
     /// Parses `CommandLine.arguments` and runs the first matching mode. Does not return if a mode ran.
     static func handle() {
         let a = CommandLine.arguments
+        switch ChromeHostArgv.mode(a) {   // Chrome native-messaging host (ChromeHost.swift); before anything that prints
+        case .host(let origin): ChromeHost.run(origin: origin)
+        case .rejected: exit(64)
+        case .notHost: break
+        }
         // The `n` arguments following `flag`, or nil if the flag is absent or too few arguments follow it.
         func value(_ flag: String, _ n: Int = 1) -> [String]? {
             guard let i = a.firstIndex(of: flag), i + n < a.count else { return nil }
@@ -41,9 +47,10 @@ enum CLI {
         if a.contains("--help") { print(usage); exit(0) }
         // A mistyped flag or a missing argument must not silently open the GUI instead. (Single-dash arguments are
         // left alone: macOS and the automation hooks pass those, e.g. -destination, -NSDocumentRevisionsDebugMode.)
-        let known: [String: Int] = ["--snapshot": 0, "--json": 0, "--findings": 0, "--processes": 0, "--top": 1, "--stats": 1, "--csv": 2,
+        var known: [String: Int] = ["--snapshot": 0, "--json": 0, "--findings": 0, "--processes": 0, "--top": 1, "--stats": 1, "--csv": 2,
                                     "--report": 2, "--json-stream": 0, "--mcp": 0, "--channel": 0, "--render-views": 1, "--bench-ui": 0, "--render-iconset": 1, "--render-dock-previews": 1,
                                     "--fleet-serve": 1, "--fleet-query": 2]
+        known["--web-demo"] = 1
         for (i, arg) in a.enumerated().dropFirst() where arg.hasPrefix("--") {
             guard let n = known[arg] else { fail("unknown option \(arg)\n\n\(usage)") }
             if n > 0 && (i + n >= a.count || a[(i + 1)...(i + n)].contains { $0.hasPrefix("--") }) && arg != "--bench-ui" {
@@ -54,13 +61,23 @@ enum CLI {
         if let v = value("--fleet-serve") { FleetCLI.serve(port: v[0]) }            // developer-only, FleetCLI.swift
         if let v = value("--fleet-query", 2) { FleetCLI.query(v[0], code: v[1]) }
         if let v = value("--render-views") { UIBench.renderViews(to: v[0]) }
+        if let v = value("--web-demo") { WebDashboardCLI.serveDemo(port: v[0]) }      // developer-only, WebDashboardCLI.swift
         if a.contains("--json-stream") { jsonStream(a) }
         if a.contains("--bench-ui") { UIBench.run(renders: Int(value("--bench-ui")?.first ?? "") ?? 20) }
         if a.contains("--snapshot") || a.contains("--findings") {
             // CLI findings come from a single sample, so only instantaneous conditions are found; "sustained for N
             // minutes" findings need the long-running app.
-            let s = warmSample()
+            // Counters for other users' processes while the running app holds an unlock (H2); never a prompt.
+            let build = HelperEligibility.evaluate(HelperEligibility.readSelf(), bundlePath: Bundle.main.bundlePath)
+            let helper = HelperSession.standalone(build: build)
+            // The control deadline, not one tick's 0.1 s: launchd may still be starting the helper.
+            helper?.refreshStatus()
+            let s = warmSample(helper: helper)
             let findings = Analyzer().ingest(s)
+            // On stderr, so --json output stays parseable.
+            if let note = HelperSession.snapshotNote(build: build, state: helper?.state) {
+                FileHandle.standardError.write(Data((note + "\n").utf8))
+            }
             if a.contains("--json") {
                 let enc = JSONEncoder(); enc.outputFormatting = [.prettyPrinted, .sortedKeys]; enc.dateEncodingStrategy = .iso8601
                 struct Out: Encodable { var snapshot: Snapshot; var findings: [Finding] }
@@ -149,8 +166,8 @@ enum CLI {
     }
 
     /// Two samples a second apart: delta-based values (CPU %, disk/network rates) are unavailable in the first one.
-    static func warmSample() -> Snapshot {
-        let sampler = Sampler(); _ = sampler.sample(); Thread.sleep(forTimeInterval: 1); return sampler.sample()
+    static func warmSample(helper: HelperSession? = nil) -> Snapshot {
+        let sampler = Sampler(); sampler.processes.helper = helper; _ = sampler.sample(); Thread.sleep(forTimeInterval: 1); return sampler.sample()
     }
 
     /// Reads a trace file, exiting with an error message if it can't be read.

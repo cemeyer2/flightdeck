@@ -42,6 +42,9 @@ struct FindingRow: View {
                     if !compact, let detail = f.detail {
                         Text(detail).font(.system(size: 11)).foregroundStyle(p.dim).fixedSize(horizontal: false, vertical: true)
                     }
+                    if !compact, let tabs = e.chromeTabsLine(for: f) {   // live Chrome tabs, shown here only, never stored
+                        Text(tabs).font(.system(size: 11)).foregroundStyle(p.dim).lineLimit(2)
+                    }
                 }
                 Spacer(minLength: 0)
                 if f.destination != nil { Image(systemName: "chevron.right").font(.system(size: 10)).foregroundStyle(p.dim) }

@@ -64,5 +64,13 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   </dict></array>
 </dict></plist>
 PLIST
-codesign --force --deep --sign - "$APP"
+cp -R Extensions/Chrome "$APP/Contents/Resources/ChromeExtension"   # Chrome tabs companion extension (ChromeTabsService)
+# Optional root helper (Settings › Integrations), offered only on Developer ID builds. Nested code is signed first,
+# then the app, without --deep. The release build above already built it.
+HELPER="$APP/Contents/Library/LaunchServices/app.flightdeck.Flightdeck.helper"
+mkdir -p "$APP/Contents/Library/LaunchServices" "$APP/Contents/Library/LaunchDaemons"
+cp "$(dirname "$BIN")/FlightDeckHelper" "$HELPER"
+cp scripts/helper-launchd.plist "$APP/Contents/Library/LaunchDaemons/app.flightdeck.Flightdeck.helper.plist"
+codesign --force --sign - --identifier app.flightdeck.Flightdeck.helper "$HELPER"
+codesign --force --sign - "$APP"
 echo "Built $APP"

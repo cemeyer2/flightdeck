@@ -228,8 +228,12 @@ final class SmallBugTests: XCTestCase {
         let p = Process(); p.executableURL = hog; try p.run()
         defer { p.terminate(); try? FileManager.default.removeItem(at: hog); try? FileManager.default.removeItem(at: src) }
         Thread.sleep(forTimeInterval: 0.6)
-        let first = s.sample().first { $0.pid == p.processIdentifier }
-        XCTAssertGreaterThan(first?.cpu ?? 0, 40, "first appearance already shows its CPU use")
+        let first = try XCTUnwrap(s.sample().first { $0.pid == p.processIdentifier })
+        // Compared with its own average since launch rather than a fixed share of a core, so a busy machine (the hog
+        // getting less CPU) can't fail it: the point is that the first appearance isn't 0%.
+        let age = Date().timeIntervalSince(first.startDate)
+        XCTAssertGreaterThan(first.cpu, 1, "first appearance already shows its CPU use")
+        XCTAssertEqual(first.cpu, first.cpuTime / age * 100, accuracy: max(first.cpu * 0.25, 2))
     }
 
     /// A memory sample whose statistics couldn't be read is flagged, so views show "—" instead of zeros.

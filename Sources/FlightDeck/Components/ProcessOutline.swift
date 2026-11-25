@@ -11,6 +11,9 @@ import FlightDeckCore
 final class ProcItem: NSObject {
     var s: ProcessSample
     var children: [ProcItem] = []
+    /// App-group rows only: the group's `AppUsage` key and plain app name (not the "Name (N)" shown), for the catalog.
+    var groupKey: String?
+    var groupName: String?
     init(_ s: ProcessSample) { self.s = s }
 }
 
@@ -37,15 +40,15 @@ enum ProcColumn: String, CaseIterable, Equatable {
         switch self {
         case .name: s.notResponding == true ? "\(s.name) (Not Responding)" : s.name
         case .pid: s.pid < 0 ? "" : "\(s.pid)"
-        case .cpu: s.restricted ? "—" : String(format: "%.1f", s.cpu)
-        case .memory: s.restricted ? "—" : Fmt.bytes(s.memory)
-        case .disk: s.restricted ? "—" : (s.diskReadBps + s.diskWriteBps > 0 ? Fmt.rate(s.diskReadBps + s.diskWriteBps) : "0")
+        case .cpu: s.valuesUnreadable ? "—" : String(format: "%.1f", s.cpu)
+        case .memory: s.valuesUnreadable ? "—" : Fmt.bytes(s.memory)
+        case .disk: s.valuesUnreadable ? "—" : (s.diskReadBps + s.diskWriteBps > 0 ? Fmt.rate(s.diskReadBps + s.diskWriteBps) : "0")
         case .netIn: s.network.map { $0.inBps > 0 ? Fmt.rate($0.inBps) : "0" } ?? "—"
         case .netOut: s.network.map { $0.outBps > 0 ? Fmt.rate($0.outBps) : "0" } ?? "—"
         case .energy: s.energyWatts.map { String(format: "%.2f W", $0) } ?? "—"
         case .gpu: s.gpu.map { String(format: "%.1f", $0) } ?? ""
-        case .wakeups: s.restricted ? "—" : String(format: "%.0f", s.wakeups)
-        case .threads: s.restricted ? "—" : "\(s.threads)"
+        case .wakeups: s.valuesUnreadable ? "—" : String(format: "%.0f", s.wakeups)
+        case .threads: s.valuesUnreadable ? "—" : "\(s.threads)"
         case .user: s.user
         case .kind: s.translated == true ? "Intel" : (s.translated == false ? "Apple" : "")
         case .sleep: s.powerAssertions.map { a in a.contains { $0.preventsDisplaySleep } ? "Display" : "Prevents" } ?? ""
@@ -65,6 +68,8 @@ struct ProcessOutline: NSViewRepresentable {
     @Binding var selection: ProcessIdentity?
     var menu: (ProcessSample) -> NSMenu
     var onOpen: ((ProcessSample) -> Void)? = nil
+    /// Chrome renderers' tabs (live only), shown in the name cell and matched by the filter. Never stored.
+    var tabLabels: [ProcessIdentity: ChromeTabAttribution] = [:]
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -202,7 +207,7 @@ struct ProcessOutline: NSViewRepresentable {
                 g.notResponding = members.contains { $0.s.notResponding == true } ? true : nil
                 // Reuse the group's ProcItem so NSOutlineView sees the same row object.
                 let item = groupItems[g.identity] ?? ProcItem(g)
-                item.s = g; item.children = sorted(members)
+                item.s = g; item.children = sorted(members); item.groupKey = k; item.groupName = names[k]
                 groupItems[g.identity] = item; items[g.identity] = item
                 return item
             }
@@ -271,7 +276,8 @@ struct ProcessOutline: NSViewRepresentable {
                 roots = sorted(appGroups(Array(next.values)))
             } else if !f.isEmpty || !parent.tree {
                 let q = ProcessQuery(f)
-                roots = sorted(next.values.filter { q.isEmpty || q.matches($0.s) })
+                let tabs = parent.tabLabels   // a renderer's text terms also match its tabs' sites and titles
+                roots = sorted(next.values.filter { q.isEmpty || q.matches($0.s, extraText: tabs[$0.s.identity].map(ChromeTabText.searchText)) })
             } else {
                 // Tree by parent PID. Processes whose parent is launchd (1) or the kernel, or isn't in this sample, are roots.
                 // ppid is a bare PID, so parent lookup is by PID rather than identity.
@@ -395,6 +401,11 @@ struct ProcessOutline: NSViewRepresentable {
                 v.barColor = NSColor(parent.palette.level(it.s.cpu / 100))
                 return v
             }
+            if c == .name, it.s.pid > 0, let a = parent.tabLabels[it.s.identity], let label = ChromeTabLabel(a) {   // ChromeTabNameCell.swift
+                let cell = (ov.makeView(withIdentifier: ChromeTabNameCell.reuseID, owner: nil) as? ChromeTabNameCell) ?? ChromeTabNameCell()
+                cell.configure(label: label, icon: icon(for: it.s.path), font: font, tooltip: ChromeTabText.tooltip(a) + "\n" + it.s.name)
+                return cell
+            }
             let cell = (ov.makeView(withIdentifier: col.identifier, owner: nil) as? NSTableCellView) ?? makeCell(col.identifier, icon: c == .name)
             cell.textField?.stringValue = c.text(it.s)
             cell.textField?.font = font
@@ -403,7 +414,11 @@ struct ProcessOutline: NSViewRepresentable {
             if c == .name {
                 if it.s.notResponding == true { cell.textField?.textColor = .systemRed }
                 cell.imageView?.image = icon(for: it.s.path)
-                cell.toolTip = it.s.restricted ? "Owned by another user; some values are unavailable without elevated rights" : it.s.path
+                // The catalog's explanation on the first line (rows never pass a signature: no I/O per row);
+                // the path line says "via helper" for counters the root helper filled in.
+                let match = it.groupKey.map { ProcessCatalog.shared.lookup(groupKey: $0, name: it.groupName ?? it.s.name, memberPath: it.children.first?.s.path ?? "") }
+                    ?? ProcessCatalog.shared.lookup(name: it.s.name, path: it.s.path, signature: nil)
+                cell.toolTip = ProcessCatalogText.rowTooltip(match, it.s)
             }
             return cell
         }
@@ -441,6 +456,12 @@ struct ProcessOutline: NSViewRepresentable {
             let m = parent.menu(it.s)
             // An NSMenuItem can belong to only one menu, so items are detached from the built menu before being added.
             for i in m.items { m.removeItem(i); menu.addItem(i) }
+            // A group row opens the inspector on the app's main process. Disabled in demo mode (no openInspector).
+            let target = it.groupKey.map { ProcessCatalog.mainMember(groupKey: $0, it.children.map(\.s))?.identity } ?? it.s.identity
+            menu.addItem(.separator())
+            menu.addItem(ClosureMenuItem("What Is This?", enabled: AppActions.openInspector != nil && target != nil) {
+                if let target { AppActions.openInspector?(target) }
+            })
         }
     }
 }
