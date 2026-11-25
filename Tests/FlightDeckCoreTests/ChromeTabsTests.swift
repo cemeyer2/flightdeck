@@ -44,6 +44,21 @@ final class ChromeTabsTests: XCTestCase {
         XCTAssertTrue(js.contains(ChromeTabsConstants.hostName))
     }
 
+    /// The extension clips below the app's limits, so a long URL or a huge window is shortened there, not refused here.
+    func testBackgroundClipsBelowAppLimits() throws {
+        let js = try String(contentsOf: extDir.appendingPathComponent("background.js"), encoding: .utf8)
+        func limit(_ name: String) throws -> Int {
+            let m = try XCTUnwrap(js.firstMatch(of: try Regex("const \(name) = ([0-9]+);")), name)
+            return try XCTUnwrap(Int(String(try XCTUnwrap(m.output[1].substring))))
+        }
+        XCTAssertLessThan(try limit("MAX_TABS"), ChromeTabsConstants.maxTabs)
+        XCTAssertLessThan(try limit("MAX_FRAMES_PER_TAB"), ChromeTabsConstants.maxFramesPerTab)
+        XCTAssertLessThan(try limit("MAX_URL_BYTES"), ChromeTabsConstants.maxURLBytes)
+        XCTAssertLessThan(try limit("MAX_TITLE_BYTES"), ChromeTabsConstants.maxTitleBytes)
+        XCTAssertLessThan(try limit("MAX_ORIGIN_BYTES"), ChromeTabsConstants.maxOriginBytes)
+        XCTAssertLessThanOrEqual(try limit("MAX_MESSAGE_BYTES") * 2, ChromeTabsConstants.maxFrameBytes, "headroom for Chrome's own escaping")
+    }
+
     // MARK: Host argv and framing
 
     func testHostArgvExactOriginOnly() {
