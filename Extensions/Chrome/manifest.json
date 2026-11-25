@@ -1,7 +1,7 @@
 {
   "name": "FlightDeck Tabs",
   "description": "Tells FlightDeck on this Mac which tab runs in which Chrome process. It only reports; it never reads or changes pages.",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "manifest_version": 3,
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2prZXIvj9ku5zLjZhdvqWlOjvZUp+rtErAJ3UYLD4gIyTVLUOu53XyBBfllaB41U7gVVot66W+jd72O8olZcO135hNZ+GImfnMSF1+oPCpnfx8/hiZbN6SpBXPQll0JnndzOfMXlolBuWoAOV89PA/ShvwKpydxCiegMskzVC9n9J99jZlmySQkZHAdASN+XrIFKSeJNmlvlw5XCfB8Wv2S9hP+drCW2ryPMP3jgk2jG2J7T9tk3gvNTQpV6BOPLpduLX5ohBm8k8u8adpwBRuNezXQFTBOA22O1mOdhuKQMqaHqorEOSWxwvsjcj9UDsLD0W8KnnLEGU0WTBC6DaQIDAQAB",
   "background": { "service_worker": "background.js" },
