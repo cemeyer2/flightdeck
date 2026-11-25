@@ -162,6 +162,16 @@ extension MCPTools {
 
     // MARK: get_process
 
+    /// What the catalog says about a process. A lookalike is reported exactly like an unknown process. Catalog text
+    /// isn't process contents, so it isn't behind the MCP contents setting.
+    static func aboutJSON(_ m: ProcessMatch) -> JSON {
+        guard case .known(let e, let key, let verified) = m else { return ["known": false] }
+        return .object([("known", .bool(true)), ("title", .str(e.title)), ("summary", .str(e.summary)), ("maker", .str(e.makerName)),
+                        ("maker_is_apple", .bool(e.isApple)), ("managed", .bool(e.managed)), ("busy_when", e.busyWhen.map(JSON.str) ?? .null),
+                        ("quit", .str(e.quit.rawValue)), ("what_to_do", e.whatToDo.map(JSON.str) ?? .null),
+                        ("matched_by", .str(key.rawValue)), ("path_verified", .bool(verified))])
+    }
+
     func getProcess(_ a: Args) async throws -> JSON {
         let pid = Int32(clamping: try a.requiredInt("pid"))
         let include = Set(try a.choices("include", Self.processSections))
@@ -204,6 +214,7 @@ extension MCPTools {
             ("listening_ports", d.files.isAvailable ? .strings(listening) : nil),
             ("cwd", measured(d.cwd, JSON.str)),
             ("code_signature", sig ?? F.unavailable("executable not readable")),
+            ("about", Self.aboutJSON(catalog.lookup(name: p.name, path: p.path, signature: d.signature))),
         ]
         if include.contains("arguments") {
             pairs.append(("arguments", measured(d.arguments) { .strings($0.prefix(64).map { String($0.prefix(500)) }) }))

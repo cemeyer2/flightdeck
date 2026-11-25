@@ -14,6 +14,8 @@ public struct MCPTools: MCPToolProvider {
     var now: @Sendable () -> Date = { Date() }
     var stackSampler: @Sendable (Int32, Int) -> String = { ProcessInspector.sampleStacks(pid: $0, seconds: $1) }
     var inspector: @Sendable (Int32, String) -> ProcessDetails = { ProcessInspector.details(pid: $0, path: $1) }
+    /// `get_process`'s `about`: the process catalog (tests use a fixture).
+    var catalog: ProcessCatalog = .shared
     var ownUID: UInt32 = getuid()
     /// The battery's condition from system_profiler (~1 s); tests replace it so they never read the machine.
     var batteryCondition: @Sendable () -> String? = {
@@ -182,7 +184,7 @@ public struct MCPTools: MCPToolProvider {
                             ("by_app", ["type": "boolean", "description": "Group processes into apps.", "default": false]),
                         ])),
             MCPToolSpec(name: "get_process", title: "Process details",
-                        description: "Details of one process by PID: identity, path, user, parent chain, start time, CPU, memory, energy, disk and network, listening ports, open-file and socket counts, code signature. Optional sections add more; other users' processes show 'unavailable' where macOS refuses.",
+                        description: "Details of one process by PID: identity, path, user, parent chain, start time, CPU, memory, energy, disk and network, listening ports, open-file and socket counts, code signature; about: what the process is and whether it's safe to quit, from FlightDeck's offline catalog (known: false if not catalogued). Optional sections add more; other users' processes show 'unavailable' where macOS refuses.",
                         inputSchema: Self.schema([
                             ("pid", ["type": "integer", "description": "Process ID."]),
                             ("include", ["type": "array", "description": "Extra sections: arguments (command line), files (open file descriptors), sockets, threads.",

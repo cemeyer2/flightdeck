@@ -333,6 +333,15 @@ and TCP state, threads (CPU, state, priority, times), the environment, and call-
 `/usr/bin/sample` to see why it's busy or hung. Actions: quit, force quit, suspend, resume, lower priority (nice).
 Anything macOS doesn't let a normal user read for other users' processes is shown as unavailable.
 
+**What is this process?** The inspector's "What is this?" panel, the Processes tooltips (and "What Is This?" in a row's
+menu), findings and the MCP `get_process` tool explain what a process is, who makes it, when it's normally busy and
+whether quitting it helps. The explanations come from a catalog bundled with FlightDeck, so nothing is looked up
+online, and each entry cites the man page, launchd plist or documentation it was written from. A process the catalog
+doesn't know shows only facts FlightDeck already has (signer, app, what launched it). Security and device-management
+software is marked "Managed by your organisation" and is never suggested for quitting. Other users' and system
+processes are matched by name only unless the privileged helper is installed and FlightDeck is unlocked. A program
+named like part of macOS but running from somewhere else is flagged in the inspector.
+
 #### Connection quality
 
 *Performance › Network.* Wi-Fi signal, noise, SNR, link rate, channel, band, width, PHY and
@@ -960,7 +969,7 @@ the master Alerts switch is on; the Settings notice shows either way). Never in 
 | `triage` | one call for "what's wrong right now?": every current problem (findings, ongoing Flight Log incidents, crashes/hangs/panics of the last 24 h, unexpected restarts of the last 7 days, memory pressure, heat, a full disk, low battery) ranked by severity, each with evidence numbers and the next tool to call with its arguments; plus the headline readings |
 | `get_status` | findings in plain English, CPU/memory/swap/disk/network/power/thermal/GPU, top apps by CPU, memory and energy, Stress Map top causes |
 | `list_processes` | processes or apps as a table; `sort`, `limit`, `filter` (the Processes filter syntax, e.g. `cpu>50 user:root`), `by_app` |
-| `get_process` | one PID: identity, path, user, parent chain, CPU, memory, energy, disk, network, listening ports, open files, code signature; optional arguments/files/sockets/threads |
+| `get_process` | one PID: identity, path, user, parent chain, CPU, memory, energy, disk, network, listening ports, open files, code signature; optional arguments/files/sockets/threads; about (what the process is, from FlightDeck's catalog) |
 | `sample_stacks` | 1–5 s of `/usr/bin/sample` on one of *your* processes: main-thread summary and heaviest path |
 | `recent_incidents` | the Flight Log over the last N hours |
 | `diagnostic_reports` | macOS crash, hang, memory-kill and resource-limit reports, with counts by kind and process |

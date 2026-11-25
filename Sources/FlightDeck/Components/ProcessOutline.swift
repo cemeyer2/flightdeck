@@ -11,6 +11,9 @@ import FlightDeckCore
 final class ProcItem: NSObject {
     var s: ProcessSample
     var children: [ProcItem] = []
+    /// App-group rows only: the group's `AppUsage` key and plain app name (not the "Name (N)" shown), for the catalog.
+    var groupKey: String?
+    var groupName: String?
     init(_ s: ProcessSample) { self.s = s }
 }
 
@@ -202,7 +205,7 @@ struct ProcessOutline: NSViewRepresentable {
                 g.notResponding = members.contains { $0.s.notResponding == true } ? true : nil
                 // Reuse the group's ProcItem so NSOutlineView sees the same row object.
                 let item = groupItems[g.identity] ?? ProcItem(g)
-                item.s = g; item.children = sorted(members)
+                item.s = g; item.children = sorted(members); item.groupKey = k; item.groupName = names[k]
                 groupItems[g.identity] = item; items[g.identity] = item
                 return item
             }
@@ -403,7 +406,10 @@ struct ProcessOutline: NSViewRepresentable {
             if c == .name {
                 if it.s.notResponding == true { cell.textField?.textColor = .systemRed }
                 cell.imageView?.image = icon(for: it.s.path)
-                cell.toolTip = it.s.restricted ? "Owned by another user; some values are unavailable without elevated rights" : it.s.path
+                // The catalog's explanation on the first line (rows never pass a signature: no I/O per row).
+                let match = it.groupKey.map { ProcessCatalog.shared.lookup(groupKey: $0, name: it.groupName ?? it.s.name, memberPath: it.children.first?.s.path ?? "") }
+                    ?? ProcessCatalog.shared.lookup(name: it.s.name, path: it.s.path, signature: nil)
+                cell.toolTip = ProcessCatalogText.rowTooltip(match, it.s)
             }
             return cell
         }
@@ -441,6 +447,12 @@ struct ProcessOutline: NSViewRepresentable {
             let m = parent.menu(it.s)
             // An NSMenuItem can belong to only one menu, so items are detached from the built menu before being added.
             for i in m.items { m.removeItem(i); menu.addItem(i) }
+            // A group row opens the inspector on the app's main process. Disabled in demo mode (no openInspector).
+            let target = it.groupKey.map { ProcessCatalog.mainMember(groupKey: $0, it.children.map(\.s))?.identity } ?? it.s.identity
+            menu.addItem(.separator())
+            menu.addItem(ClosureMenuItem("What Is This?", enabled: AppActions.openInspector != nil && target != nil) {
+                if let target { AppActions.openInspector?(target) }
+            })
         }
     }
 }

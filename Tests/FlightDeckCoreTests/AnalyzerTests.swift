@@ -281,6 +281,19 @@ final class NoiseTests: XCTestCase {
 
 /// User automation rules.
 final class RuleEngineTests: XCTestCase {
+    /// Rules and the process catalog share one list of macOS's own folders, and it covers Cryptexes (Safari lives there).
+    func testRulesUseSharedPlatformPrefixes() {
+        let safari = AnalyzerTests().proc("Safari", path: "/System/Volumes/Preboot/Cryptexes/App/System/Applications/Safari.app/Contents/MacOS/Safari", pid: 70)
+        XCTAssertFalse(RuleEngine().allowed(safari, for: .quit))
+        XCTAssertTrue(Platform.prefixes.contains("/System/Volumes/Preboot/Cryptexes/"))
+        XCTAssertFalse(Platform.isPlatformPath("/usr/local/bin/x"))
+        // the Data volume is user-writable, so a path through it is not macOS's own, even though it starts "/System/"
+        XCTAssertFalse(Platform.isPlatformPath("/System/Volumes/Data/Users/x/mdworker_shared"))
+        XCTAssertTrue(Platform.isPlatformPath("/System/Library/Frameworks/x"))
+        XCTAssertTrue(RuleEngine().allowed(AnalyzerTests().proc("x", path: "/System/Volumes/Data/Users/x/x", pid: 72), for: .quit))
+        XCTAssertTrue(RuleEngine().allowed(AnalyzerTests().proc("x", path: "/usr/local/bin/x", pid: 71), for: .quit))
+    }
+
     /// Guards the safety properties of rules, which can quit processes: a rule fires only after its condition has held
     /// for `minutes`, once per occurrence (not every sample), targets every process of the matched app, respects its
     /// cooldown when the condition breaks and returns, and never targets protected processes (kernel_task,
@@ -308,5 +321,66 @@ final class RuleEngineTests: XCTestCase {
         let f = any.evaluate(t.snap(t0, procs: procs(150)))
         XCTAssertFalse(f.contains { ["kernel_task", "WindowServer"].contains($0.subject) })
         XCTAssertEqual(RuleEngine.load(RuleEngine.save(RuleEngine.examples)).count, 3)
+    }
+}
+
+/// Findings explain catalogued processes by adding the entry's note, and always keep an action line: a match never
+/// replaces the advice, changes the severity, or tells anyone to quit a managed security agent.
+final class CatalogFindingTests: XCTestCase {
+    let t = AnalyzerTests()
+    let t0 = Date(timeIntervalSince1970: 14_000_000)
+    let cpuAction = "Quit it or let it finish if you don't need it right now."
+
+    /// The CPU finding for one busy process, after two minutes at `cpu`.
+    func cpuFinding(_ name: String, path: String, catalog: ProcessCatalog? = ProcessCatalogTests.fixture(), cpu: Double = 150) -> Finding? {
+        let a = Analyzer(); if let catalog { a.catalog = catalog }
+        let p = t.proc(name, path: path, pid: 40, cpu: cpu)
+        for i in 0..<120 { a.ingest(t.snap(t0.addingTimeInterval(Double(i)), procs: [p])) }
+        return a.findings.first { $0.id.hasPrefix("cpu:") }
+    }
+
+    func testKnownAppCPUFindingHasNoteAndAction() {
+        let f = cpuFinding("Google Chrome", path: ProcessCatalogTests.chromeMain)
+        XCTAssertEqual(f?.detail, "Note for chrome. " + cpuAction)
+    }
+
+    func testRelaunchesFindingSaysQuittingWontHelp() {
+        let d = cpuFinding("mdworker_shared", path: ProcessCatalogTests.mdworkerPath)?.detail ?? ""
+        XCTAssertTrue(d.hasPrefix("Note for mdworker."), d)
+        XCTAssertTrue(d.contains("won't help"), d)
+    }
+
+    func testLookalikeFindingHasNoNote() {
+        XCTAssertEqual(cpuFinding("mdworker_shared", path: NSHomeDirectory() + "/Downloads/mdworker_shared")?.detail, cpuAction)
+    }
+
+    func testManagedCPUFindingHasITActionAndNoQuit() {
+        let d = cpuFinding("falcond", path: "/Library/CS/falcond")?.detail ?? ""
+        XCTAssertTrue(d.hasSuffix(ProcessCatalogText.managedAction), d)
+        XCTAssertNil(d.range(of: "quit", options: .caseInsensitive), d)
+    }
+
+    func testChromeFindingUsesAppEntry() {
+        let helper = "/Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/131.0.6778.86/Helpers/Google Chrome Helper (Renderer).app/Contents/MacOS/Google Chrome Helper (Renderer)"
+        let d = cpuFinding("Google Chrome Helper (Renderer)", path: helper, catalog: nil)?.detail ?? ""
+        let e = ProcessCatalog.shared.entry(id: "browser-chrome")
+        XCTAssertNotNil(e)
+        XCTAssertTrue(d.hasPrefix(e?.findingNote ?? "-"), d)
+    }
+
+    func testThermalFindingExplainsKernelTask() {
+        let a = Analyzer()
+        var s = t.snap(t0, procs: [t.proc("kernel_task", path: "", pid: 0, cpu: 60)]); s.power.thermalState = 2
+        a.ingest(s)
+        let d = a.findings.first { $0.id == "thermal" }?.detail ?? ""
+        XCTAssertNotNil(ProcessCatalog.shared.entry(id: "kernel-task"))
+        XCTAssertTrue(d.contains(ProcessCatalog.shared.entry(id: "kernel-task")?.findingNote ?? "-"), d)
+    }
+
+    func testSeverityUnchangedByMatch() {
+        let known = cpuFinding("Google Chrome", path: ProcessCatalogTests.chromeMain)
+        let unknown = cpuFinding("Busy", path: "/Applications/Busy.app/Contents/MacOS/Busy")
+        XCTAssertNotNil(known); XCTAssertEqual(known?.severity, unknown?.severity)
+        XCTAssertEqual(unknown?.detail, cpuAction)
     }
 }
