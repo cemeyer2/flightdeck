@@ -14,6 +14,9 @@ public final class UnlockRegistry {
     /// uid → the connection that unlocked for it.
     private var holders: [uid_t: ConnectionID] = [:]
     private var verifiedAt: [ConnectionID: Date] = [:]
+    /// Moves on each time a connection's unlock ends. Kept after a close (never removed), so a check that started
+    /// before the close can't match a fresh 0; connection IDs aren't reused and the helper exits when idle.
+    private var epochs: [ConnectionID: UInt64] = [:]
 
     public init(clock: @escaping () -> Date = Date.init) { self.clock = clock }
 
@@ -43,7 +46,11 @@ public final class UnlockRegistry {
 
     public func holderAlive(uid: uid_t) -> Bool { holders[uid] != nil }
 
+    /// Read before an authd check and compared after it: a different value means the unlock ended meanwhile.
+    public func epoch(connection: ConnectionID) -> UInt64 { epochs[connection, default: 0] }
+
     private func end(_ c: ConnectionID) {
+        epochs[c, default: 0] &+= 1
         verifiedAt[c] = nil
         for (uid, h) in holders where h == c { holders[uid] = nil }
     }

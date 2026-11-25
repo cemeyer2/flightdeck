@@ -152,6 +152,45 @@ final class HelperServiceTests: XCTestCase {
         XCTAssertEqual(code(send(s, .processRusage(ids: [pid500]), from: standalone)), .notAuthorized)
     }
 
+    /// Holds the app's first verify in flight while `during` runs (a lock, or the connection closing), then lets it
+    /// finish and returns its response.
+    func verifyRacing(_ s: HelperService, during: () -> Void) -> HelperResponse? {
+        let entered = DispatchSemaphore(value: 0), release = DispatchSemaphore(value: 0), done = DispatchSemaphore(value: 0)
+        let authority = self.authority
+        authority.onVerify = { [unowned authority] in
+            authority.onVerify = nil
+            entered.signal()
+            _ = release.wait(timeout: .now() + 10)
+        }
+        var response: HelperResponse?
+        DispatchQueue.global().async { [self] in
+            response = send(s, .processRusage(ids: [pid500]), auth: form)
+            done.signal()
+        }
+        guard entered.wait(timeout: .now() + 10) == .success else { XCTFail("verify never started"); return nil }
+        during()
+        release.signal()
+        guard done.wait(timeout: .now() + 10) == .success else { XCTFail("the request never finished"); return nil }
+        return response
+    }
+
+    func testLockDuringVerifyGrantsNothing() {
+        let s = greeted(app, standalone)
+        let r = verifyRacing(s) { XCTAssertEqual(send(s, .lock), .ok) }
+        XCTAssertEqual(r.flatMap(code), .notAuthorized)
+        XCTAssertEqual(send(s, .status, from: standalone), .status(HelperServiceStatus(unlocked: false, holderAlive: false, agentContents: false)))
+        // Nothing was cached for the locked connection: its next request is checked again.
+        guard case .rusage = send(s, .processRusage(ids: [pid500]), auth: form) else { return XCTFail() }
+        XCTAssertEqual(authority.verifyCount, 2)
+    }
+
+    func testCloseDuringVerifyGrantsNothing() {
+        let s = greeted(app, standalone)
+        let r = verifyRacing(s) { s.connectionClosed(app.connection) }
+        XCTAssertEqual(r.flatMap(code), .notAuthorized)
+        XCTAssertEqual(send(s, .status, from: standalone), .status(HelperServiceStatus(unlocked: false, holderAlive: false, agentContents: false)))
+    }
+
     func testStatusReportsUnlock() {
         let s = greeted(app, standalone)
         XCTAssertEqual(send(s, .status, auth: form), .status(HelperServiceStatus(unlocked: true, holderAlive: true, agentContents: false)))
