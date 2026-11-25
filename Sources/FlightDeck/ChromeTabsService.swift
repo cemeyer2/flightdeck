@@ -18,10 +18,17 @@ final class ChromeTabsService: ObservableObject {
     }
     /// Why the listener couldn't start (shown in Settings), nil when it's fine or off.
     @Published private(set) var listenerError: String?
+    /// Why the host manifest or the extension's stable copy couldn't be written (shown in Settings beside
+    /// `listenerError`). Set and cleared only by `heal()` and `setUp()`, so a listener that starts fine never hides it.
+    @Published private(set) var installError: String?
     /// Bumped whenever a host connects, says hello, sends a table or goes away, so Settings refreshes its status.
     @Published private(set) var revision = 0
 
     private var listener: ChromeTabsListener?
+    /// Status facts read from disk, refreshed only when the app itself writes those files (`heal`, `setUp`, turning
+    /// the feature on or off), so `status` doesn't hit the disk on every `revision` bump.
+    private struct DiskFacts { var bundledVersion: String?; var stableVersion: String?; var manifestPresent: Bool; var relocatable: Bool }
+    private var diskFacts: DiskFacts?
 
     /// The extension inside the app; nil for a `swift build` run, which has no bundle resources.
     var bundledExtension: URL? { Bundle.main.url(forResource: "ChromeExtension", withExtension: nil) }
@@ -53,13 +60,20 @@ final class ChromeTabsService: ObservableObject {
 
     var status: ChromeTabsStatus {
         _ = revision
+        let facts = diskFacts ?? DiskFacts(bundledVersion: bundledExtension.flatMap(ChromeExtensionInstall.manifestVersion),
+                                           stableVersion: ChromeExtensionInstall.manifestVersion(at: stableCopy),
+                                           manifestPresent: ChromeExtensionInstall.readHostManifest(dir: hostsDir) != nil, relocatable: relocatable)
+        diskFacts = facts
         let tables = store.tables().values
-        return ChromeTabsStatus.compute(enabled: enabled && !Demo.isEnabled, bundledVersion: bundledExtension.flatMap(ChromeExtensionInstall.manifestVersion),
-                                        stableVersion: ChromeExtensionInstall.manifestVersion(at: stableCopy),
-                                        manifestPresent: ChromeExtensionInstall.readHostManifest(dir: hostsDir) != nil, relocatable: relocatable,
+        return ChromeTabsStatus.compute(enabled: enabled && !Demo.isEnabled, bundledVersion: facts.bundledVersion,
+                                        stableVersion: facts.stableVersion, manifestPresent: facts.manifestPresent, relocatable: facts.relocatable,
                                         hellos: Array(store.hellos().values), tabCount: tables.reduce(0) { $0 + $1.tabs.count },
-                                        listenerError: listenerError)
+                                        listenerError: listenerError, installError: installError)
     }
+
+    /// True only while some extension is connected and nothing is broken, so MCP says "unavailable" rather than
+    /// returning an empty view.
+    var servesTabs: Bool { enabled && !Demo.isEnabled && listenerError == nil && installError == nil && !store.isEmpty }
 
     /// At launch: heals what was installed (the app may have moved, or been updated with a newer extension) and starts
     /// listening if the feature is on. Never in demo mode.
@@ -76,11 +90,12 @@ final class ChromeTabsService: ObservableObject {
         } else {
             listener?.stop(); listener = nil
             store.removeAll()
-            listenerError = nil
+            listenerError = nil; installError = nil
             if !Demo.isEnabled {
                 ChromeExtensionInstall.removeHostManifest(dir: hostsDir)
                 ChromeExtensionInstall.removeStableCopy(stableCopy)
             }
+            diskFacts = nil
             revision += 1
         }
     }
@@ -88,14 +103,16 @@ final class ChromeTabsService: ObservableObject {
     /// Rewrites the host manifest when it doesn't name this app, and refreshes the stable copy when the bundled
     /// extension is newer. Skipped when the app can't stay where it is (see `relocatable`).
     private func heal() {
+        installError = nil; diskFacts = nil
         guard let bundled = bundledExtension, relocatable else { return }
         if ChromeExtensionInstall.needsRewrite(existing: ChromeExtensionInstall.readHostManifest(dir: hostsDir), executablePath: executablePath) {
             do { try ChromeExtensionInstall.writeHostManifest(dir: hostsDir, executablePath: executablePath) }
-            catch { listenerError = "Couldn't write Chrome's native messaging manifest: \(error.localizedDescription)" }
+            catch { installError = "Couldn't write Chrome's native messaging manifest: \(error.localizedDescription)" }
         }
         if let stable = ChromeExtensionInstall.manifestVersion(at: stableCopy), let b = ChromeExtensionInstall.manifestVersion(at: bundled),
            ChromeExtensionInstall.isVersion(b, newerThan: stable) {
-            try? ChromeExtensionInstall.installStableCopy(from: bundled, to: stableCopy)
+            do { try ChromeExtensionInstall.installStableCopy(from: bundled, to: stableCopy) }
+            catch { installError = [installError, "Couldn't update the extension's folder: \(error.localizedDescription)"].compactMap { $0 }.joined(separator: "\n") }
         }
     }
 
@@ -109,8 +126,9 @@ final class ChromeTabsService: ObservableObject {
                 try ChromeExtensionInstall.writeHostManifest(dir: hostsDir, executablePath: executablePath)
             }
         } catch {
-            listenerError = "Couldn't set up Chrome tabs: \(error.localizedDescription)"; revision += 1; return
+            installError = "Couldn't set up Chrome tabs: \(error.localizedDescription)"; diskFacts = nil; revision += 1; return
         }
+        installError = nil; diskFacts = nil
         NSWorkspace.shared.activateFileViewerSelecting([stableCopy])
         Self.openExtensionsPage()
         revision += 1

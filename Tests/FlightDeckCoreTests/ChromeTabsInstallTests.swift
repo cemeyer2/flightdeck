@@ -131,9 +131,18 @@ final class ChromeTabsInstallTests: XCTestCase {
 
     let hello1 = ChromeTabStore.Hello(protocolVersion: 1, extensionVersion: "1.0.0")
     func status(enabled: Bool = true, bundled: String? = "1.0.0", stable: String? = "1.0.0", manifest: Bool = true, relocatable: Bool = true,
-                hellos: [ChromeTabStore.Hello] = [], tabs: Int = 0, error: String? = nil) -> ChromeTabsStatus {
+                hellos: [ChromeTabStore.Hello] = [], tabs: Int = 0, error: String? = nil, installError: String? = nil) -> ChromeTabsStatus {
         ChromeTabsStatus.compute(enabled: enabled, bundledVersion: bundled, stableVersion: stable, manifestPresent: manifest,
-                                 relocatable: relocatable, hellos: hellos, tabCount: tabs, listenerError: error)
+                                 relocatable: relocatable, hellos: hellos, tabCount: tabs, listenerError: error, installError: installError)
+    }
+
+    /// A manifest that couldn't be written must still show once the listener starts fine, and both errors show together.
+    func testInstallErrorShownBesideListener() {
+        XCTAssertEqual(status(stable: nil, installError: "no manifest"), .error("no manifest"))
+        XCTAssertEqual(status(installError: "no manifest"), .error("no manifest"), "not hidden behind Waiting for the extension")
+        XCTAssertEqual(status(error: "sock", installError: "no manifest"), .error("sock\nno manifest"))
+        XCTAssertEqual(status(enabled: false, installError: "no manifest"), .off)
+        XCTAssertEqual(status(relocatable: false, installError: nil), .moveToApplications(reason: ChromeTabsStatus.moveReason))
     }
 
     /// Review focus 5: a `swift build` run has no bundled extension, so setup can't be offered.

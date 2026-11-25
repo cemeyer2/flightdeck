@@ -1,8 +1,8 @@
 import Foundation
 // Chrome tabs: the one status line Settings shows, worked out from plain facts so every case is testable. The first
-// matching rule wins: off; not a bundled app; the socket couldn't open; the app can't stay where it is; an extension
-// speaking another protocol; a newer bundled extension Chrome hasn't reloaded; nothing installed yet; waiting for the
-// extension; connected.
+// matching rule wins: off; not a bundled app; the socket couldn't open or setup couldn't write its files; the app can't
+// stay where it is; an extension speaking another protocol; a newer bundled extension Chrome hasn't reloaded; nothing
+// installed yet; waiting for the extension; connected.
 
 public enum ChromeTabsStatus: Equatable, Sendable {
     case off
@@ -21,11 +21,15 @@ public enum ChromeTabsStatus: Equatable, Sendable {
     /// - `stableVersion`: the copy the user loads in Chrome (nil when not installed).
     /// - `relocatable`: false when the app runs translocated or from a read-only or removable volume (a mounted DMG).
     /// - `hellos`: one per connected extension (Chrome profile).
+    /// - `listenerError`: the socket couldn't open. `installError`: the host manifest or extension copy couldn't be
+    ///   written. Both are shown when both are set.
     public static func compute(enabled: Bool, bundledVersion: String?, stableVersion: String?, manifestPresent: Bool,
-                               relocatable: Bool, hellos: [ChromeTabStore.Hello], tabCount: Int, listenerError: String?) -> ChromeTabsStatus {
+                               relocatable: Bool, hellos: [ChromeTabStore.Hello], tabCount: Int, listenerError: String?,
+                               installError: String? = nil) -> ChromeTabsStatus {
         guard enabled else { return .off }
         guard let bundled = bundledVersion else { return .unbundled }
-        if let listenerError { return .error(listenerError) }
+        let errors = [listenerError, installError].compactMap { $0 }
+        if !errors.isEmpty { return .error(errors.joined(separator: "\n")) }
         guard relocatable else { return .moveToApplications(reason: moveReason) }
         if hellos.contains(where: { $0.protocolVersion != ChromeTabsConstants.protocolVersion }) { return .needsUpdating }
         let behind = hellos.contains { ChromeExtensionInstall.isVersion(bundled, newerThan: $0.extensionVersion) }
