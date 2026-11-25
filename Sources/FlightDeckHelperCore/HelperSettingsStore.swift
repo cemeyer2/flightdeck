@@ -9,14 +9,20 @@ public protocol HelperSettingsStoring: AnyObject {
     func removeAll()
 }
 
-/// `{"agentContents": false}` in a root-owned folder, written atomically with mode 0600. The only file the helper
-/// writes.
+/// `{"agentContents": false}` in a root-owned folder, replaced atomically with mode 0600. The only file the helper
+/// writes (with its temporary copy while saving).
 public final class FileHelperSettingsStore: HelperSettingsStoring {
     private struct Contents: Codable { var agentContents: Bool }
     let url: URL
+    /// Sets a file's mode to 0600; replaceable so a test can make it fail.
+    private let ownerOnly: (String) throws -> Void
 
-    public init(url: URL = URL(fileURLWithPath: "/Library/Application Support/FlightDeck Helper/settings.json")) {
-        self.url = url
+    public convenience init(url: URL = URL(fileURLWithPath: "/Library/Application Support/FlightDeck Helper/settings.json")) {
+        self.init(url: url, ownerOnly: { try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: $0) })
+    }
+
+    init(url: URL, ownerOnly: @escaping (String) throws -> Void) {
+        self.url = url; self.ownerOnly = ownerOnly
     }
 
     public var agentContents: Bool {
@@ -24,11 +30,20 @@ public final class FileHelperSettingsStore: HelperSettingsStoring {
         return c.agentContents
     }
 
+    /// Written to a temporary file beside the real one, given its mode, then renamed over it: any failure leaves the
+    /// stored value as it was, and the new value never lands without mode 0600.
     public func setAgentContents(_ on: Bool) throws {
-        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true,
-                                                attributes: [.posixPermissions: 0o700])
-        try JSONEncoder().encode(Contents(agentContents: on)).write(to: url, options: .atomic)
-        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        let dir = url.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        let tmp = dir.appendingPathComponent(".settings-\(UUID().uuidString).tmp")
+        do {
+            try JSONEncoder().encode(Contents(agentContents: on)).write(to: tmp, options: .withoutOverwriting)
+            try ownerOnly(tmp.path)
+            guard rename(tmp.path, url.path) == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        } catch {
+            try? FileManager.default.removeItem(at: tmp)
+            throw error
+        }
     }
 
     public func removeAll() {

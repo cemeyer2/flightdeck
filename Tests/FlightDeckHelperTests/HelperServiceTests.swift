@@ -297,6 +297,23 @@ final class HelperServiceTests: XCTestCase {
         XCTAssertEqual(mode, 0o600)
     }
 
+    func testSettingsFileModeFailureLeavesTheValueUnchanged() throws {
+        struct ModeFailed: Error {}
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        var fail = false
+        let store = FileHelperSettingsStore(url: dir.appendingPathComponent("settings.json")) { path in
+            if fail { throw ModeFailed() }
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path)
+        }
+        try store.setAgentContents(false)
+        fail = true
+        XCTAssertThrowsError(try store.setAgentContents(true))
+        XCTAssertFalse(store.agentContents)
+        // No half-written file is left beside it.
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: dir.path), ["settings.json"])
+    }
+
     func testSettingsFileWriteFailureThrows() throws {
         // The parent "folder" is a regular file, so neither the folder nor the file can be made.
         let blocker = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
