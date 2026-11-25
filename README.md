@@ -65,6 +65,7 @@ by showing which process and which subsystem is responsible.
     - [Benchmarks](#benchmarks)
 - [Recording and replay](#recording-and-replay)
 - [Everywhere in the app](#everywhere-in-the-app)
+  - [System-wide details (privileged helper)](#system-wide-details-privileged-helper)
 - [Integrations](#integrations)
 - [Measurement principles](#measurement-principles)
 - [Known limits](#known-limits)
@@ -289,7 +290,7 @@ FlightDeck takes an inventory, compares it with the previous one and records eac
   program each runs, whether it starts at login or boot, who signed it;
 - **system extensions** (`systemextensionsctl list`) and loaded **kernel extensions** (`kmutil showloaded`), third-party only;
 - **configuration profiles**: your user's profiles (`profiles list`), DEP/MDM enrollment and the managed-settings
-  domains in `/Library/Managed Preferences`. Profiles installed for the whole Mac can only be listed with root;
+  domains in `/Library/Managed Preferences`. Profiles installed for the whole Mac can only be listed with root (the [helper](#system-wide-details-privileged-helper), while unlocked);
 - **sharing services**: Remote Login, Screen Sharing, File Sharing, Remote Apple Events and Internet Sharing on or
   off (launchd's override database);
 - **apps** outside `/System` (the Installed Apps inventory): installed, updated or removed, with version, bundle ID,
@@ -303,7 +304,7 @@ why it may matter. Notable changes are flagged and raised once as findings: unsi
 program in a temporary, shared, hidden or home folder, a new third-party system or kernel extension, a new profile or
 managed setting, an MDM enrollment, a sharing service turned on. The first inventory is the baseline and raises
 nothing, as does a category the first time it can be read. Items link to Startup Apps, Installed Apps or Checkup.
-Login items and SMAppService background items aren't tracked (listing them needs Automation permission or root).
+Login items and SMAppService background items aren't tracked (listing them needs Automation permission or root), except while the [helper](#system-wide-details-privileged-helper) is unlocked.
 
 ### Activity
 
@@ -617,7 +618,7 @@ name or IP). The process inspector's Network tab shows the same list for the ins
 
 #### Connections
 
-Your processes' network sockets as a sortable, filterable table (process, PID, protocol, local and remote address,
+Your processes' network sockets (every process's, with the [helper](#system-wide-details-privileged-helper) unlocked) as a sortable, filterable table (process, PID, protocol, local and remote address,
 state), refreshed every few seconds, with the listening-ports panel on top (see Known limits for what it can see).
 
 #### UPnP
@@ -701,7 +702,7 @@ bar, from `diskutil apfs list -plist` and `diskutil info -plist /` (no root): yo
 for important usage" minus available), the sealed macOS volume, Preboot, Recovery, swap (VM), Update, APFS overhead and
 free, each explained. What Storage settings calls "System Data" is mostly the Data volume's caches, snapshots and app
 files, and this view says so. Local Time Machine snapshots (`tmutil listlocalsnapshots /`) are listed with dates; their
-sizes need root, so they show as unknown. Below that, **known space hogs**: app caches, logs, the Trash, old downloads,
+sizes need root, so they show as unknown (unless the [helper](#system-wide-details-privileged-helper) is unlocked). Below that, **known space hogs**: app caches, logs, the Trash, old downloads,
 iPhone/iPad backups, Xcode DerivedData, archives, device support and previews, simulator devices and runtimes (`simctl`
 from the selected Xcode, never the `xcrun` shim, which can pop up an install dialog), Docker/OrbStack/Colima disk images,
 the Homebrew cache (`brew --cache`), npm/Yarn/pnpm/pip/Cargo/Gradle caches, Mail downloads, Messages attachments, the
@@ -830,7 +831,7 @@ and domain, with a running-only filter and a Copy Label action.
 #### Users
 
 Who is logged in (console and remote sessions, with login times) and resource use by user. Other users' processes
-need root to measure, which the page says.
+need root to measure, which the page says (with the [helper](#system-wide-details-privileged-helper) unlocked, they are included).
 
 ### Tools
 
@@ -939,6 +940,35 @@ command (record, save or replay the black box, open a flight log, capture diagno
 10 minutes, a text summary (system, findings, top processes; no serial number or hardware UUID), macOS crash and hang
 reports from the last 24 hours, 2-second stack samples of the busiest and any hung app of yours, and recent unified-log
 errors. It may contain personal paths and names, so review it before sharing.
+
+### System-wide details (privileged helper)
+
+*Settings › Integrations › System-wide details. Off by default.* macOS lets an app see only your own processes in full.
+Turning on "Allow FlightDeck to read system-wide details (installs a helper that runs as root)" registers a small,
+read-only helper (macOS asks you to allow it in System Settings › Login Items). Once an administrator unlocks it,
+FlightDeck also shows other users' and system processes' CPU, memory, disk, energy and wake-ups (and the Users page's
+totals), every process's listening ports and connections, local snapshot sizes, configuration profiles installed for
+the whole Mac and Login Items background items; the inspector shows other processes' arguments, working folder, open
+files and sockets live, and can sample their stacks or memory once on request (the process pauses briefly;
+WindowServer, launchd, kernel_task, coreaudiod and loginwindow are never sampled). Values from the helper say "via
+helper" in tooltips.
+
+- **Developer ID builds only.** The helper runs as root, so FlightDeck only installs it from a build signed with a
+  Developer ID. Locally built copies and the current GitHub release downloads are ad-hoc signed and show
+  "Needs a signed build"; everything else works as usual. A Developer ID copy run from Downloads or a disk image shows "Move
+  FlightDeck to Applications first".
+- **Administrator unlock.** Root data appears only after "View all processes…" (Processes, Connections, the inspector)
+  or Unlock in Settings, and macOS's administrator name-and-password dialog; any account can unlock with an
+  administrator's credentials. The unlock lasts until FlightDeck quits, or until Lock. Nothing prompts at launch, and an
+  AI agent can never trigger the prompt.
+- **Read-only.** No request can change anything, signal a process or run anything but a fixed list of Apple tools.
+- **Contents are never saved.** Arguments, environment, open files, stacks and memory breakdowns read through the helper
+  are shown live only: never in recordings, the black box, the Flight Log, Fleet, Prometheus, Copy Summary or evidence
+  files. Counters (CPU, memory, disk, energy) persist like today's values. The web dashboard never shows helper data.
+- **AI assistants (MCP)** get counters while FlightDeck is unlocked, and other processes' contents only with "Let AI
+  agents read other processes' details" turned on (off by default); outputs say `"helper": "off" | "locked" |
+  "unlocked"`. While FlightDeck is unlocked, any program running as you can use MCP (or `FlightDeck --mcp`) to read
+  those counters.
 
 ## Integrations
 
@@ -1132,7 +1162,7 @@ Six themes: Light, Dark, Green, Amber, Blue, Mono.
 - **Light in the background.** With no FlightDeck window on screen, view updates stop (graphs catch up instantly when you return) and sampling drops to every 2 s (Settings); the black box, findings and alerts keep running. Background cost is about 2.5% of one core.
 - **Self-monitoring.** FlightDeck appears in its own process list by default (Settings → toggle).
 - **Identity-safe actions.** Signals are sent only if the PID still has the same start time (`ProcessIdentity`).
-- **Private by design.** FlightDeck sends no data anywhere. By default it makes no network requests at all; the only exception is the opt-in latency probe (Settings › Network › Network quality), which pings your router and one host you choose. The opt-in Prometheus and MCP servers only accept connections from this Mac.
+- **Private by design.** FlightDeck sends no data anywhere. By default it makes no network requests at all; the only exception is the opt-in latency probe (Settings › Network › Network quality), which pings your router and one host you choose. The opt-in Prometheus and MCP servers only accept connections from this Mac. The optional root helper's process contents are never saved; MCP gets them only with their own setting on.
 
 - **Private by design.** FlightDeck sends no data anywhere. By default it makes no network requests at all; the exceptions are the opt-in latency probe (Settings › Network › Network quality), which pings your router and one host you choose, and the UniFi view, which talks only to the console you configure (and, while nothing is configured, checks whether your router looks like one). The Camera & Mic history records only that a device was in use, never audio
 or video, and never leaves this Mac.
@@ -1146,7 +1176,8 @@ or video, and never leaves this Mac.
 - Live CPU and GPU clocks come from IOReport (Performance › GPU › CPU clusters); Power & Freq shows the DVFS tables.
 - Connections lists only your own processes' sockets, since `lsof` runs without root. The listening-ports panel would
   list every process's via `netstat`, but macOS gives an ad-hoc-signed app an empty socket table, so it falls back to
-  your own processes (and says so).
+  your own processes (and says so). The [helper](#system-wide-details-privileged-helper) lifts both limits while
+  unlocked, on Developer ID builds only.
 - The Network, UPnP and Internet pages need macOS's Local Network permission. macOS ties that permission to the app's
   signature, and an ad-hoc-signed build gets a new one each time it's rebuilt, so a rebuilt copy may need to be allowed
   again (System Settings › Privacy & Security › Local Network). Without it the ARP table and Bonjour come back empty.
