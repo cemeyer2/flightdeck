@@ -285,7 +285,11 @@ final class HelperModel: ObservableObject {
                 error = e.description
             }
             s.refreshStatus()
-            await MainActor.run { [error] in self.agentContentsError = error; self.refresh() }
+            // A Lock or a new session while the request was out has already cleared the error; don't bring it back.
+            await MainActor.run { [error] in
+                if self.session === s && s.state == .unlocked { self.agentContentsError = error }
+                self.refresh()
+            }
         }
     }
 }
