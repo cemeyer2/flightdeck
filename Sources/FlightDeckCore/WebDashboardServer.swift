@@ -41,7 +41,7 @@ public final class WebDashboardServer: @unchecked Sendable {
     private var context: WebNetworkContext
     private var allowlist: WebAllowlist
     private let requestedPort: UInt16, loopbackOnly: Bool
-    private let headDeadline: TimeInterval, keepAlive: TimeInterval, maxBacklog: Int
+    private let headDeadline: TimeInterval, keepAlive: TimeInterval, maxBacklog: Int, releaseFallback: TimeInterval
     private let provider: Provider
     private let onStreamCount: @Sendable (Int) -> Void
     private let log: @Sendable (String) -> Void
@@ -51,13 +51,17 @@ public final class WebDashboardServer: @unchecked Sendable {
     public static let invalidAllowlist = "Fix the allowed addresses first"
 
     /// `port` 0 picks a free one (tests). `loopbackOnly` binds 127.0.0.1 (tests and the developer demo).
+    /// `releaseFallback`: how long after `stop()` the port stops being held for a listener that hasn't cancelled, and
+    /// how long a bind that finds the port still taken by such a listener waits for it to cancel.
     public init(port: UInt16, loopbackOnly: Bool = false, context: WebNetworkContext, allowlist: WebAllowlist,
                 headDeadline: TimeInterval = 10, keepAlive: TimeInterval = 25, maxBacklog: Int = 256 << 10,
+                releaseFallback: TimeInterval = WebDashboardServer.releaseFallback,
                 provider: @escaping Provider,
                 onStreamCount: @escaping @Sendable (Int) -> Void = { _ in },
                 log: @escaping @Sendable (String) -> Void = { _ in }) {
         requestedPort = port; self.loopbackOnly = loopbackOnly; self.context = context; self.allowlist = allowlist
         self.headDeadline = headDeadline; self.keepAlive = keepAlive; self.maxBacklog = maxBacklog
+        self.releaseFallback = releaseFallback
         self.provider = provider; self.onStreamCount = onStreamCount; self.log = log
     }
 
@@ -79,10 +83,13 @@ public final class WebDashboardServer: @unchecked Sendable {
     }
 
     /// Ports whose listener is still cancelling, process-wide. `stop()` marks its port before it returns and the mark
-    /// is cleared when the listener reaches `.cancelled`; a server starting on a marked port binds only then.
+    /// is cleared when the listener reaches `.cancelled`; a server starting on a marked port binds only then. A mark
+    /// the fallback clears first is kept as overdue until that `.cancelled`, so a bind it let fail can try again.
     final class Releasing: @unchecked Sendable {
+        typealias Marks = [UInt16: (tokens: Set<Int>, waiting: [@Sendable () -> Void])]
         private let lock = NSLock()
-        private var held: [UInt16: (tokens: Set<Int>, waiting: [@Sendable () -> Void])] = [:]
+        private var held: Marks = [:]
+        private var overdue: Marks = [:]
         private var next = 0
 
         func begin(_ port: UInt16) -> Int {
@@ -92,13 +99,31 @@ public final class WebDashboardServer: @unchecked Sendable {
             return next
         }
 
-        /// Clears one mark (again is harmless); the starts waiting run once no mark on the port is left.
+        /// The listener reached `.cancelled`: clears its mark, held or overdue (again is harmless). The starts waiting
+        /// on either kind run once no mark of that kind on the port is left.
         func end(_ port: UInt16, token: Int) {
             lock.lock()
-            guard var h = held[port], h.tokens.remove(token) != nil else { lock.unlock(); return }
-            if h.tokens.isEmpty { held[port] = nil } else { held[port] = h; h.waiting = [] }
+            let run = Self.remove(token, port, &held) + Self.remove(token, port, &overdue)
             lock.unlock()
-            for w in h.waiting { w() }
+            for w in run { w() }
+        }
+
+        /// The fallback: the mark stops holding up starts on the port and stays overdue until `end`.
+        func expire(_ port: UInt16, token: Int) {
+            lock.lock()
+            guard held[port]?.tokens.contains(token) == true else { lock.unlock(); return }
+            overdue[port, default: ([], [])].tokens.insert(token)
+            let run = Self.remove(token, port, &held)
+            lock.unlock()
+            for w in run { w() }
+        }
+
+        /// Removes one mark; the starts waiting on the port when it was the last one.
+        private static func remove(_ token: Int, _ port: UInt16, _ marks: inout Marks) -> [@Sendable () -> Void] {
+            guard var h = marks[port], h.tokens.remove(token) != nil else { return [] }
+            if h.tokens.isEmpty { marks[port] = nil; return h.waiting }
+            marks[port] = h
+            return []
         }
 
         /// Runs `then` once `port` is free: at once when no listener on it is cancelling.
@@ -108,15 +133,31 @@ public final class WebDashboardServer: @unchecked Sendable {
             lock.unlock()
             then()
         }
+
+        /// When a listener on `port` has outlasted its fallback without cancelling: runs `then` once it cancels and
+        /// returns true. Otherwise returns false and `then` never runs.
+        func whenOverdueEnds(_ port: UInt16, _ then: @escaping @Sendable () -> Void) -> Bool {
+            lock.lock(); defer { lock.unlock() }
+            guard overdue[port] != nil else { return false }
+            overdue[port]!.waiting.append(then)
+            return true
+        }
+
+        func isOverdue(_ port: UInt16) -> Bool {
+            lock.lock(); defer { lock.unlock() }
+            return overdue[port] != nil
+        }
     }
     static let releasing = Releasing()
-    /// A cancel that never reports `.cancelled` stops holding up the port after this long.
-    static let releaseFallback: TimeInterval = 5
+    /// A cancel that never reports `.cancelled` stops holding up the port after this long (the default). A bind that
+    /// then finds the port taken waits up to this long again for that `.cancelled` before it reports the error.
+    public static let releaseFallback: TimeInterval = 5
 
     /// The port this server's listener holds (or is binding), its Releasing mark once stopped, and whether the listener
-    /// has already cancelled itself. Guarded by `lock`: `stop()` may run on any thread, the state handler on `queue`.
+    /// has already cancelled itself. `attempt` counts binds, so a listener a retry replaced no longer changes it.
+    /// Guarded by `lock`: `stop()` may run on any thread, the state handler on `queue`.
     private final class Hold: @unchecked Sendable {
-        var port: UInt16?, token: Int?, cancelled = false, stopped = false
+        var port: UInt16?, token: Int?, cancelled = false, stopped = false, attempt = 0
     }
     private let lock = NSLock()
     private let hold = Hold()
@@ -128,14 +169,21 @@ public final class WebDashboardServer: @unchecked Sendable {
         guard requestedPort != 0 else { listen(ready: ready); return }
         Self.releasing.whenFree(requestedPort) { [weak self] in
             guard let self else { return }
-            self.queue.async {
-                self.lock.lock(); let stopped = self.hold.stopped; self.lock.unlock()
-                if !stopped { self.listen(ready: ready) }
-            }
+            self.queue.async { self.listen(ready: ready) }
         }
     }
 
-    private func listen(ready: @escaping @Sendable (String?) -> Void) {
+    /// Binds unless stopped. The stopped check and taking the port are one step, so a `stop()` that lands while this
+    /// binds always finds the port to mark. With `retry`, a bind that finds a fixed port still taken by a listener
+    /// past its fallback binds once more when that listener reports `.cancelled` (retryWhenOverdueEnds).
+    private func listen(retry: Bool = true, ready: @escaping @Sendable (String?) -> Void) {
+        lock.lock()
+        guard !hold.stopped else { lock.unlock(); return }
+        hold.attempt += 1; hold.cancelled = false
+        if requestedPort != 0 { hold.port = requestedPort }
+        let attempt = hold.attempt
+        lock.unlock()
+        let wasOverdue = requestedPort != 0 && Self.releasing.isOverdue(requestedPort)
         let params = NWParameters.tcp
         // No address reuse: with it, a bind on every interface succeeds even while another listener holds the port on
         // 127.0.0.1, and Settings would say "Serving" for a port that something else answers on this Mac.
@@ -145,30 +193,72 @@ public final class WebDashboardServer: @unchecked Sendable {
         let port = NWEndpoint.Port(rawValue: requestedPort) ?? .any
         if loopbackOnly { params.requiredLocalEndpoint = .hostPort(host: .ipv4(.loopback), port: port) }
         let l: NWListener
-        do { l = loopbackOnly ? try NWListener(using: params) : try NWListener(using: params, on: port) } catch { ready("\(error)"); return }
+        do { l = loopbackOnly ? try NWListener(using: params) : try NWListener(using: params, on: port) } catch {
+            // Nothing will report `.cancelled`: let go of the port now, and of a mark a `stop()` meanwhile put on it.
+            lock.lock(); hold.cancelled = true; let p = hold.port, t = hold.token; lock.unlock()
+            if let p, let t { Self.releasing.end(p, token: t) }
+            ready("\(error)"); return
+        }
         listener = l
-        if requestedPort != 0 { lock.lock(); hold.port = requestedPort; lock.unlock() }
         l.newConnectionHandler = { [weak self] c in self?.accept(c) }
         var reported = false   // only touched on `queue`, where state updates are delivered
         let lock = lock, hold = hold
         l.stateUpdateHandler = { [weak self] st in
+            lock.lock(); let current = hold.attempt == attempt; lock.unlock()
             switch st {
             case .ready:
+                guard current else { break }
                 let bound = l.port?.rawValue
                 self?.port = bound
                 lock.lock(); hold.port = bound; lock.unlock()
                 if !reported { reported = true; ready(nil) }
             // `.waiting` is how a listener reports e.g. "address already in use"; it won't recover on its own here.
             case .failed(let e), .waiting(let e):
-                if !reported { reported = true; ready("\(e)") }
+                if !reported {
+                    reported = true
+                    let retrying = retry && current
+                        && (self?.retryWhenOverdueEnds(error: "\(e)", wasOverdue: wasOverdue, ready: ready) ?? false)
+                    if !retrying { ready("\(e)") }
+                }
                 l.cancel()
             case .cancelled:
+                guard current else { break }
                 lock.lock(); hold.cancelled = true; let p = hold.port, t = hold.token; lock.unlock()
                 if let p, let t { Self.releasing.end(p, token: t) }
             default: break
             }
         }
         l.start(queue: queue)
+    }
+
+    /// On `queue`, after a bind on a fixed port failed: when a stopped listener on it is past its fallback, binds once
+    /// more after that listener reports `.cancelled`, or reports `error` after `releaseFallback`, whichever comes
+    /// first, and returns true. Neither happens once this server is stopped. `wasOverdue`: such a listener was there
+    /// when the bind started; if it has cancelled since, before the failure got here, the bind runs again at once.
+    private func retryWhenOverdueEnds(error: String, wasOverdue: Bool,
+                                      ready: @escaping @Sendable (String?) -> Void) -> Bool {
+        guard requestedPort != 0 else { return false }
+        var settled = false   // only touched on `queue`
+        let waiting = Self.releasing.whenOverdueEnds(requestedPort) { [weak self] in
+            guard let self else { return }
+            self.queue.async {
+                guard !settled else { return }
+                settled = true
+                self.listen(retry: false, ready: ready)
+            }
+        }
+        guard waiting else {
+            guard wasOverdue else { return false }
+            queue.async { [self] in listen(retry: false, ready: ready) }
+            return true
+        }
+        queue.asyncAfter(deadline: .now() + releaseFallback) { [weak self] in
+            guard let self, !settled else { return }
+            settled = true
+            self.lock.lock(); let stopped = self.hold.stopped; self.lock.unlock()
+            if !stopped { ready(error) }
+        }
+        return true
     }
 
     /// Cancels the listener and every open connection (streams end at once). The port is marked as releasing before
@@ -181,8 +271,8 @@ public final class WebDashboardServer: @unchecked Sendable {
         let t = hold.token
         lock.unlock()
         if let p, let t {
-            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + Self.releaseFallback) {
-                Self.releasing.end(p, token: t)
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + releaseFallback) {
+                Self.releasing.expire(p, token: t)
             }
         }
         queue.async { [self] in

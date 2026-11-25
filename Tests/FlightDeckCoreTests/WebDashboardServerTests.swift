@@ -67,12 +67,13 @@ final class WebDashboardServerTests: XCTestCase {
     }
 
     func start(allow: String = "", headDeadline: TimeInterval = 10, maxBacklog: Int = 256 << 10, counts: Counts? = nil,
+               releaseFallback: TimeInterval = WebDashboardServer.releaseFallback,
                provider: WebDashboardServer.Provider? = nil) throws -> WebDashboardServer {
         let p: WebDashboardServer.Provider = provider ?? { withHistory, reply in
             reply(withHistory ? Data(#"{"history":[],"v":1}"#.utf8) : Data(#"{"v":1}"#.utf8))
         }
         let s = WebDashboardServer(port: 0, loopbackOnly: true, context: Self.context(), allowlist: .parse(allow),
-                                   headDeadline: headDeadline, maxBacklog: maxBacklog, provider: p,
+                                   headDeadline: headDeadline, maxBacklog: maxBacklog, releaseFallback: releaseFallback, provider: p,
                                    onStreamCount: { counts?.add($0) })
         let ready = expectation(description: "ready")
         let err = Box<String?>(nil)
@@ -287,10 +288,11 @@ final class WebDashboardServerTests: XCTestCase {
 
     /// Turning the dashboard off and on again keeps its port: a new server on it waits until the old listener has
     /// finished cancelling, with no retry here. The old server's queue is held up first, as on a busy Mac where it
-    /// hasn't got to the cancel yet when the new one binds. TIME_WAIT from replies closed on the server side doesn't
-    /// block the bind.
+    /// hasn't got to the cancel yet when the new one binds. The old server's fallback is far longer than the wait, so
+    /// only the `.cancelled` hand-off can let the new one bind in time. TIME_WAIT from replies closed on the server
+    /// side doesn't block the bind.
     func testRestartOnSamePortAfterTraffic() throws {
-        let a = try start(), port = try XCTUnwrap(a.port)
+        let a = try start(releaseFallback: 60), port = try XCTUnwrap(a.port)
         // Replies close from the server side, which leaves its end of each connection in TIME_WAIT.
         for _ in 0..<3 { XCTAssertTrue(raw(port, request("/")).hasPrefix("HTTP/1.1 200")) }
         a.queue.suspend()
@@ -303,6 +305,41 @@ final class WebDashboardServerTests: XCTestCase {
         wait(for: [ready], timeout: 10)
         b.stop()
         XCTAssertNil(err.value, "turning the dashboard off and on again keeps its port")
+    }
+
+    /// The old listener is slower to cancel than its fallback: the new server's bind finds the port still taken, and
+    /// it binds again once the old listener does report `.cancelled` instead of leaving the dashboard off.
+    func testRestartBindsAgainWhenTheCancelOutlastsTheFallback() throws {
+        let a = try start(releaseFallback: 0.2), port = try XCTUnwrap(a.port)
+        a.queue.suspend()
+        var suspended = true
+        defer { if suspended { a.queue.resume() } }
+        a.stop()
+        let b = WebDashboardServer(port: port, loopbackOnly: true, context: Self.context(), allowlist: .parse(""), provider: { _, r in r(nil) })
+        let ready = expectation(description: "b")
+        let err = Box<String?>(nil)
+        b.start { e in err.value = e; ready.fulfill() }
+        usleep(1_000_000)   // well past a's fallback: b has tried to bind and found the port taken
+        suspended = false; a.queue.resume()
+        wait(for: [ready], timeout: 10)
+        b.stop()
+        XCTAssertNil(err.value, "the dashboard comes back on its port once the old listener lets go")
+    }
+
+    /// A listener that never cancels holds up a new server on its port only for a bounded time, then the bind's error.
+    func testRestartGivesUpWhenTheOldListenerNeverCancels() throws {
+        let a = try start(releaseFallback: 0.2), port = try XCTUnwrap(a.port)
+        a.queue.suspend()
+        defer { a.queue.resume() }
+        a.stop()
+        let b = WebDashboardServer(port: port, loopbackOnly: true, context: Self.context(), allowlist: .parse(""),
+                                   releaseFallback: 0.5, provider: { _, r in r(nil) })
+        let ready = expectation(description: "b")
+        let err = Box<String?>(nil)
+        b.start { e in err.value = e; ready.fulfill() }
+        wait(for: [ready], timeout: 10)
+        b.stop()
+        XCTAssertNotNil(err.value, "the port is still taken, and Settings says so")
     }
 
     /// Only turning the dashboard on or off, or a new port, starts a server; allowlist, Advanced and network changes
