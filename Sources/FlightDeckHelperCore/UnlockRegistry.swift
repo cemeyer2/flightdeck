@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import FlightDeckHelperProtocol
 
 public typealias ConnectionID = UInt64
@@ -13,7 +14,8 @@ public final class UnlockRegistry {
     private let clock: () -> Date
     /// uid → the connection that unlocked for it.
     private var holders: [uid_t: ConnectionID] = [:]
-    private var verifiedAt: [ConnectionID: Date] = [:]
+    /// When each connection's authorization last verified, and a SHA-256 of that external form (never the form itself).
+    private var verified: [ConnectionID: (at: Date, digest: Data)] = [:]
     /// Moves on each time a connection's unlock ends. Kept after a close (never removed), so a check that started
     /// before the close can't match a fresh 0; connection IDs aren't reused and the helper exits when idle.
     private var epochs: [ConnectionID: UInt64] = [:]
@@ -34,12 +36,17 @@ public final class UnlockRegistry {
 
     public func connectionClosed(_ c: ConnectionID) { end(c) }
 
-    public func cachedVerification(connection: ConnectionID) -> Bool {
-        guard let t = verifiedAt[connection] else { return false }
-        return clock().timeIntervalSince(t) < HelperLimits.authReverifyInterval
+    /// A hit only for the same external form that verified on this connection; no form is never a hit.
+    public func cachedVerification(connection: ConnectionID, form: Data?) -> Bool {
+        guard let form, let v = verified[connection], v.digest == Self.digest(form) else { return false }
+        return clock().timeIntervalSince(v.at) < HelperLimits.authReverifyInterval
     }
 
-    public func recordVerification(connection: ConnectionID) { verifiedAt[connection] = clock() }
+    public func recordVerification(connection: ConnectionID, form: Data) {
+        verified[connection] = (clock(), Self.digest(form))
+    }
+
+    private static func digest(_ form: Data) -> Data { Data(SHA256.hash(data: form)) }
 
     /// A presented authorization no longer verifies (the right was revoked): the connection's unlock ends.
     public func verificationFailed(connection: ConnectionID) { end(connection) }
@@ -51,7 +58,7 @@ public final class UnlockRegistry {
 
     private func end(_ c: ConnectionID) {
         epochs[c, default: 0] &+= 1
-        verifiedAt[c] = nil
+        verified[c] = nil
         for (uid, h) in holders where h == c { holders[uid] = nil }
     }
 }

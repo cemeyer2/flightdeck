@@ -152,6 +152,26 @@ final class HelperServiceTests: XCTestCase {
         XCTAssertEqual(code(send(s, .processRusage(ids: [pid500]), from: standalone)), .notAuthorized)
     }
 
+    func testCachedUnlockNeedsTheSameForm() {
+        let s = greeted()
+        guard case .rusage = send(s, .processRusage(ids: [pid500]), auth: form) else { return XCTFail() }
+        // No form at all is never a cache hit.
+        XCTAssertEqual(code(send(s, .processRusage(ids: [pid500]))), .notAuthorized)
+        XCTAssertEqual(authority.verifyCount, 1)
+    }
+
+    func testCachedUnlockChecksADifferentForm() {
+        let s = greeted()
+        guard case .rusage = send(s, .processRusage(ids: [pid500]), auth: form) else { return XCTFail() }
+        XCTAssertEqual(code(send(s, .processRusage(ids: [pid500]), auth: Data(repeating: 1, count: 32))), .notAuthorized)
+        XCTAssertEqual(authority.verifyCount, 2)
+        // A different form that does verify is an unlock of its own.
+        let other = Data(repeating: 2, count: 32)
+        authority.validForms.insert(other)
+        guard case .rusage = send(s, .processRusage(ids: [pid500]), auth: other) else { return XCTFail() }
+        XCTAssertEqual(authority.verifyCount, 3)
+    }
+
     /// Holds the app's first verify in flight while `during` runs (a lock, or the connection closing), then lets it
     /// finish and returns its response.
     func verifyRacing(_ s: HelperService, during: () -> Void) -> HelperResponse? {

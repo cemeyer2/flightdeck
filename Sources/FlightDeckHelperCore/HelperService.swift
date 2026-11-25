@@ -97,21 +97,23 @@ public final class HelperService {
 
     /// The authd check runs outside the lock; the registry is only touched under it. A lock or disconnect while the
     /// check runs moves the connection's epoch on, and the check's answer is then dropped instead of granting an
-    /// unlock that has already ended.
+    /// unlock that has already ended. The cache only counts for the same form that verified, so a request with none,
+    /// or with another, is checked on its own.
     private func checkAccess(_ form: Data?, _ c: HelperCaller) -> Access {
         let (cached, epoch): (Access?, UInt64) = withLock {
-            let hit = registry.cachedVerification(connection: c.connection)
+            let hit = registry.cachedVerification(connection: c.connection, form: form)
             let unchecked = !hit && form != nil
             return (unchecked ? nil : registry.access(connection: c.connection, uid: c.uid, verified: hit),
                     registry.epoch(connection: c.connection))
         }
         if let cached { return cached }
-        let verified = form.map { authority.verify(externalForm: $0, right: HelperIDs.rightName) } ?? false
+        guard let form else { return withLock { registry.access(connection: c.connection, uid: c.uid, verified: false) } }
+        let verified = authority.verify(externalForm: form, right: HelperIDs.rightName)
         return withLock {
             guard greeted.contains(c.connection), registry.epoch(connection: c.connection) == epoch else {
                 return registry.access(connection: c.connection, uid: c.uid, verified: false)
             }
-            if verified { registry.recordVerification(connection: c.connection) }
+            if verified { registry.recordVerification(connection: c.connection, form: form) }
             else { registry.verificationFailed(connection: c.connection) }
             return registry.access(connection: c.connection, uid: c.uid, verified: verified)
         }
