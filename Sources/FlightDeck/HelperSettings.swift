@@ -63,7 +63,8 @@ final class HelperModel: ObservableObject {
     /// An unregister() failure after turning the helper off (the status itself then reads Off).
     @Published private(set) var unregisterError: String?
     /// Why the last change to the agent setting didn't take (the toggle shows the stored value either way).
-    @Published private(set) var agentContentsError: String?
+    var agentContentsError: String? { agentNote.error }
+    @Published private var agentNote = AgentSettingNote()
     @Published private(set) var busy = false
 
     /// The session for the current state: nil unless the toggle is on, the build is eligible, the daemon is
@@ -71,7 +72,7 @@ final class HelperModel: ObservableObject {
     private(set) var session: HelperSession? {
         didSet {
             // An error from the old session's change says nothing about the new one.
-            if oldValue !== session { agentContentsError = nil }
+            if oldValue !== session { agentNote.invalidate() }
             Self.box.set(session); onSessionChange?(session)
         }
     }
@@ -267,7 +268,7 @@ final class HelperModel: ObservableObject {
 
     func lock() {
         guard let s = session else { return }
-        agentContentsError = nil
+        agentNote.invalidate()
         let holder = unlockHolder
         Task.detached(priority: .userInitiated) {
             s.lock()
@@ -279,17 +280,15 @@ final class HelperModel: ObservableObject {
 
     func setAgentContents(_ on: Bool) {
         guard let s = session, s.state == .unlocked else { return }
+        let ticket = agentNote.ticket()
         Task.detached(priority: .userInitiated) {
             var error: String?
             if case .failure(let e) = s.request(.setAgentContents(on), deadline: HelperSession.controlDeadline) {
                 error = e.description
             }
             s.refreshStatus()
-            // A Lock or a new session while the request was out has already cleared the error; don't bring it back.
-            await MainActor.run { [error] in
-                if self.session === s && s.state == .unlocked { self.agentContentsError = error }
-                self.refresh()
-            }
+            // A Lock or a new session while the request was out made this reply stale (AgentSettingNote).
+            await MainActor.run { [error] in self.agentNote.reply(error, ticket: ticket); self.refresh() }
         }
     }
 }

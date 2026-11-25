@@ -95,3 +95,19 @@ public enum HelperStatus: Equatable, Sendable {
         }
     }
 }
+
+/// Settings' note about the last failed change to the agent setting. A reply that arrives after Lock or a new helper
+/// session is dropped, whatever the session's state reads by then (a failed status refresh reads as locked, which
+/// must not hide an error from a change made while unlocked).
+public struct AgentSettingNote: Equatable, Sendable {
+    public private(set) var error: String?
+    private var generation: UInt64 = 0
+    public init() {}
+
+    /// Called when a change is sent; its reply is accepted only with the returned ticket.
+    public func ticket() -> UInt64 { generation }
+    /// Lock or a new session: clears the note and makes replies to earlier changes stale.
+    public mutating func invalidate() { error = nil; generation &+= 1 }
+    /// A reply to the change sent with `ticket`. Stale replies change nothing.
+    public mutating func reply(_ error: String?, ticket: UInt64) { if ticket == generation { self.error = error } }
+}
