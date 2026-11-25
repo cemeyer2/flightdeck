@@ -307,6 +307,41 @@ final class WebDashboardServerTests: XCTestCase {
         XCTAssertNil(err.value, "turning the dashboard off and on again keeps its port")
     }
 
+    /// The old listener is slower to cancel than its fallback: the new server's bind finds the port still taken, and
+    /// it binds again once the old listener does report `.cancelled` instead of leaving the dashboard off.
+    func testRestartBindsAgainWhenTheCancelOutlastsTheFallback() throws {
+        let a = try start(releaseFallback: 0.2), port = try XCTUnwrap(a.port)
+        a.queue.suspend()
+        var suspended = true
+        defer { if suspended { a.queue.resume() } }
+        a.stop()
+        let b = WebDashboardServer(port: port, loopbackOnly: true, context: Self.context(), allowlist: .parse(""), provider: { _, r in r(nil) })
+        let ready = expectation(description: "b")
+        let err = Box<String?>(nil)
+        b.start { e in err.value = e; ready.fulfill() }
+        usleep(1_000_000)   // well past a's fallback: b has tried to bind and found the port taken
+        suspended = false; a.queue.resume()
+        wait(for: [ready], timeout: 10)
+        b.stop()
+        XCTAssertNil(err.value, "the dashboard comes back on its port once the old listener lets go")
+    }
+
+    /// A listener that never cancels holds up a new server on its port only for a bounded time, then the bind's error.
+    func testRestartGivesUpWhenTheOldListenerNeverCancels() throws {
+        let a = try start(releaseFallback: 0.2), port = try XCTUnwrap(a.port)
+        a.queue.suspend()
+        defer { a.queue.resume() }
+        a.stop()
+        let b = WebDashboardServer(port: port, loopbackOnly: true, context: Self.context(), allowlist: .parse(""),
+                                   releaseFallback: 0.5, provider: { _, r in r(nil) })
+        let ready = expectation(description: "b")
+        let err = Box<String?>(nil)
+        b.start { e in err.value = e; ready.fulfill() }
+        wait(for: [ready], timeout: 10)
+        b.stop()
+        XCTAssertNotNil(err.value, "the port is still taken, and Settings says so")
+    }
+
     /// Only turning the dashboard on or off, or a new port, starts a server; allowlist, Advanced and network changes
     /// go to the running one. Updating it in place keeps the listener and an allowed stream open, drops a client the
     /// new list no longer admits, and a list that is briefly invalid while typed drops everyone without unbinding.
