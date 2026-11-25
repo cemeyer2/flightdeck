@@ -1,0 +1,111 @@
+// Checks on the shipped process catalog: every entry is well formed and cites checkable sources, no key is claimed
+// twice (the cross-batch check when the part files are merged), today's explanations and the protected processes are
+// covered, and lookups stay cheap enough to run per row per refresh.
+import XCTest
+@testable import FlightDeckCore
+
+final class ProcessCatalogContentTests: XCTestCase {
+    let catalog = ProcessCatalog.shared
+
+    func testEveryEntryIsValid() {
+        func trimmed(_ s: String) -> Bool { s == s.trimmingCharacters(in: .whitespacesAndNewlines) }
+        for e in catalog.entries {
+            let texts = [e.id, e.title, e.summary, e.findingNote, e.groundedIn] + [e.busyWhen, e.whatToDo].compactMap { $0 }
+            for t in texts { XCTAssertFalse(t.isEmpty, e.id); XCTAssertTrue(trimmed(t), "\(e.id): whitespace around “\(t)”") }
+            XCTAssertLessThanOrEqual(e.title.count, 60, e.id)
+            XCTAssertLessThanOrEqual(e.summary.count, 280, e.id)
+            XCTAssertLessThanOrEqual(e.findingNote.count, 160, e.id)
+            XCTAssertFalse((e.names + e.namePrefixes + e.paths + e.pathPrefixes + e.bundleIDs).isEmpty, "\(e.id) has no match key")
+            for p in e.paths + e.pathPrefixes { XCTAssertTrue(p.hasPrefix("/"), "\(e.id): \(p)") }
+            if case .vendor(let v) = e.maker {
+                XCTAssertFalse(v.isEmpty, e.id)
+                if !e.bundleIDs.isEmpty { XCTAssertFalse(e.teamIDs.isEmpty, "\(e.id): a bundle ID key needs team IDs") }
+                if !(e.names + e.namePrefixes).isEmpty {
+                    XCTAssertFalse((e.paths + e.pathPrefixes).isEmpty, "\(e.id): vendor name keys need the vendor's own locations")
+                }
+            }
+            for src in e.groundedIn.components(separatedBy: "; ") {
+                guard let u = URL(string: src), let scheme = u.scheme else { XCTFail("\(e.id): unparseable source \(src)"); continue }
+                XCTAssertTrue(["https", "x-man-page", "file"].contains(scheme), "\(e.id): \(src)")
+                if scheme == "file" { XCTAssertTrue(src.hasPrefix("file:///"), "\(e.id): \(src) must be absolute") }
+            }
+        }
+    }
+
+    /// Corporate security and device-management entries (E2) never suggest quitting and always say what to do instead.
+    func testManagedEntries() {
+        for e in catalog.entries where e.managed {
+            XCTAssertFalse(e.isApple, e.id)
+            XCTAssertEqual(e.quit, .avoid, e.id)
+            XCTAssertNotNil(e.whatToDo, e.id)
+            for t in [e.summary, e.whatToDo ?? "", e.findingNote] {
+                XCTAssertNil(t.range(of: "quit", options: .caseInsensitive), "\(e.id): \(t)")
+            }
+        }
+    }
+
+    func testNoDuplicates() {
+        func dupes(_ keys: [String]) -> [String] { Dictionary(grouping: keys, by: { $0 }).filter { $0.value.count > 1 }.map(\.key) }
+        let es = catalog.entries
+        XCTAssertEqual(dupes(es.map(\.id)), [], "ids")
+        XCTAssertEqual(dupes(es.flatMap(\.names)), [], "names")
+        XCTAssertEqual(dupes(es.flatMap(\.paths)), [], "paths")
+        XCTAssertEqual(dupes(es.flatMap(\.bundleIDs)), [], "bundle IDs")
+        XCTAssertEqual(dupes(es.flatMap(\.namePrefixes)), [], "name prefixes")
+        XCTAssertEqual(dupes(es.flatMap(\.pathPrefixes)), [], "path prefixes")
+        for e in es {
+            for p in e.namePrefixes { for o in es where o.id != e.id { XCTAssertFalse(o.names.contains(p), "\(e.id)'s prefix \(p) is \(o.id)'s name") } }
+            for p in e.pathPrefixes { for o in es where o.id != e.id { XCTAssertFalse(o.paths.contains(p), "\(e.id)'s prefix \(p) is \(o.id)'s path") } }
+        }
+    }
+
+    func testBatchesAreSmall() {
+        XCTAssertEqual(ProcessCatalogParts.batches.map(\.number), Array(1...12))
+        for b in ProcessCatalogParts.batches { XCTAssertLessThanOrEqual(b.entries.count, 100, b.area) }
+    }
+
+    /// Every name the old 13-row KnownProcess table explained still gets an explanation.
+    func testLegacyKnownNamesResolve() throws {
+        try XCTSkipIf(ProcessCatalogParts.all.isEmpty, "the catalog has no entries yet")
+        let apple = ["mds", "mds_stores", "mdworker", "mdworker_shared", "mdsync", "backupd", "backupd-helper", "photoanalysisd",
+                     "photolibraryd", "mediaanalysisd", "softwareupdated", "softwareupdate_download_service", "mobileassetd",
+                     "kernel_task", "WindowServer", "bird", "cloudd", "fileproviderd", "nsurlsessiond", "XprotectService", "XProtect",
+                     "syspolicyd", "trustd", "corespotlightd", "suggestd", "knowledge-agent", "coreaudiod", "launchd",
+                     "com.apple.WebKit.WebContent"]
+        for n in apple { XCTAssertNotNil(catalog.lookup(name: n, path: "", signature: nil).known, n) }
+        let helpers = "/Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/131.0.6778.86/Helpers/"
+        for n in ["Google Chrome Helper", "Google Chrome Helper (Renderer)"] {
+            XCTAssertNotNil(catalog.lookup(name: n, path: helpers + "\(n).app/Contents/MacOS/\(n)", signature: nil).known, n)
+        }
+    }
+
+    /// Rules refuse to touch these, so the catalog must not call them safe to quit.
+    func testProtectedNamesAreNotSafe() throws {
+        try XCTSkipIf(ProcessCatalogParts.all.isEmpty, "the catalog has no entries yet")
+        for n in RuleEngine.protected {
+            let e = catalog.lookup(name: n, path: "", signature: nil).known
+            XCTAssertNotNil(e, n)
+            XCTAssertNotEqual(e?.quit, .safe, n)
+        }
+    }
+
+    /// The thermal finding explains kernel_task by entry id.
+    func testKernelTaskEntryExists() throws {
+        try XCTSkipIf(ProcessCatalogParts.all.isEmpty, "the catalog has no entries yet")
+        XCTAssertNotNil(catalog.entry(id: "kernel-task"))
+    }
+
+    /// Rows look every process up on every refresh. 10,000 lookups over this Mac's real names and paths (plus lookalike
+    /// and hidden-path variants) must stay well under 100 ms even in a debug build.
+    func testLookupPerformance() {
+        let real = ProcessSampler().sample().map { ($0.name, $0.path) }
+        let mix = real + real.map { ($0.0, "") } + real.map { ($0.0, "/Users/x/Downloads/" + $0.0) }
+        XCTAssertFalse(mix.isEmpty)
+        let t = Date()
+        var hits = 0
+        for i in 0..<10_000 { let (n, p) = mix[i % mix.count]; if catalog.lookup(name: n, path: p, signature: nil).known != nil { hits += 1 } }
+        let ms = Date().timeIntervalSince(t) * 1000
+        print("COST catalog 10k lookups", String(format: "%.1f ms", ms), "(\(hits) known)")
+        XCTAssertLessThan(ms, 100)
+    }
+}
