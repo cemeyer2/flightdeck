@@ -40,10 +40,11 @@ final class WebDashboardFeedTests: XCTestCase {
         let main = Analyzer(), mainLog = IncidentLog(url: nil), feed = WebDashboardFeed(ownUID: WebDashboardFeedTests.me)
         var lastMain: [Finding] = []
         @discardableResult
-        func step(_ s: Snapshot, enabled: Bool = true, helperFree: [Finding] = []) -> WebDashboardData? {
-            lastMain = main.ingest(s) + helperFree
+        func step(_ s: Snapshot, enabled: Bool = true, others: [Finding] = []) -> WebDashboardData? {
+            let analyzed = main.ingest(s)
+            lastMain = analyzed + others
             mainLog.update(lastMain, at: s.time)
-            return feed.ingest(s, enabled: enabled, main: lastMain, helperFree: helperFree)
+            return feed.ingest(s, enabled: enabled, analyzed: analyzed, others: others)
         }
     }
 
@@ -53,7 +54,7 @@ final class WebDashboardFeedTests: XCTestCase {
         let r = Rig()
         let extra = Finding(id: "backup-old", severity: .info, icon: "clock", title: "No backup", detail: nil, since: t0, destination: nil)
         var out: WebDashboardData?
-        for i in 0..<40 { out = r.step(snap(i, [safari(cpu: 120)]), helperFree: [extra]) }
+        for i in 0..<40 { out = r.step(snap(i, [safari(cpu: 120)]), others: [extra]) }
         let d = try XCTUnwrap(out)
         XCTAssertEqual(d.findings, r.lastMain, "no helper values: the main findings are already clean")
         XCTAssertTrue(d.findings.contains { $0.id == "cpu:/Applications/Safari.app" })
@@ -142,5 +143,38 @@ final class WebDashboardFeedTests: XCTestCase {
         let d = r.step(snap(40, [safari(cpu: 1), gone]))
         XCTAssertTrue(text(r.lastMain).contains("secretd is using"))
         XCTAssertFalse(text(d?.findings ?? []).contains("secretd"), "the main analyzer is tainted even if the dashboard was off")
+    }
+
+    // MARK: What Changed
+
+    func event(_ name: String, _ item: InventoryItem) -> ChangeEvent {
+        ChangeEvent(id: "added:" + item.id, detected: t0, estimated: nil, kind: .added, item: item, previous: nil,
+                    summary: "Added \(name)", reasons: ["new"], notable: true)
+    }
+    func deviceProfile(_ name: String) -> InventoryItem {
+        InventoryItem(category: .profile, key: "profile:" + name, name: name, scope: ChangeReaders.deviceScope)
+    }
+    func backgroundItem(_ name: String) -> InventoryItem {
+        InventoryItem(category: .launchItem, key: ChangeReaders.backgroundKeyPrefix + name, name: name, scope: "Login Items (app)")
+    }
+    func agent(_ name: String) -> InventoryItem { InventoryItem(category: .launchItem, key: "agent:" + name, name: name) }
+
+    /// Mac-wide profiles and Login Items background records are read by the helper, so changes to them stay off the
+    /// dashboard, on their own and when they would be named in a batch finding.
+    func testChangesReadByHelperStayOffDashboard() {
+        let one = [event("SecretCorp MDM", deviceProfile("SecretCorp MDM")), event("Updater", agent("Updater"))]
+        XCTAssertEqual(ChangeFindings.findings(one).count, 2)
+        XCTAssertEqual(ChangeFindings.dashboardFindings(one).map(\.title), ["Added Updater"])
+        let many = [event("SecretCorp MDM", deviceProfile("SecretCorp MDM")), event("hidden-bg", backgroundItem("hidden-bg"))]
+            + (0..<4).map { event("Agent\($0)", agent("Agent\($0)")) }
+        XCTAssertTrue(text(ChangeFindings.findings(many)).contains("6 notable changes"))
+        let d = text(ChangeFindings.dashboardFindings(many))
+        XCTAssertTrue(d.contains("4 notable changes"))
+        XCTAssertFalse(d.contains("SecretCorp") || d.contains("hidden-bg"))
+        let w = ChangeWatch()
+        w.add(ChangeFindings.findings(one), dashboard: ChangeFindings.dashboardFindings(one), at: t0)
+        XCTAssertEqual(w.findings(now: t0).count, 2)
+        XCTAssertEqual(w.dashboardFindings(now: t0).map(\.title), ["Added Updater"])
+        XCTAssertTrue(w.dashboardFindings(now: t0.addingTimeInterval(ChangeFindings.linger + 1)).isEmpty)
     }
 }

@@ -18,11 +18,11 @@ public struct WebDashboardData {
 /// Decides, per sample, which findings and incidents the dashboard gets. Not thread-safe: the Engine confines it to its
 /// sampling queue.
 ///
-/// - Helper not contributing (and not recently): the main findings are already clean and are reused; no extra analysis.
+/// - Helper not contributing (and not recently): the main Analyzer's findings are already clean and are reused; no
+///   extra analysis.
 /// - Helper contributing, or within `holdDown` of its last value: a second Analyzer runs on the helper-free snapshot.
 ///   It starts fresh, unseeded (the black box holds helper values), so baseline findings and ones that need some
-///   seconds of history appear a few samples later than in the app. Findings from per-app baselines (DailyLog) are
-///   left out: they are built from helper-inclusive history.
+///   seconds of history appear a few samples later than in the app.
 /// - Dashboard off: nothing is kept except when the helper last contributed (one scan of the process list per sample).
 ///
 /// Incidents always come from the dashboard's own in-memory log, fed with whatever findings the dashboard got, so
@@ -30,8 +30,9 @@ public struct WebDashboardData {
 /// the dashboard's incident history starts when the dashboard (or the app) did, and has no rule-action incidents.
 public final class WebDashboardFeed {
     /// How long the main Analyzer can still carry helper values after the last one: per-app CPU and GPU are smoothed
-    /// over ~20 s, and the leak finding fits the last 30 minutes of per-app memory.
-    public static let holdDown: TimeInterval = 1800
+    /// over ~20 s, and the leak finding fits the last 30 minutes of per-app memory (a point exactly 30 minutes old
+    /// still counts, hence the extra minute).
+    public static let holdDown: TimeInterval = 1800 + 60
     /// The user's thresholds, forwarded to the dashboard's Analyzer.
     public var thresholds = Thresholds() { didSet { analyzer?.thresholds = thresholds } }
     /// Whether the dashboard's own Analyzer is running (for tests).
@@ -43,10 +44,11 @@ public final class WebDashboardFeed {
 
     public init(ownUID: UInt32 = getuid()) { self.ownUID = ownUID }
 
-    /// Call once per sample, after the main analysis. `main` is every live finding the app computed; `helperFree` is
-    /// the part of it from sources that never read per-process counters (launches, thermals, backups…). nil while the
-    /// dashboard is off.
-    public func ingest(_ s: Snapshot, enabled: Bool, main: [Finding], helperFree: [Finding]) -> WebDashboardData? {
+    /// Call once per sample, after the main analysis. `analyzed` is the main Analyzer's result for `s`; `others` are the
+    /// findings from sources that never use helper values (launches, thermals, backups, the dashboard's change
+    /// findings…). Per-app baseline findings (DailyLog) are never passed: their "usual" figures come from saved,
+    /// helper-inclusive history. nil while the dashboard is off.
+    public func ingest(_ s: Snapshot, enabled: Bool, analyzed: [Finding], others: [Finding]) -> WebDashboardData? {
         if s.processes.contains(where: { $0.source == .helper }) { lastHelperValue = s.time }
         guard enabled else { analyzer = nil; log = IncidentLog(url: nil); return nil }
         let clean = s.withoutHelperValues(ownUID: ownUID)
@@ -54,10 +56,10 @@ public final class WebDashboardFeed {
         if let last = lastHelperValue, s.time.timeIntervalSince(last) < Self.holdDown {
             let a = analyzer ?? { let a = Analyzer(); a.thresholds = thresholds; return a }()
             analyzer = a
-            findings = a.ingest(clean) + helperFree
+            findings = a.ingest(clean) + others
         } else {
             analyzer = nil
-            findings = main
+            findings = analyzed + others
         }
         log.update(findings, at: s.time)
         return WebDashboardData(snapshot: clean, findings: findings, incidents: Array(log.incidents.suffix(50)))

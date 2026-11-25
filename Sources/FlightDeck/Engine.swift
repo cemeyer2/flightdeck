@@ -457,17 +457,18 @@ final class Engine: ObservableObject {
             self.launchLog.ingest(s.processes, at: s.time)
             // Respawn loops and baseline findings ("3× its usual memory") join the Analyzer's, so they reach the banner,
             // alerts and the Flight Log the same way.
-            // `helperFree` are the sources that never read per-process counters, so the web dashboard can reuse them.
+            // The web dashboard gets the same sources (each is evaluated once), minus per-app baselines and changes only
+            // the helper could read: see WebDashboardFeed.
             let analyzed = analyzer.ingest(s), baselines = dailyLog.ingest(s)
-            let helperFree = self.launchLog.findings(now: s.time) + self.thermal.ingest(s)
+            let before = self.launchLog.findings(now: s.time) + self.thermal.ingest(s)
                 + CameraMicService.findings(now: s.time)   // opt-in camera & mic alerts
                 + DestinationService.findings(now: s.time)   // opt-in "new destination" alerts
                 + RestartWatch.shared.findings(now: s.time)   // one-shot: unexpected shutdown or panic since last launch
-                + ChangeWatch.shared.findings(now: s.time)   // notable changes: unsigned launch agent, new extension or profile…
-                + BackupWatch.shared.findings()   // no successful Time Machine backup for days (refreshed every 15 min)
+            let changes = ChangeWatch.shared.findings(now: s.time)   // notable changes: unsigned launch agent, new extension or profile…
+            let after = BackupWatch.shared.findings()   // no successful Time Machine backup for days (refreshed every 15 min)
                 + FleetWatch.shared.findings()   // a paired Mac in trouble (set by the Fleet poll)
                 + PeripheralsService.findings(now: s.time)   // once per plug-in: slow drive; once per discharge: low accessory
-            let found = analyzed + baselines + helperFree
+            let found = analyzed + baselines + before + changes + after
             self.chargeCurve.ingest(s)
             ruleEngine.frontmostPID = front
             let firings = ruleEngine.evaluate(s)
@@ -478,7 +479,8 @@ final class Engine: ObservableObject {
             if s.time.timeIntervalSince(self.lastIncidentSave) > 60 { incidentLog.save(); self.lastIncidentSave = s.time }
             let log: [Incident]? = incidentLog.revision != self.incidentRevision ? incidentLog.incidents : nil
             self.incidentRevision = incidentLog.revision
-            let webData = webFeed.ingest(s, enabled: web, main: found, helperFree: helperFree)
+            let webData = webFeed.ingest(s, enabled: web, analyzed: analyzed,
+                                         others: web ? before + ChangeWatch.shared.dashboardFindings(now: s.time) + after : [])
             Task { @MainActor in
                 // publish only real changes (each publish re-evaluates every observing view)
                 if found.map(\.signature) != self.liveFindings.map(\.signature) { self.liveFindings = found }
