@@ -141,14 +141,27 @@ public struct ProcessCatalog: Sendable {
     }
 
     func lookup(pid: Int32, name: String, path: String, signature: ProcessDetails.Signature?, ownExecutable: String?) -> ProcessMatch {
-        let mine = pid == getpid() || (!path.isEmpty && path == ownExecutable)
+        let mine = pid == getpid() || (!path.isEmpty && ownExecutable.map { path == $0 || Self.sameFile(path, $0) } == true)
         if mine, let me = byID[Self.selfID] { return .known(me, by: .path, pathVerified: true) }
         return lookup(name: name, path: path, signature: signature)
     }
 
     static let selfID = "flightdeck"
-    /// This process's executable with symlinks resolved, as process paths are reported.
-    static let ownExecutable = Bundle.main.executableURL?.resolvingSymlinksInPath().path
+    /// This process's executable resolved by realpath, as process paths are reported (keeping /private, which
+    /// URL.resolvingSymlinksInPath strips).
+    static let ownExecutable = Bundle.main.executablePath.flatMap(realPath)
+
+    /// realpath(3): symlinks resolved and /private kept. nil if the path does not exist.
+    static func realPath(_ p: String) -> String? {
+        guard let r = realpath(p, nil) else { return nil }
+        defer { free(r) }
+        return String(cString: r)
+    }
+
+    /// `path` is `own` once resolved; only paths ending in the same file name are resolved, so other rows cost no call.
+    private static func sameFile(_ path: String, _ own: String) -> Bool {
+        (path as NSString).lastPathComponent == (own as NSString).lastPathComponent && realPath(path) == own
+    }
 
     /// Which entry this process gets. Precedence, first hit wins: exact path, longest path prefix, exact name, longest
     /// name prefix, then (only with a signature, and only when nothing else matched) bundle ID. A signature can change

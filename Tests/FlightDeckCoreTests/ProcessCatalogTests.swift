@@ -272,6 +272,25 @@ final class ProcessCatalogTests: XCTestCase {
         XCTAssertTrue(isLookalike(c.lookup(pid: getpid() + 1, name: "FlightDeck", path: odd, signature: nil, ownExecutable: "/elsewhere/FlightDeck")))
     }
 
+    /// Process paths keep /private (/private/tmp/...), so FlightDeck's own executable is resolved the same way, with
+    /// realpath, and a symlinked path to it still counts. URL.resolvingSymlinksInPath would strip /private and miss.
+    func testOwnExecutableUnderPrivateTmp() throws {
+        let dir = "/tmp/fd-own-\(UUID().uuidString)"
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let exe = dir + "/FlightDeck"
+        XCTAssertTrue(FileManager.default.createFile(atPath: exe, contents: Data()))
+        let own = ProcessCatalog.realPath(exe)
+        XCTAssertEqual(own, "/private" + exe)
+        let c = ProcessCatalog.shared
+        let m = c.lookup(pid: getpid() + 1, name: "FlightDeck", path: "/private" + exe, signature: nil, ownExecutable: own)
+        XCTAssertEqual(m.known?.id, "flightdeck"); XCTAssertEqual(verified(m), true)
+        try FileManager.default.createDirectory(atPath: dir + "/bin", withIntermediateDirectories: true)
+        let link = dir + "/bin/FlightDeck"
+        try FileManager.default.createSymbolicLink(atPath: link, withDestinationPath: exe)
+        XCTAssertEqual(c.lookup(pid: getpid() + 1, name: "FlightDeck", path: link, signature: nil, ownExecutable: own).known?.id, "flightdeck")
+    }
+
     /// A name match outside the vendor's folders is vouched for by a valid signature from the vendor's team.
     func testVendorNameVouchedForBySignature() {
         let c = ProcessCatalog.shared
