@@ -23,6 +23,8 @@ final class WebDashboardEndpoint: ObservableObject {
 
     private weak var engine: Engine?
     private var server: WebDashboardServer?
+    /// The port `server` was started on.
+    private var serverPort: UInt16?
     private var pathMonitor: NWPathMonitor?
     private var debounce: Task<Void, Never>?
     private var subscription: AnyCancellable?
@@ -44,15 +46,27 @@ final class WebDashboardEndpoint: ObservableObject {
 
     private var allowlist: WebAllowlist { .parse(UserDefaults.standard.string(forKey: Self.allowlistKey) ?? "") }
 
-    /// Starts, restarts or stops the server to match the current settings.
+    /// Matches the server to the current settings. Every Settings change comes here. Only turning it on or off, or a
+    /// new port, starts a server (binding once the old listener has let go of the port); allowlist, Advanced and
+    /// network changes update the running server in place, which closes connections the new list no longer admits.
     func apply() {
-        stopServer()
         let d = UserDefaults.standard
-        guard d.bool(forKey: Self.enabledKey), !Demo.isEnabled, engine != nil else { status = nil; return }
-        readModelName()
         let raw = d.object(forKey: Self.portKey) as? Int ?? Self.defaultPort
-        guard (1024...65535).contains(raw) else { status = "Choose a port between 1024 and 65535."; return }
-        let port = UInt16(raw)
+        let on = d.bool(forKey: Self.enabledKey) && !Demo.isEnabled && engine != nil
+        let wanted = on && (1024...65535).contains(raw) ? UInt16(raw) : nil
+        switch WebDashboardServer.change(running: server == nil ? nil : serverPort, wanted: wanted) {
+        case .update:
+            refresh()
+            return
+        case .off:
+            stopServer()
+            status = on ? "Choose a port between 1024 and 65535." : nil
+            return
+        case .start:
+            stopServer()
+        }
+        guard let port = wanted else { return }
+        readModelName()
         let allow = allowlist
         let ctx = readContext()
         context = ctx
@@ -69,6 +83,7 @@ final class WebDashboardEndpoint: ObservableObject {
         }, log: { Self.logger.notice("\($0, privacy: .public)") })
         ref.server = s
         server = s
+        serverPort = port
         status = "Starting…"
         s.start { err in
             Task { @MainActor in
@@ -85,16 +100,11 @@ final class WebDashboardEndpoint: ObservableObject {
         }
     }
 
-    /// An allowlist or Advanced edit: re-checks open connections, or restarts when the list became (in)valid.
-    func settingsChanged() {
-        if server == nil || !allowlist.invalid.isEmpty { apply() } else { refresh() }
-    }
-
     /// Re-reads the network for Settings while the section is shown (cheap; no polling).
     func refreshContext() { context = readContext() }
 
     private func stopServer() {
-        server?.stop(); server = nil
+        server?.stop(); server = nil; serverPort = nil
         subscription?.cancel(); subscription = nil
         pathMonitor?.cancel(); pathMonitor = nil
         debounce?.cancel(); debounce = nil
@@ -119,6 +129,9 @@ final class WebDashboardEndpoint: ObservableObject {
     }
 
     private func serving() {
+        // A list made invalid while typing stays on the running server, which then admits no one.
+        let allow = allowlist
+        guard allow.invalid.isEmpty else { urls = []; status = WebDashboardServer.invalidAllowlist; return }
         guard let ctx = context, let port = server?.port else { return }
         var out: [String] = []
         if let v4 = ctx.interfaces.filter({ $0.kind == .lan }).flatMap(\.addresses).first(where: { $0.ip.isV4 })?.ip {
@@ -126,7 +139,6 @@ final class WebDashboardEndpoint: ObservableObject {
         }
         if let name = ctx.localHostName, !name.isEmpty { out.append("http://\(name).local:\(port)") }
         // The tailnet address, when a tailnet entry that is honoured lets tailnet devices in.
-        let allow = allowlist
         if let tail = ctx.interfaces.first(where: { $0.kind == .tailscale })?.addresses.first(where: { $0.ip.isV4 })?.ip,
            allow.entries.contains(where: { WebAccess.label($0.prefix, context: ctx) == .tailnet && $0.prefix.contains(tail) }) {
             out.append("http://\(tail):\(port)")
@@ -320,8 +332,8 @@ struct WebDashboardSection: View {
             if enabled { Task { await readUniFiNetworks() } }
         }
         .onChange(of: port) { endpoint.apply() }
-        .onChange(of: allow) { endpoint.settingsChanged() }
-        .onChange(of: advanced) { endpoint.settingsChanged() }
+        .onChange(of: allow) { endpoint.apply() }
+        .onChange(of: advanced) { endpoint.apply() }
     }
 
     /// The UniFi console's networks, read once each time the section is shown with the dashboard on, or when it is

@@ -285,24 +285,54 @@ final class WebDashboardServerTests: XCTestCase {
         XCTAssertNotNil(err.value)
     }
 
+    /// Turning the dashboard off and on again keeps its port: a new server on it waits until the old listener has
+    /// finished cancelling, with no retry here. The old server's queue is held up first, as on a busy Mac where it
+    /// hasn't got to the cancel yet when the new one binds. TIME_WAIT from replies closed on the server side doesn't
+    /// block the bind.
     func testRestartOnSamePortAfterTraffic() throws {
         let a = try start(), port = try XCTUnwrap(a.port)
         // Replies close from the server side, which leaves its end of each connection in TIME_WAIT.
         for _ in 0..<3 { XCTAssertTrue(raw(port, request("/")).hasPrefix("HTTP/1.1 200")) }
+        a.queue.suspend()
         a.stop()
-        // stop() releases the listener asynchronously, so a loaded machine may not have let go of the port yet: retry for
-        // up to 5 s. TIME_WAIT lasts 2 × MSL (30 s on macOS), so a bind it blocked would still fail every attempt.
+        let b = WebDashboardServer(port: port, loopbackOnly: true, context: Self.context(), allowlist: .parse(""), provider: { _, r in r(nil) })
+        let ready = expectation(description: "b")
         let err = Box<String?>(nil)
-        let end = Date().addingTimeInterval(5)
-        repeat {
-            let b = WebDashboardServer(port: port, loopbackOnly: true, context: Self.context(), allowlist: .parse(""), provider: { _, r in r(nil) })
-            let ready = expectation(description: "b")
-            b.start { e in err.value = e; ready.fulfill() }
-            wait(for: [ready], timeout: 10)
-            b.stop()
-            if err.value != nil { usleep(100_000) }
-        } while err.value != nil && Date() < end
+        b.start { e in err.value = e; ready.fulfill() }
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.3) { a.queue.resume() }
+        wait(for: [ready], timeout: 10)
+        b.stop()
         XCTAssertNil(err.value, "turning the dashboard off and on again keeps its port")
+    }
+
+    /// Only turning the dashboard on or off, or a new port, starts a server; allowlist, Advanced and network changes
+    /// go to the running one. Updating it in place keeps the listener and an allowed stream open, drops a client the
+    /// new list no longer admits, and a list that is briefly invalid while typed drops everyone without unbinding.
+    func testAllowlistUpdateKeepsListenerAndDropsNewlyDisallowed() throws {
+        XCTAssertEqual(WebDashboardServer.change(running: 9466, wanted: 9466), .update)
+        XCTAssertEqual(WebDashboardServer.change(running: 9466, wanted: 9467), .start)
+        XCTAssertEqual(WebDashboardServer.change(running: nil, wanted: 9466), .start)
+        XCTAssertEqual(WebDashboardServer.change(running: 9466, wanted: nil), .off)
+        XCTAssertEqual(WebDashboardServer.change(running: nil, wanted: nil), .off)
+
+        let counts = Counts()
+        let s = try start(allow: "127.0.0.1", counts: counts), port = try XCTUnwrap(s.port)
+        let dropped = try XCTUnwrap(stream(port, host: "192.0.2.10"))
+        let kept = try XCTUnwrap(stream(port, host: "localhost"))
+        XCTAssertTrue(dropped.read(timeout: 10) { String(decoding: $0, as: UTF8.self).contains("event: snapshot") })
+        XCTAssertTrue(kept.read(timeout: 10) { String(decoding: $0, as: UTF8.self).contains("event: snapshot") })
+        s.update(context: Self.context(), allowlist: .parse("10.0.0.0/8"))
+        XCTAssertTrue(dropped.waitEOF(10), "the newly disallowed client is closed")
+        XCTAssertFalse(kept.waitEOF(0.5), "an allowed stream survives the update: nothing restarted")
+        XCTAssertEqual(s.port, port)
+        XCTAssertTrue(raw(port, request("/", host: "localhost")).hasPrefix("HTTP/1.1 200"), "still listening on the same port")
+
+        s.update(context: Self.context(), allowlist: .parse("10.0.0."))
+        XCTAssertTrue(kept.waitEOF(10), "an invalid list admits no one")
+        XCTAssertTrue(eventually { counts.last == 0 })
+        XCTAssertEqual(raw(port, request("/", host: "localhost")), "", "refused without a reply while invalid")
+        s.update(context: Self.context(), allowlist: .parse("10.0.0.0/8"))
+        XCTAssertTrue(raw(port, request("/", host: "localhost")).hasPrefix("HTTP/1.1 200"), "valid again, same listener")
     }
 
     func testRevocationOnNetworkChange() throws {
