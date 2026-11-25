@@ -90,6 +90,7 @@ These are taken in demo mode, which feeds the real UI invented data (a busy "Dem
 | ![Displays](docs/screenshots/displays.jpg) **Displays:** modes, ProMotion, HDR and the video link, with why it's stuck at 30 Hz | ![Peripherals](docs/screenshots/peripherals.jpg) **Peripherals:** link speeds with what's slowing a drive down, and accessory batteries |
 | ![Developer](docs/screenshots/developer.jpg) **Developer:** dev servers, containers, Homebrew services, builds and toolchains | ![Rules](docs/screenshots/rules.jpg) **Rules:** automatic responses to sustained problems |
 | ![Cockpit editing](docs/screenshots/cockpit-edit.jpg) **Cockpit editing:** add, remove, reorder and resize instruments; save layouts | ![Ambient mode](docs/screenshots/ambient.jpg) **Ambient mode:** a dim full-screen instrument panel for a second display |
+| ![Web dashboard](docs/screenshots/web-dashboard.jpg) **Web dashboard:** this Mac's live readings in a phone's browser, read-only | |
 
 ## Build & run
 
@@ -1103,6 +1104,27 @@ pressure, swap, disk and network rates, system watts, hottest temperature, therm
 the top 20 processes by CPU (`name`, `pid` labels). Unmeasured values are omitted, never exported as 0. It does no work
 between scrapes.
 
+### Web dashboard
+
+*Settings › Integrations › Web dashboard, off by default.* FlightDeck serves a live, read-only page to browsers on your
+local network at `http://<this Mac's address>:9466/` (port configurable; Settings shows the addresses, a Copy button
+for each and a QR code for a phone). It shows the annunciator, current findings, CPU, memory, thermals, disk, network,
+energy and battery with 30-minute sparklines, and the busiest apps by name with their CPU, memory and energy. The page
+is labelled with the name you set in Settings, which defaults to the model name ("MacBook Pro"), never the computer
+name. `/api/state` returns the same data as JSON and `/api/stream` as Server-Sent Events.
+
+- **Who can connect.** By default, only addresses on the local network, arriving over Wi-Fi or Ethernet. "Allowed
+  addresses" narrows that to listed addresses and ranges (`192.168.1.0/24`, `192.168.1.42`, `fd00::/8`), with one-click
+  suggestions: this Mac's subnets, your UniFi console's networks if UniFi is set up, and "Allow my tailnet" when
+  Tailscale is detected. Under Advanced, "Allow addresses outside the local network" lets listed non-local addresses in
+  too, with a warning; without it they are ignored even when listed.
+- **What it says plainly:** "No password and no encryption. Anyone on an allowed network can see this Mac's readings,
+  findings and the names of running apps. Read-only: nothing can be changed from the browser."
+- **What it never shows:** PIDs, paths, user names, command lines, camera and microphone use, network destinations,
+  Chrome tabs, anything only the privileged helper can see, or process contents. Findings are redacted as for Fleet.
+- **Cost:** nothing runs while no browser is open beyond the listening socket; an open page gets each published sample
+  (every 5 s while FlightDeck has no window open).
+
 ### Command line
 
 The app binary doubles as a CLI
@@ -1162,6 +1184,16 @@ or video, and never leaves this Mac.
 - The CPU speed limit comes from `pmset -g therm`, which runs only while Performance › Thermals is open, so throttling
   by the power manager is only seen (and only counted toward "time throttled") then; thermal pressure and the GPU
   heat cap are tracked all the time.
+- The web dashboard is plain HTTP: anything on the network path can read it. Over a tailnet the tunnel encrypts it in
+  transit, but every allowed tailnet device can read it.
+- macOS's application firewall, if on, asks once whether FlightDeck may accept incoming connections, and asks again
+  after an ad-hoc-signed rebuild.
+- A router port forward to the dashboard is refused by its Host check, even with Advanced on. Tailnet access works by
+  IP address, not by MagicDNS name.
+- A raw TCP forwarder run on this Mac (`ssh -R`, socat) can expose the dashboard, since its clients reach it as this
+  Mac itself.
+- VPN peers aren't "local" for the dashboard even when their addresses are private.
+- Refused dashboard connections are logged to Console under the category `web-dashboard`.
 
 ## Layout
 
