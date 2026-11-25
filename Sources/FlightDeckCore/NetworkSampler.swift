@@ -17,6 +17,16 @@ public struct InterfaceSample: Codable, Sendable, Identifiable {
     public var isUp: Bool
     public var addresses: [String]
     public var mac: String?
+    /// Carrier/link present, from the interface's media status (the "status: active" of ifconfig). `isUp` only means the
+    /// interface is administratively enabled, which is true of many unplugged ports. nil for interfaces with no media
+    /// status (loopback, tunnels) and in frames recorded before this field existed.
+    public var linkActive: Bool? = nil
+    /// Packet, error and input-queue-drop counters since the interface came up. nil if unreadable and in older frames.
+    public var inPackets: UInt64? = nil
+    public var outPackets: UInt64? = nil
+    public var inErrors: UInt64? = nil
+    public var outErrors: UInt64? = nil
+    public var inDrops: UInt64? = nil
 }
 
 /// Machine-wide throughput: the sum over all interfaces except loopback (lo*). Rates are unavailable on the first
@@ -36,7 +46,10 @@ public final class NetworkSampler {
     public init() {}
 
     /// Cumulative in/out bytes, link speed (bits/s) and IFF_UP for one interface.
-    struct Raw { var ib: UInt64; var ob: UInt64; var speed: UInt64; var up: Bool }
+    struct Raw { var ib: UInt64; var ob: UInt64; var speed: UInt64; var up: Bool; var pkts: Counters64? = nil }
+
+    /// The 64-bit counters read from the interface MIB.
+    struct Counters64 { var ib: UInt64, ob: UInt64, ip: UInt64, op: UInt64, ie: UInt64, oe: UInt64, drops: UInt64 }
 
     /// Walks the NET_RT_IFLIST2 buffer: a packed sequence of variable-length routing messages, each starting with an
     /// if_msghdr whose `ifm_msglen` gives the offset to the next. Only RTM_IFINFO2 messages describe interfaces (the others
@@ -64,8 +77,8 @@ public final class NetworkSampler {
                         // NET_RT_IFLIST2 truncates byte counters to 32 bits (they wrap every 4 GB), so read
                         // the full 64-bit counters from the interface MIB, as netstat does.
                         let full = Self.counters64(index: Int32(h2.pointee.ifm_index))
-                        out[name] = Raw(ib: full?.0 ?? d.ifi_ibytes, ob: full?.1 ?? d.ifi_obytes, speed: d.ifi_baudrate,
-                                        up: (h2.pointee.ifm_flags & IFF_UP) != 0)
+                        out[name] = Raw(ib: full?.ib ?? d.ifi_ibytes, ob: full?.ob ?? d.ifi_obytes, speed: d.ifi_baudrate,
+                                        up: (h2.pointee.ifm_flags & IFF_UP) != 0, pkts: full)
                     }
                 }
                 off += msglen
@@ -74,13 +87,32 @@ public final class NetworkSampler {
         return out
     }
 
-    /// Full 64-bit byte counters for one interface index from net.link.generic.ifdata (IFMIB_IFDATA / IFDATA_GENERAL).
-    /// nil if the interface vanished, in which case the caller falls back to the 32-bit routing-message counters.
-    static func counters64(index: Int32) -> (UInt64, UInt64)? {
+    /// Full 64-bit counters (bytes, packets, errors, input drops) for one interface index from net.link.generic.ifdata
+    /// (IFMIB_IFDATA / IFDATA_GENERAL). nil if the interface vanished, in which case the caller falls back to the 32-bit
+    /// routing-message byte counters.
+    static func counters64(index: Int32) -> Counters64? {
         var mib: [Int32] = [CTL_NET, PF_LINK, NETLINK_GENERIC, IFMIB_IFDATA, index, IFDATA_GENERAL]
         var d = ifmibdata(); var len = MemoryLayout<ifmibdata>.size
         guard sysctl(&mib, 6, &d, &len, nil, 0) == 0 else { return nil }
-        return (d.ifmd_data.ifi_ibytes, d.ifmd_data.ifi_obytes)
+        let x = d.ifmd_data
+        return Counters64(ib: x.ifi_ibytes, ob: x.ifi_obytes, ip: x.ifi_ipackets, op: x.ifi_opackets,
+                          ie: x.ifi_ierrors, oe: x.ifi_oerrors, drops: x.ifi_iqdrops)
+    }
+
+    /// SIOCGIFMEDIA, _IOWR('i', 56, struct ifmediareq) (0xc02c6938 today); the macro isn't imported into Swift, so it is built
+    /// from the struct's size: IOC_INOUT | size << 16 | 'i' << 8 | 56.
+    private static let siocgifmedia: UInt = 0xc000_0000 | UInt(MemoryLayout<ifmediareq>.size) << 16 | 0x6900 | 56
+
+    /// Whether the interface has carrier, from its media status (the same source as ifconfig's "status: active").
+    /// nil when it has no media status (loopback, tunnels, most virtual interfaces) or the ioctl fails.
+    static func linkActive(_ name: String, socket fd: Int32) -> Bool? {
+        guard fd >= 0 else { return nil }
+        var req = ifmediareq()
+        withUnsafeMutableBytes(of: &req.ifm_name) { buf in
+            for (i, c) in name.utf8.prefix(buf.count - 1).enumerated() { buf[i] = c }
+        }
+        guard ioctl(fd, siocgifmedia, &req) == 0, req.ifm_status & Int32(IFM_AVALID) != 0 else { return nil }
+        return req.ifm_status & Int32(IFM_ACTIVE) != 0
     }
 
     /// Numeric IPv4/IPv6 addresses and MAC address per interface name, via getifaddrs.
@@ -125,6 +157,8 @@ public final class NetworkSampler {
         let (addrs, macs) = addresses()
         let dt = lastTime.map { max(now.timeIntervalSince($0), 0.001) }
         var ifs: [InterfaceSample] = []
+        let mediaSocket = socket(AF_INET, SOCK_DGRAM, 0)
+        defer { if mediaSocket >= 0 { close(mediaSocket) } }
         var ti = 0.0, to = 0.0, si: UInt64 = 0, so: UInt64 = 0
         // Interfaces are diffed by name. A counter that went backwards (interface reset, re-created, or a fallback to the
         // 32-bit counter that wrapped) yields 0 for this interval rather than a giant spike.
@@ -138,7 +172,10 @@ public final class NetworkSampler {
             // so counting both would double VPN traffic. Per-interface rows still show tunnels.
             if !Self.isVirtual(name) { ti += ib; to += ob; si += r.ib; so += r.ob }
             ifs.append(InterfaceSample(name: name, inBps: ib, outBps: ob, totalIn: r.ib, totalOut: r.ob,
-                                       linkSpeed: r.speed, isUp: r.up, addresses: addrs[name] ?? [], mac: macs[name]))
+                                       linkSpeed: r.speed, isUp: r.up, addresses: addrs[name] ?? [], mac: macs[name],
+                                       linkActive: Self.isVirtual(name) ? nil : Self.linkActive(name, socket: mediaSocket),
+                                       inPackets: r.pkts?.ip, outPackets: r.pkts?.op, inErrors: r.pkts?.ie,
+                                       outErrors: r.pkts?.oe, inDrops: r.pkts?.drops))
         }
         let warm = dt != nil && !previous.isEmpty
         previous = cur.mapValues { ($0.ib, $0.ob) }; lastTime = now

@@ -331,14 +331,31 @@ final class Engine: ObservableObject {
     }
 
     /// `fresh` are incidents IncidentLog just logged (findings that lasted past its `minDuration`). Only hangs, CPU and
-    /// GPU hogs get evidence. At most one capture runs at a time, and each finding key is captured at most once per
+    /// GPU hogs, and lost-address or receive-stall network incidents get evidence. At most one capture runs at a time, and each finding key is captured at most once per
     /// 10 minutes. The capture runs on `evidenceQueue`; its result is attached to the incident back on `queue`.
     /// Disabled by the `autoEvidence` default. Set FD_DEBUG_EVIDENCE in the environment to log decisions.
-    /// On the sampling queue: when a hang or a sustained CPU/GPU hog is first logged, sample its call stacks.
+    /// On the sampling queue: when a hang or a sustained CPU/GPU hog is first logged, sample its call stacks; when a network
+    /// interface loses its address or stops receiving, save the network state.
     nonisolated private func captureEvidence(for fresh: [Incident], findings: [Finding], snapshot s: Snapshot) {
         let debug = ProcessInfo.processInfo.environment["FD_DEBUG_EVIDENCE"] != nil
         if debug && !fresh.isEmpty { NSLog("FDEV fresh=%@ busy=%d", fresh.map(\.key).joined(separator: ","), evidenceBusy ? 1 : 0) }
         guard UserDefaults.standard.object(forKey: "autoEvidence") as? Bool ?? true, !evidenceBusy else { return }
+        // A lost address or a stalled receive path has no process to sample: save the network state while it is happening.
+        for inc in fresh where ["net-noip:", "net-rx-stall:"].contains(where: { inc.key.hasPrefix($0) }) {
+            if let last = lastEvidence[inc.key], s.time.timeIntervalSince(last) < 600 { continue }
+            guard let colon = inc.key.firstIndex(of: ":") else { continue }
+            let interface = String(inc.key[inc.key.index(after: colon)...]), id = inc.id
+            evidenceBusy = true; lastEvidence[inc.key] = s.time
+            evidenceQueue.async { [queue, incidentLog] in
+                let r = NetworkEvidence.capture(interface: interface, incident: id)
+                if debug { NSLog("FDEV network captured if=%@ ok=%d", interface, r == nil ? 0 : 1) }
+                queue.async {
+                    if let (url, summary) = r { incidentLog.attach(evidence: url.path, summary: summary, to: id) }
+                    self.evidenceBusy = false
+                }
+            }
+            return
+        }
         for inc in fresh where ["hang:", "cpu:", "gpu:"].contains(where: { inc.key.hasPrefix($0) }) {
             if let last = lastEvidence[inc.key], s.time.timeIntervalSince(last) < 600 { continue }
             // Never sample ourselves; and skip if the process has already gone.

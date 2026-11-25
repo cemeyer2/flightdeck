@@ -130,6 +130,8 @@ public final class Analyzer {
     /// GPU recovery (driver reset) counter at the previous sample, and the times of recent recoveries (last 10 min).
     private var lastRecoveries: Int?
     private var recoveryEvents: [Date] = []
+    /// Per physical network interface, what the connectivity findings need to remember between samples.
+    private var links: [String: LinkState] = [:]
 
     public init() {}
 
@@ -382,6 +384,12 @@ public final class Analyzer {
                 "Performance:Network")
         }
 
+        // Connectivity: an interface with link that lost its IP address, or that sends but receives nothing.
+        for f in connectivityFindings(s, at: t) {
+            if since[f.id] == nil { since[f.id] = f.since }   // the condition began before it lasted long enough to report
+            active.append(f)
+        }
+
         // Compared with what's normal for this Mac: needs both an absolute floor and a clear margin over its own p90,
         // so a usually idle Mac doesn't raise "unusual" at 20% CPU.
         if let b = baseline {
@@ -426,6 +434,102 @@ public final class Analyzer {
         return findings
     }
 
+    /// Connectivity bookkeeping for one interface; see `connectivityFindings`.
+    private struct LinkState {
+        /// A routable IPv4 address was seen on this interface with link up (so a missing one is a loss, not a port nobody uses).
+        var hadAddress = false
+        /// When the link came up with no usable address, while that still holds.
+        var noAddressSince: Date?
+        /// Input packet count at the last sample where it changed, and when that was.
+        var lastIn: UInt64?
+        var inChangedAt: Date?
+        /// Output packet counts since then, kept for the last `receiveStallSeconds` (plus the sample just before it).
+        var outHistory: [(time: Date, out: UInt64)] = []
+    }
+
+    /// An address must be missing this long (counted from link-up, so joining a network doesn't count) before it is
+    /// reported: Wi-Fi reports link as soon as it associates, and 802.1X plus DHCP on a new network can take 30 s or more.
+    /// The real failure lasts until a reboot, so waiting costs little.
+    static let noAddressSeconds: TimeInterval = 60
+    /// Nothing may arrive for this long, while at least `receiveStallMinOut` packets went out in the same window.
+    static let receiveStallSeconds: TimeInterval = 30
+    /// Packets sent within the window, below which a silent interface is idle (a few mDNS or ARP packets) rather than stalled.
+    static let receiveStallMinOut: UInt64 = 20
+
+    /// Wired and Wi-Fi adapters (en*), not the virtual and peer-to-peer interfaces (awdl, llw, anpi, bridge, ap, utun, lo).
+    static func isPhysicalAdapter(_ i: InterfaceSample) -> Bool { i.name.hasPrefix("en") && i.mac != nil && !NetworkSampler.isVirtual(i.name) }
+
+    /// Whether the addresses hold a usable IPv4 address, and whether they hold a self-assigned (169.254/16) one, which a
+    /// Mac gives itself when DHCP gets no answer.
+    static func ipv4State(_ addresses: [String]) -> (routable: Bool, selfAssigned: Bool) {
+        var routable = false, selfAssigned = false
+        for a in addresses where a.contains(".") && !a.contains(":") {
+            if a.hasPrefix("169.254.") { selfAssigned = true } else if !a.hasPrefix("127.") && a != "0.0.0.0" { routable = true }
+        }
+        return (routable, selfAssigned)
+    }
+
+    /// Findings for physical interfaces whose link is up (per the media status, which is nil when unknown):
+    ///  - `net-noip:<if>`: no usable IPv4 address for `noAddressSeconds`, on an interface that had one earlier or that
+    ///    has a self-assigned address. An unplugged port, Wi-Fi switched off, or a port that never had a lease raise nothing.
+    ///  - `net-rx-stall:<if>`: with an address, no packet received for `receiveStallSeconds` although at least
+    ///    `receiveStallMinOut` went out in that window. The counters are the adapter's, so a packet counts as received
+    ///    before any VPN, network filter or security software sees it: this rule finds a dead adapter, driver, cable or
+    ///    port, and cannot see traffic that arrives and is dropped higher up. Its finding says so.
+    /// `since` of each result is when the condition began, so the incident starts there.
+    private func connectivityFindings(_ s: Snapshot, at t: Date) -> [Finding] {
+        var out: [Finding] = []
+        var seen = Set<String>()
+        for i in s.network.interfaces where Self.isPhysicalAdapter(i) {
+            seen.insert(i.name)
+            var st = links[i.name] ?? LinkState()
+            defer { links[i.name] = st }
+            guard i.linkActive == true else { st.noAddressSince = nil; st.lastIn = nil; st.inChangedAt = nil; st.outHistory = []; continue }
+
+            let v4 = Self.ipv4State(i.addresses)
+            if v4.routable { st.hadAddress = true; st.noAddressSince = nil }
+            else if st.hadAddress || v4.selfAssigned { st.noAddressSince = st.noAddressSince ?? t }
+            else { st.noAddressSince = nil }
+            if let n = st.noAddressSince, t.timeIntervalSince(n) >= Self.noAddressSeconds {
+                let selfAssigned = v4.selfAssigned
+                // A global IPv6 address may mean an IPv6-only network, so that case is a caution, not a warning.
+                let hasIPv6 = i.addresses.contains { $0.contains(":") && ($0.hasPrefix("2") || $0.hasPrefix("3")) }
+                out.append(Finding(
+                    id: "net-noip:\(i.name)", severity: hasIPv6 && !selfAssigned ? .caution : .warning, icon: "network.slash",
+                    title: selfAssigned ? "\(i.name) has a self-assigned address: DHCP got no answer"
+                        : hasIPv6 ? "\(i.name) has link but lost its IPv4 address" : "\(i.name) has link but lost its IP address",
+                    detail: "The connection is up, but this interface has no usable IPv4 address"
+                        + (hasIPv6 && !selfAssigned ? " (it still has an IPv6 address, so this may simply be an IPv6-only network)" : ", so nothing can connect through it")
+                        + ". If this happens on several interfaces at once, and other devices on the network are fine, the cause is on this Mac "
+                        + "(a VPN, network filter or security agent) and not the network.",
+                    since: n, destination: "Performance:Network"))
+            }
+
+            guard v4.routable, let inP = i.inPackets, let outP = i.outPackets else { st.lastIn = nil; st.inChangedAt = nil; st.outHistory = []; continue }
+            if st.lastIn != inP || st.inChangedAt == nil {   // a counter that moved (or reset) restarts the silence
+                st.lastIn = inP; st.inChangedAt = t; st.outHistory = [(t, outP)]
+            } else {
+                st.outHistory.append((t, outP))
+                // Keep the newest sample at or before the window start, and everything after it.
+                let start = t.addingTimeInterval(-Self.receiveStallSeconds)
+                if let k = st.outHistory.lastIndex(where: { $0.time <= start }), k > 0 { st.outHistory.removeFirst(k) }
+                if let at = st.inChangedAt, t.timeIntervalSince(at) >= Self.receiveStallSeconds,
+                   let base = st.outHistory.first, base.time <= start, outP >= base.out, outP - base.out >= Self.receiveStallMinOut {
+                    out.append(Finding(
+                        id: "net-rx-stall:\(i.name)", severity: .warning, icon: "network.slash",
+                        title: "\(i.name) stopped receiving packets while still sending",
+                        detail: "Nothing has arrived for \(Int(t.timeIntervalSince(at))) s although \(outP - base.out) packets went out in the last \(Int(Self.receiveStallSeconds)) s. "
+                            + "An idle working link still receives broadcast traffic, so this points at the adapter, its driver, the cable or the switch port. "
+                            + "This counts packets at the adapter, before any VPN, network filter or security software sees them, so it cannot see traffic "
+                            + "those drop: if connections fail but this finding is absent, the packets are arriving and the cause is higher up, in software.",
+                        since: at, destination: "Performance:Network"))
+                }
+            }
+        }
+        links = links.filter { seen.contains($0.key) }   // `defer` has already stored this pass's state
+        return out
+    }
+
     /// Linear trend of startup-volume free space; needs 2 h of history and a clearly shrinking trend.
     /// Returns days until free space reaches 0 at the fitted rate, from the latest reading, or nil.
     public func daysUntilFull() -> Double? {
@@ -441,6 +545,8 @@ public final class Analyzer {
     private func resetShortTerm() {
         swap = []   // a gap (e.g. sleep) would make "swap grew in 10 minutes" compare across it
         appCPU = [:]; appGPU = [:]; gpuThermal = EMA(); swapOutRate = EMA(); lastSwapOuts = nil; pClockRatio = EMA(); cpuEMA = EMA(); cpuSlow = EMA(); diskEMA = EMA(); netEMA = EMA(); wattsEMA = EMA(); since = [:]
+        // Whether an interface ever had an address survives a gap; how long it has been missing or silent does not.
+        links = links.mapValues { var l = LinkState(); l.hadAddress = $0.hadAddress; return l }
     }
 }
 

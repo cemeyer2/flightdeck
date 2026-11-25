@@ -117,15 +117,17 @@ struct IncidentRow: View {
                 Text((i.end == nil ? "ongoing · " : "") + shortDuration(i.duration) + (i.detail.map { " · " + $0 } ?? ""))
                     .font(.system(size: 11)).foregroundStyle(p.dim).lineLimit(2)
                 if let ev = i.evidenceSummary {
-                    Label(ev, systemImage: "list.bullet.indent").font(.system(size: 10, design: .monospaced))
+                    Label(ev, systemImage: i.key.hasPrefix("net-") ? "network" : "list.bullet.indent").font(.system(size: 10, design: .monospaced))
                         .foregroundStyle(p.accent).lineLimit(2).help(ev)
                 }
             }
             Spacer()
             // Evidence files are pruned on a schedule, so only offer the button while the file still exists.
             if let path = i.evidencePath, FileManager.default.fileExists(atPath: path) {
-                Button { NSWorkspace.shared.open(URL(fileURLWithPath: path)) } label: { Label("Stacks", systemImage: "list.bullet.indent") }
-                    .help("Call stacks captured automatically while this was happening")
+                let network = i.key.hasPrefix("net-")
+                Button { NSWorkspace.shared.open(URL(fileURLWithPath: path)) } label: { Label(network ? "Network state" : "Stacks", systemImage: network ? "network" : "list.bullet.indent") }
+                    .help(network ? "The network state saved while this was happening. Its packet counters are the adapter's, so they can't show traffic dropped by VPN, filter or security software."
+                                  : "Call stacks captured automatically while this was happening")
             }
             // The black box keeps at most 24 hours (fine tier for 1 h, coarse 10 s tier beyond), so older incidents
             // can't be replayed; Engine.replayBlackBox adds 2 minutes of context either side.
