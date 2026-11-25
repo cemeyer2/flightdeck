@@ -280,6 +280,7 @@ struct SettingsView: View {
             tab {
                 MetricsExportSection()
                 MCPSection()
+                ChromeTabsSettingsSection()
             }
             .tabItem { Label("Integrations", systemImage: "puzzlepiece.extension") }
         }
