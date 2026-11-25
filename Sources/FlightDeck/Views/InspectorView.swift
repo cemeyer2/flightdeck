@@ -27,6 +27,12 @@ final class InspectorModel: ObservableObject {
     /// Output of the last `/usr/bin/sample` run, if any.
     @Published var stacks: String?
     @Published var sampling = false
+    /// What the process catalog says about this process: by name and path first, then rechecked with the signature once
+    /// the details load (which can turn a match into a lookalike, never into a different entry).
+    @Published private(set) var about: ProcessMatch = .unknown
+    /// launchd jobs, for the "Launched by" fact about a process the catalog doesn't know. Loaded once, on demand.
+    @Published private(set) var startupItems: [StartupItem]?
+    private var loadingStartupItems = false
     private var bag: AnyCancellable?
     private var lastDetails = Date.distantPast
     private weak var engine: Engine?
@@ -36,7 +42,22 @@ final class InspectorModel: ObservableObject {
         history = engine.processHistory.series(identity)
         sample = engine.liveSnapshot?.processes.first { $0.identity == identity }
         bag = engine.$liveSnapshot.compactMap { $0 }.sink { [weak self] s in self?.ingest(s) }
+        updateAbout()
         refreshDetails()
+    }
+
+    /// Re-matches against the catalog (cheap: dictionary lookups) and publishes only a change.
+    private func updateAbout() {
+        guard let s = sample else { return }
+        let m = ProcessCatalog.shared.lookup(name: s.name, path: s.path, signature: details?.signature)
+        if m != about { about = m }
+        if m.known == nil, startupItems == nil, !loadingStartupItems {
+            loadingStartupItems = true
+            Task.detached(priority: .utility) {
+                let items = Launchd.startupItems(includeLoginItems: false)
+                await MainActor.run { self.startupItems = items }
+            }
+        }
     }
 
     /// Called for every live snapshot on the main actor (via the Combine sink in init).
@@ -46,6 +67,7 @@ final class InspectorModel: ObservableObject {
         // start time (PID recycled) or no process at all counts as exited.
         if p == nil { exited = ProcessSampler.identity(of: identity.pid) != identity }
         if let p { sample = p; exited = false }
+        updateAbout()
         history = engine?.processHistory.series(identity) ?? []
         // A child must have started after this process; an older process with the same ppid would be a leftover from a
         // previous owner of the PID.
@@ -63,7 +85,7 @@ final class InspectorModel: ObservableObject {
         let pid = identity.pid, path = sample?.path ?? ""
         Task.detached(priority: .utility) {
             let d = ProcessInspector.details(pid: pid, path: path)
-            await MainActor.run { self.previousCounters = self.details?.counters; self.details = d }
+            await MainActor.run { self.previousCounters = self.details?.counters; self.details = d; self.updateAbout() }
         }
     }
 
@@ -164,6 +186,7 @@ struct InspectorView: View {
                             .font(.caption).foregroundStyle(sig.valid ? p.dim : p.warn)
                     }
                 }
+                if let e = model.about.known { Text(e.title).font(.caption).foregroundStyle(p.dim).lineLimit(1) }
                 Text(s?.path.isEmpty == false ? s!.path : "path unavailable").font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(p.dim).lineLimit(1).truncationMode(.middle).textSelection(.enabled)
             }
@@ -228,6 +251,7 @@ struct InspectorView: View {
     /// code signature and the process tree.
     @ViewBuilder func overview(_ s: ProcessSample?) -> some View {
         let d = model.details
+        whatIsThis(s)
         Panel(title: "Process") {
             Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 5) {
                 row("PID / parent", s.map { "\($0.pid) / \($0.ppid)" })
@@ -273,6 +297,39 @@ struct InspectorView: View {
     }
 
     /// Label/value grid row; nil values render as "—" (unavailable), never as an empty or zero value.
+    /// "What is this?": the catalog's explanation, or for a lookalike or unknown process only facts FlightDeck knows.
+    @ViewBuilder func whatIsThis(_ s: ProcessSample?) -> some View {
+        Panel(title: "What is this?") {
+            VStack(alignment: .leading, spacing: 6) {
+                switch model.about {
+                case .known(let e, _, let verified):
+                    Text(e.title).font(.system(size: 13, weight: .semibold))
+                    Text(e.summary).font(.system(size: 12)).fixedSize(horizontal: false, vertical: true)
+                    Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 5) {
+                        ForEach(ProcessCatalogText.inspectorRows(e), id: \.label) { r in row(r.label, r.value) }
+                    }.font(.system(size: 12))
+                    if !verified { Text("Matched by name only").font(.caption).foregroundStyle(p.dim) }
+                case .lookalike(let e):
+                    Text(ProcessCatalogText.lookalikeSentence(e, path: s?.path ?? "")).font(.system(size: 12)).foregroundStyle(p.warn)
+                        .fixedSize(horizontal: false, vertical: true)
+                    knownFacts(s)
+                case .unknown:
+                    knownFacts(s)
+                }
+            }.textSelection(.enabled)
+        }
+    }
+
+    @ViewBuilder func knownFacts(_ s: ProcessSample?) -> some View {
+        if let s {
+            let facts = ProcessFacts.lines(s, signature: model.details?.signature, ancestry: model.details?.ancestry ?? [],
+                                           startupItems: model.startupItems ?? [])
+            Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 5) {
+                ForEach(facts, id: \.label) { r in row(r.label, r.value) }
+            }.font(.system(size: 12))
+        }
+    }
+
     func row(_ k: String, _ v: String?) -> some View {
         GridRow {
             Text(k).foregroundStyle(p.dim)

@@ -333,6 +333,15 @@ and TCP state, threads (CPU, state, priority, times), the environment, and call-
 `/usr/bin/sample` to see why it's busy or hung. Actions: quit, force quit, suspend, resume, lower priority (nice).
 Anything macOS doesn't let a normal user read for other users' processes is shown as unavailable.
 
+**What is this process?** The inspector's "What is this?" panel, the Processes tooltips (and "What Is This?" in a row's
+menu), findings and the MCP `get_process` tool explain what a process is, who makes it, when it's normally busy and
+whether quitting it helps. The explanations come from a catalog bundled with FlightDeck, so nothing is looked up
+online, and each entry cites the man page, launchd plist or documentation it was written from. A process the catalog
+doesn't know shows only facts FlightDeck already has (signer, app, what launched it). Security and device-management
+software is marked "Managed by your organisation" and is never suggested for quitting. Other users' and system
+processes are matched by name only unless the privileged helper is installed and FlightDeck is unlocked. A program
+named like part of macOS but running from somewhere else is flagged in the inspector.
+
 #### Connection quality
 
 *Performance › Network.* Wi-Fi signal, noise, SNR, link rate, channel, band, width, PHY and
