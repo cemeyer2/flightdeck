@@ -953,7 +953,7 @@ errors. It may contain personal paths and names, so review it before sharing.
 | `triage` | one call for "what's wrong right now?": every current problem (findings, ongoing Flight Log incidents, crashes/hangs/panics of the last 24 h, unexpected restarts of the last 7 days, memory pressure, heat, a full disk, low battery) ranked by severity, each with evidence numbers and the next tool to call with its arguments; plus the headline readings |
 | `get_status` | findings in plain English, CPU/memory/swap/disk/network/power/thermal/GPU, top apps by CPU, memory and energy, Stress Map top causes |
 | `list_processes` | processes or apps as a table; `sort`, `limit`, `filter` (the Processes filter syntax, e.g. `cpu>50 user:root`), `by_app` |
-| `get_process` | one PID: identity, path, user, parent chain, CPU, memory, energy, disk, network, listening ports, open files, code signature; optional arguments/files/sockets/threads |
+| `get_process` | one PID: identity, path, user, parent chain, CPU, memory, energy, disk, network, listening ports, open files, code signature; optional arguments/files/sockets/threads; about (what the process is, from FlightDeck's catalog) |
 | `sample_stacks` | 1–5 s of `/usr/bin/sample` on one of *your* processes: main-thread summary and heaviest path |
 | `recent_incidents` | the Flight Log over the last N hours |
 | `diagnostic_reports` | macOS crash, hang, memory-kill and resource-limit reports, with counts by kind and process |
