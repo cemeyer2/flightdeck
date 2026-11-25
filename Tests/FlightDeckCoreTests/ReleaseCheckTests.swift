@@ -110,6 +110,7 @@ final class ReleaseCheckTests: XCTestCase {
         for s in ["https://github.com/cemeyer2/flightdeck/releases/../../evil/x",
                   "https://github.com/cemeyer2/flightdeck/releases/tag/v1?next=https://evil.example",
                   "https://GitHub.com@evil.example/cemeyer2/flightdeck/releases/tag/v1.7.0",
+                  "https://user@github.com/cemeyer2/flightdeck/releases/tag/v1.7.0",
                   "https://github.com/cemeyer2/flightdeck/releases/tag/v1.7.0#x",
                   "https://github.com/cemeyer2/flightdeck/releases/%2E%2E/x"] {
             XCTAssertFalse(ReleaseInfo.isTrustedReleaseURL(URL(string: s)!), s)
@@ -192,6 +193,7 @@ final class ReleaseCheckTests: XCTestCase {
         }
         let first = n()
         XCTAssertEqual(first?.identifier, "update-1.7.0")
+        XCTAssertEqual(first?.version, v("1.7.0"))
         XCTAssertEqual(first?.title, "FlightDeck 1.7.0 is available")
         XCTAssertEqual(first?.body, "You have 1.6.0. Click to see what's new.")
         XCTAssertEqual(first?.url, release("1.7.0").url)
@@ -343,16 +345,19 @@ final class ReleaseCheckTests: XCTestCase {
     }
 
     func testStatusText() {
-        func t(_ s: ReleaseCheckState, installed: String? = "1.6.0", demo: Bool = false) -> String {
-            ReleaseCheck.statusText(state: s, installed: installed.map(v), demo: demo)
+        func t(_ s: ReleaseCheckState, installed: String? = "1.6.0", demo: Bool = false) -> ReleaseCheckStatus {
+            ReleaseCheck.status(state: s, installed: installed.map(v), demo: demo)
         }
-        XCTAssertEqual(t(cached(), demo: true), "Not available in demo mode")
-        XCTAssertEqual(t(cached(), installed: nil), "Version unknown (development build); update checks are off")
+        XCTAssertEqual(t(cached(), demo: true), ReleaseCheckStatus(text: "Not available in demo mode"))
+        XCTAssertEqual(t(cached(), installed: nil), ReleaseCheckStatus(text: "Version unknown (development build); update checks are off"))
         var err = cached(); err.lastError = "Couldn't check: offline"
-        XCTAssertEqual(t(err), "Couldn't check: offline")
-        XCTAssertEqual(t(cached()), "FlightDeck 1.7.0 is available")
-        XCTAssertEqual(t(ReleaseCheckState()), "Never checked")
-        XCTAssertEqual(t(cached(), installed: "1.7.0"), "Up to date")
+        // A newer cached release stays on the first line; the error goes on a second.
+        XCTAssertEqual(t(err), ReleaseCheckStatus(text: "FlightDeck 1.7.0 is available", error: "Couldn't check: offline", updateAvailable: true))
+        // No newer release: the error is the status line, with no link.
+        XCTAssertEqual(t(err, installed: "1.7.0"), ReleaseCheckStatus(text: "Couldn't check: offline"))
+        XCTAssertEqual(t(cached()), ReleaseCheckStatus(text: "FlightDeck 1.7.0 is available", updateAvailable: true))
+        XCTAssertEqual(t(ReleaseCheckState()), ReleaseCheckStatus(text: "Never checked"))
+        XCTAssertEqual(t(cached(), installed: "1.7.0"), ReleaseCheckStatus(text: "Up to date"))
     }
 
     // MARK: The one GET

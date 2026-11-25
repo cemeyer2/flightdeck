@@ -55,7 +55,17 @@ public struct ReleaseCheckState: Sendable, Equatable {
     /// alerts on later still tells you once.
     public mutating func markNotified(_ notice: ReleaseNotice, delivered: Bool) {
         guard delivered else { return }
-        lastNotifiedVersion = String(notice.identifier.dropFirst("update-".count))
+        lastNotifiedVersion = notice.version.description
+    }
+}
+
+/// What Settings › About shows under "Last checked".
+public struct ReleaseCheckStatus: Sendable, Equatable {
+    public var text: String
+    public var error: String?
+    public var updateAvailable = false
+    public init(text: String, error: String? = nil, updateAvailable: Bool = false) {
+        self.text = text; self.error = error; self.updateAvailable = updateAvailable
     }
 }
 
@@ -69,7 +79,7 @@ extension ReleaseCheck {
     public static let rateLimitText = "GitHub rate limit; will retry later"
 
     /// Applies one response. Always sets lastCheckedAt = now, so a failure waits the normal 24 h (a rate limit may
-    /// make that shorter or longer through retryNotBefore). Errors keep the last good result.
+    /// make that longer through retryNotBefore, never shorter). Errors keep the last good result.
     public static func next(state: ReleaseCheckState, response: ReleaseHTTPResponse, now: Date)
         -> (state: ReleaseCheckState, outcome: ReleaseStepOutcome) {
         var s = state
@@ -118,14 +128,16 @@ extension ReleaseCheck {
         }
     }
 
-    /// The Settings status line. The view adds the "View Release" link to the available line.
-    public static func statusText(state: ReleaseCheckState, installed: ReleaseVersion?, demo: Bool) -> String {
-        if demo { return "Not available in demo mode" }
-        guard let installed else { return "Version unknown (development build); update checks are off" }
-        if let e = state.lastError { return e }
+    /// The Settings status line, and a second line for an error that came after a good result. A newer cached release
+    /// stays on the first line even when the latest check failed (errors keep the last good result); the view adds the
+    /// "View Release" link only when `updateAvailable`.
+    public static func status(state: ReleaseCheckState, installed: ReleaseVersion?, demo: Bool) -> ReleaseCheckStatus {
+        if demo { return ReleaseCheckStatus(text: "Not available in demo mode") }
+        guard let installed else { return ReleaseCheckStatus(text: "Version unknown (development build); update checks are off") }
         if let l = state.latest, ReleaseVersion.isNewer(remote: l.version, installed: installed) {
-            return "FlightDeck \(l.version) is available"
+            return ReleaseCheckStatus(text: "FlightDeck \(l.version) is available", error: state.lastError, updateAvailable: true)
         }
-        return state.lastCheckedAt == nil ? "Never checked" : "Up to date"
+        if let e = state.lastError { return ReleaseCheckStatus(text: e) }
+        return ReleaseCheckStatus(text: state.lastCheckedAt == nil ? "Never checked" : "Up to date")
     }
 }

@@ -8,6 +8,7 @@ public enum CheckNowAvailability: Sendable, Equatable { case available, demo, un
 
 /// The one notification for a new version. The identifier is stable per version, so a re-post replaces rather than stacks.
 public struct ReleaseNotice: Sendable, Equatable {
+    public var version: ReleaseVersion
     public var identifier, title, body: String
     public var url: URL
 }
@@ -74,7 +75,7 @@ extension ReleaseCheck {
                               alertsEnabled: Bool) -> ReleaseNotice? {
         guard alertsEnabled, let latest, ReleaseVersion.isNewer(remote: latest.version, installed: installed) else { return nil }
         if let last = lastNotified.flatMap(ReleaseVersion.init), latest.version <= last { return nil }
-        return ReleaseNotice(identifier: "update-\(latest.version)", title: "FlightDeck \(latest.version) is available",
+        return ReleaseNotice(version: latest.version, identifier: "update-\(latest.version)", title: "FlightDeck \(latest.version) is available",
                              body: "You have \(installed). Click to see what's new.", url: latest.url)
     }
 
