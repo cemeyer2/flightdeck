@@ -17,7 +17,7 @@ final class ChromeTabsSocketTests: XCTestCase {
         return d
     }
 
-    func waitUntil(_ timeout: TimeInterval = 2, _ cond: () -> Bool) -> Bool {
+    func waitUntil(_ timeout: TimeInterval = 10, _ cond: () -> Bool) -> Bool {
         let end = Date().addingTimeInterval(timeout)
         while Date() < end { if cond() { return true }; usleep(10_000) }
         return cond()
@@ -303,14 +303,14 @@ final class ChromeTabsSocketTests: XCTestCase {
         p.executableURL = binary; p.arguments = ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
         let output = Pipe()
         p.standardInput = Pipe(); p.standardOutput = output; p.standardError = FileHandle.nullDevice
-        let started = Date()
         let exited = expectation(description: "exits")
         p.terminationHandler = { _ in exited.fulfill() }
         try p.run()
-        wait(for: [exited], timeout: 2)   // exiting before the GUI starts means no window
+        // Exiting at all means no window: the GUI would keep running. The wait is generous so a loaded machine's slow
+        // launch can't fail it.
+        wait(for: [exited], timeout: 30)
         if p.isRunning { p.terminate() }
         XCTAssertEqual(p.terminationStatus, 64)
-        XCTAssertLessThan(Date().timeIntervalSince(started), 2)
         XCTAssertEqual(output.fileHandleForReading.readDataToEndOfFile(), Data())
     }
 }

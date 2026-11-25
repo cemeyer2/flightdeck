@@ -10,6 +10,7 @@ public extension ProcessExplanation.QuitSafety {
         case .relaunches: return "macOS starts it again within seconds, so quitting it doesn't help."
         case .avoid: return "Quitting it interrupts something you'll notice, such as sound, sync or your display."
         case .never: return "Don't. It's part of macOS, and quitting it can log you out, freeze or restart the Mac."
+        case .app: return "An app you opened. Quitting it is safe; save your work first."
         }
     }
 }
@@ -31,7 +32,7 @@ public enum ProcessCatalogText {
         if e.managed { action = managedAction }
         else {
             switch e.quit {
-            case .safe, .avoid: action = defaultAction
+            case .safe, .avoid, .app: action = defaultAction
             case .relaunches: action = e.whatToDo ?? "Quitting it won't help: macOS starts it again within seconds."
             case .never: action = e.whatToDo ?? "Quitting it won't help: it's part of macOS, and quitting it can log you out or freeze the Mac."
             }

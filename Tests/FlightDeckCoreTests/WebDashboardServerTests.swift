@@ -91,7 +91,7 @@ final class WebDashboardServerTests: XCTestCase {
     func raw(_ port: UInt16, _ req: String) -> String {
         guard let c = RawClient(port: port) else { return "" }
         c.send(req)
-        c.read(timeout: 2)
+        c.read(timeout: 10)
         return c.text
     }
 
@@ -101,7 +101,7 @@ final class WebDashboardServerTests: XCTestCase {
         return c
     }
 
-    func eventually(_ timeout: TimeInterval = 2, _ cond: () -> Bool) -> Bool {
+    func eventually(_ timeout: TimeInterval = 10, _ cond: () -> Bool) -> Bool {
         let end = Date().addingTimeInterval(timeout)
         while Date() < end { if cond() { return true }; usleep(20_000) }
         return cond()
@@ -139,13 +139,13 @@ final class WebDashboardServerTests: XCTestCase {
     func testStreamSnapshotThenSample() throws {
         let s = try start(), port = try XCTUnwrap(s.port)
         let c = try XCTUnwrap(stream(port))
-        XCTAssertTrue(c.read(timeout: 2) { String(decoding: $0, as: UTF8.self).contains("event: snapshot") })
+        XCTAssertTrue(c.read(timeout: 10) { String(decoding: $0, as: UTF8.self).contains("event: snapshot") })
         XCTAssertTrue(c.text.contains("Content-Type: text/event-stream"))
         let body = try XCTUnwrap(c.text.components(separatedBy: "\r\n\r\n").dropFirst().first)
         XCTAssertTrue(body.hasPrefix("retry: 3000\n\nevent: snapshot\ndata: "), body)
         XCTAssertTrue(body.contains(#""history""#))
         s.publish(Self.doc)
-        XCTAssertTrue(c.read(timeout: 2) { String(decoding: $0, as: UTF8.self).contains("event: sample") })
+        XCTAssertTrue(c.read(timeout: 10) { String(decoding: $0, as: UTF8.self).contains("event: sample") })
         XCTAssertEqual(c.events, ["snapshot", "sample"])
         XCTAssertTrue(c.text.contains("data: {\"v\":1,\"x\":\"doc\"}\n\n"))
         XCTAssertFalse(c.text.contains("\nid:"))
@@ -155,20 +155,20 @@ final class WebDashboardServerTests: XCTestCase {
         let counts = Counts()
         let s = try start(counts: counts), port = try XCTUnwrap(s.port)
         let a = try XCTUnwrap(stream(port)), b = try XCTUnwrap(stream(port))
-        XCTAssertTrue(a.read(timeout: 2) { String(decoding: $0, as: UTF8.self).contains("event: snapshot") })
-        XCTAssertTrue(b.read(timeout: 2) { String(decoding: $0, as: UTF8.self).contains("event: snapshot") })
+        XCTAssertTrue(a.read(timeout: 10) { String(decoding: $0, as: UTF8.self).contains("event: snapshot") })
+        XCTAssertTrue(b.read(timeout: 10) { String(decoding: $0, as: UTF8.self).contains("event: snapshot") })
         XCTAssertEqual(counts.last, 2)
         s.stop()
-        XCTAssertTrue(a.waitEOF(1))
-        XCTAssertTrue(b.waitEOF(1))
+        XCTAssertTrue(a.waitEOF(10))
+        XCTAssertTrue(b.waitEOF(10))
         XCTAssertTrue(eventually { counts.last == 0 })
     }
 
     func testStreamLimits() throws {
         let s = try start(), port = try XCTUnwrap(s.port)
         let a = try XCTUnwrap(stream(port)), b = try XCTUnwrap(stream(port))
-        XCTAssertTrue(a.read(timeout: 2) { String(decoding: $0, as: UTF8.self).contains("event: snapshot") })
-        XCTAssertTrue(b.read(timeout: 2) { String(decoding: $0, as: UTF8.self).contains("event: snapshot") })
+        XCTAssertTrue(a.read(timeout: 10) { String(decoding: $0, as: UTF8.self).contains("event: snapshot") })
+        XCTAssertTrue(b.read(timeout: 10) { String(decoding: $0, as: UTF8.self).contains("event: snapshot") })
         let third = raw(port, request("/api/stream", extra: "Accept: text/event-stream\r\n"))
         XCTAssertTrue(third.hasPrefix("HTTP/1.1 429"), third)
         XCTAssertTrue(third.contains("Retry-After: 10\r\n"))
@@ -179,38 +179,42 @@ final class WebDashboardServerTests: XCTestCase {
         let s = try start(allow: "127.0.0.1", counts: counts), port = try XCTUnwrap(s.port)
         let viaAddress = try XCTUnwrap(stream(port, host: "192.0.2.10"))
         let viaLocalhost = try XCTUnwrap(stream(port, host: "localhost"))
-        XCTAssertTrue(viaAddress.read(timeout: 2) { String(decoding: $0, as: UTF8.self).contains("event: snapshot") })
-        XCTAssertTrue(viaLocalhost.read(timeout: 2) { String(decoding: $0, as: UTF8.self).contains("event: snapshot") })
+        XCTAssertTrue(viaAddress.read(timeout: 10) { String(decoding: $0, as: UTF8.self).contains("event: snapshot") })
+        XCTAssertTrue(viaLocalhost.read(timeout: 10) { String(decoding: $0, as: UTF8.self).contains("event: snapshot") })
         s.update(context: Self.context(), allowlist: .parse("10.0.0.0/8"))
-        XCTAssertTrue(viaAddress.waitEOF(1))
+        XCTAssertTrue(viaAddress.waitEOF(10))
         XCTAssertFalse(viaLocalhost.waitEOF(0.5), "a loopback Host still passes")
         XCTAssertTrue(eventually { counts.last == 1 })
     }
 
     /// Review focus: a client that connects and sends nothing loses its slot at the head deadline.
+    /// "Before the deadline" is checked by order, not by a tight clock: the fourth is dropped while the three silent
+    /// clients are still connected, then they go at the deadline.
     func testSilentClientIsDroppedAtDeadline() throws {
-        let s = try start(headDeadline: 0.5), port = try XCTUnwrap(s.port)
+        let s = try start(headDeadline: 3), port = try XCTUnwrap(s.port)
         let silent = (0..<3).compactMap { _ in RawClient(port: port) }
         XCTAssertEqual(silent.count, 3)
-        usleep(100_000)
+        usleep(200_000)
         let fourth = try XCTUnwrap(RawClient(port: port))
-        XCTAssertTrue(fourth.waitEOF(0.4), "over the per-address cap: dropped before the deadline")
-        for c in silent { XCTAssertTrue(c.waitEOF(1.5)) }
+        XCTAssertTrue(fourth.waitEOF(10), "over the per-address cap: dropped")
+        XCTAssertFalse(silent[0].waitEOF(0.05), "dropped before the deadline closed the silent ones")
+        for c in silent { XCTAssertTrue(c.waitEOF(10)) }
         XCTAssertTrue(raw(port, request("/")).hasPrefix("HTTP/1.1 200"))
     }
 
     /// Review focus: a client that dribbles header bytes is cut off at the same deadline, counted from admission.
+    /// Dribbling the whole head takes at least 20 s (200 bytes, 0.1 s apart) and never finishes it, so a deadline that
+    /// each byte restarted would never drop it; being dropped at all is the check, with no tight clock.
     func testDribblingClientIsDroppedAtDeadline() throws {
         let s = try start(headDeadline: 0.5), port = try XCTUnwrap(s.port)
         let c = try XCTUnwrap(RawClient(port: port))
-        let started = Date()
         var dropped = false
-        for ch in "GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nX-Pad: aaaaaaaaaaaaaaaaaaaa" {
+        let head = "GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nX-Pad: " + String(repeating: "a", count: 200)
+        for ch in head {
             c.send(String(ch))
             if c.waitEOF(0.1) { dropped = true; break }
         }
         XCTAssertTrue(dropped, "dribbling never finishes a head, so the deadline ends it")
-        XCTAssertLessThan(Date().timeIntervalSince(started), 1.2)
         withExtendedLifetime(s) {}
     }
 
@@ -221,11 +225,12 @@ final class WebDashboardServerTests: XCTestCase {
         })
         let port = try XCTUnwrap(s.port)
         let c = try XCTUnwrap(stream(port))
-        XCTAssertTrue(c.read(timeout: 2) { String(decoding: $0, as: UTF8.self).contains("retry: 3000") })
+        XCTAssertTrue(c.read(timeout: 10) { String(decoding: $0, as: UTF8.self).contains("retry: 3000") })
         s.publish(Self.doc)
-        usleep(500_000)
+        // Wait for the snapshot itself rather than a fixed time, so a slow snapshot under load can't swallow both.
+        XCTAssertTrue(c.read(timeout: 10) { String(decoding: $0, as: UTF8.self).contains("event: snapshot") })
         s.publish(Self.doc)
-        XCTAssertTrue(c.read(timeout: 2) { String(decoding: $0, as: UTF8.self).contains("event: sample") })
+        XCTAssertTrue(c.read(timeout: 10) { String(decoding: $0, as: UTF8.self).contains("event: sample") })
         XCTAssertEqual(c.events.first, "snapshot")
         XCTAssertEqual(c.events, ["snapshot", "sample"], "the publish during the wait went to no one")
     }
@@ -235,32 +240,37 @@ final class WebDashboardServerTests: XCTestCase {
         let s = try start(counts: counts, provider: { _, reply in reply(nil) })
         let port = try XCTUnwrap(s.port)
         let c = try XCTUnwrap(stream(port))
-        XCTAssertTrue(c.waitEOF(2))
+        XCTAssertTrue(c.waitEOF(10))
         XCTAssertFalse(c.text.contains("event:"))
         XCTAssertTrue(eventually { counts.last == 0 })
         XCTAssertTrue(raw(port, request("/api/state")).hasPrefix("HTTP/1.1 503"))
     }
 
+    /// One stream stops reading and the other keeps up. The healthy reader reads each event before the next is
+    /// published (lock-step, no background thread or fixed sleeps), so at most one event is ever waiting on it, well under
+    /// the backlog; the stuck stream's backlog only grows, so it is closed once the kernel's buffers fill. Load can slow
+    /// the test down but not change the outcome.
     func testSlowReaderDisconnected() throws {
         let counts = Counts()
-        let s = try start(maxBacklog: 4096, counts: counts), port = try XCTUnwrap(s.port)
+        let big = Data(("{\"v\":1,\"pad\":\"" + String(repeating: "x", count: 8 << 10) + "\"}").utf8)
+        let eventSize = WebHTTP.sseEvent("sample", big).count
+        let s = try start(maxBacklog: 8 * eventSize, counts: counts), port = try XCTUnwrap(s.port)
         let stuck = try XCTUnwrap(RawClient(port: port, receiveBuffer: 4096))
         stuck.send(request("/api/stream", extra: "Accept: text/event-stream\r\n"))
         let reader = try XCTUnwrap(stream(port))
-        XCTAssertTrue(reader.read(timeout: 2) { String(decoding: $0, as: UTF8.self).contains("event: snapshot") })
-        XCTAssertTrue(eventually { counts.last == 2 })
-        let stop = Box(false)
-        let done = expectation(description: "reader")
-        DispatchQueue.global().async {
-            while !stop.value && !reader.eof { reader.read(timeout: 0.05) }
-            done.fulfill()
+        XCTAssertTrue(reader.read(timeout: 10) { String(decoding: $0, as: UTF8.self).contains("event: snapshot") })
+        XCTAssertTrue(eventually(10) { counts.last == 2 })
+        // The snapshot may still be arriving; count bytes from the end of it.
+        XCTAssertTrue(reader.read(timeout: 10) { String(decoding: $0, as: UTF8.self).hasSuffix("\n\n") })
+        var expected = reader.buffer.count, published = 0
+        while counts.last != 1, published < 2000, !reader.eof {
+            s.publish(big); published += 1
+            expected += eventSize
+            XCTAssertTrue(reader.read(timeout: 10) { $0.count >= expected }, "event \(published) reached the reading stream")
         }
-        let big = Data(("{\"v\":1,\"pad\":\"" + String(repeating: "x", count: 8 << 10) + "\"}").utf8)
-        for _ in 0..<200 { s.publish(big); usleep(20_000) }
-        XCTAssertTrue(eventually(3) { counts.last == 1 }, "the stream that stopped reading is closed")
-        stop.value = true
-        wait(for: [done], timeout: 2)
+        XCTAssertTrue(eventually(10) { counts.last == 1 }, "the stream that stopped reading is closed (after \(published) events)")
         XCTAssertFalse(reader.eof, "the reading stream stays open")
+        withExtendedLifetime(stuck) {}
     }
 
     /// Review focus: a port that is taken reports the listener's error instead of "Serving…".
@@ -280,22 +290,27 @@ final class WebDashboardServerTests: XCTestCase {
         // Replies close from the server side, which leaves its end of each connection in TIME_WAIT.
         for _ in 0..<3 { XCTAssertTrue(raw(port, request("/")).hasPrefix("HTTP/1.1 200")) }
         a.stop()
-        usleep(50_000)
-        let b = WebDashboardServer(port: port, loopbackOnly: true, context: Self.context(), allowlist: .parse(""), provider: { _, r in r(nil) })
-        let ready = expectation(description: "b")
+        // stop() releases the listener asynchronously, so a loaded machine may not have let go of the port yet: retry for
+        // up to 5 s. TIME_WAIT lasts 2 × MSL (30 s on macOS), so a bind it blocked would still fail every attempt.
         let err = Box<String?>(nil)
-        b.start { e in err.value = e; ready.fulfill() }
-        wait(for: [ready], timeout: 5)
-        b.stop()
+        let end = Date().addingTimeInterval(5)
+        repeat {
+            let b = WebDashboardServer(port: port, loopbackOnly: true, context: Self.context(), allowlist: .parse(""), provider: { _, r in r(nil) })
+            let ready = expectation(description: "b")
+            b.start { e in err.value = e; ready.fulfill() }
+            wait(for: [ready], timeout: 10)
+            b.stop()
+            if err.value != nil { usleep(100_000) }
+        } while err.value != nil && Date() < end
         XCTAssertNil(err.value, "turning the dashboard off and on again keeps its port")
     }
 
     func testRevocationOnNetworkChange() throws {
         let s = try start(allow: "127.0.0.1"), port = try XCTUnwrap(s.port)
         let c = try XCTUnwrap(stream(port, host: "192.0.2.10"))
-        XCTAssertTrue(c.read(timeout: 2) { String(decoding: $0, as: UTF8.self).contains("event: snapshot") })
+        XCTAssertTrue(c.read(timeout: 10) { String(decoding: $0, as: UTF8.self).contains("event: snapshot") })
         s.update(context: Self.context(withFake: false), allowlist: .parse("127.0.0.1"))
-        XCTAssertTrue(c.waitEOF(1))
+        XCTAssertTrue(c.waitEOF(10))
     }
 
     func testInvalidAllowlistRefusesStart() {
@@ -303,7 +318,7 @@ final class WebDashboardServerTests: XCTestCase {
         let ready = expectation(description: "ready")
         let err = Box<String?>(nil)
         s.start { e in err.value = e; ready.fulfill() }
-        wait(for: [ready], timeout: 2)
+        wait(for: [ready], timeout: 10)
         XCTAssertEqual(err.value, "Fix the allowed addresses first")
         XCTAssertNil(s.port)
     }

@@ -8,7 +8,7 @@ enum ProcessCatalogDeveloper {
             summary: "iTerm2, a terminal app that replaces macOS's Terminal.",
             maker: .vendor("George Nachman"),
             busyWhen: nil,
-            quit: .avoid, whatToDo: nil,
+            quit: .app, whatToDo: nil,
             findingNote: "iTerm2 itself is busy, rather than a command running in it.",
             names: ["iTerm2"], pathPrefixes: ["/Applications/iTerm.app/"],
             bundleIDs: ["com.googlecode.iterm2"], teamIDs: ["H7V7XYVQ7D"],
@@ -31,5 +31,14 @@ enum ProcessCatalogDeveloper {
             findingNote: "Docker Desktop is busy.",
             pathPrefixes: ["/Applications/Docker.app/"], bundleIDs: ["com.docker.docker"], teamIDs: ["9BNSXJN65R"],
             groundedIn: "https://docs.docker.com/desktop/; file:///Applications/Docker.app"),
+        ProcessExplanation(
+            id: "dev-docker-desktop-app", title: "Docker Desktop's window",
+            summary: "The Docker Desktop app's own interface. Your containers run in the separate backend and virtual machine inside Docker.app.",
+            maker: .vendor("Docker"),
+            busyWhen: nil,
+            quit: .app, whatToDo: nil,
+            findingNote: "Docker Desktop's interface is busy, rather than a container.",
+            pathPrefixes: ["/Applications/Docker.app/Contents/MacOS/Docker Desktop.app/"], teamIDs: ["9BNSXJN65R"],
+            groundedIn: "https://docs.docker.com/desktop/; file:///Applications/Docker.app/Contents/MacOS/Docker%20Desktop.app"),
     ]
 }

@@ -12,12 +12,15 @@ final class FakeHelperClient: HelperClient, @unchecked Sendable {
     var unreachable = false
     private(set) var calls: [HelperRequest] = []
     private(set) var authorizations: [Data?] = []
+    /// The deadline each call was given, in call order.
+    private(set) var deadlines: [TimeInterval] = []
     private(set) var invalidations = 0
 
     func send(_ r: HelperRequest, authorization: Data?, deadline: TimeInterval) -> Result<HelperResponse, HelperClientError> {
         lock.lock()
         calls.append(r)
         authorizations.append(authorization)
+        deadlines.append(deadline)
         let d = delay, down = unreachable
         lock.unlock()
         if d > 0 {
