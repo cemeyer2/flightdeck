@@ -113,6 +113,35 @@ final class HelperReadersTests: XCTestCase {
         XCTAssertFalse(ChangeReaders.read(previous: inv).items.contains { $0.key.hasPrefix("btm:") })
     }
 
+    /// Unlocking for the first time, locking, and turning the helper off produce no events for the helper-only items;
+    /// a real addition while both inventories include them still does.
+    func testHelperCoverageChangeIsNoFlood() {
+        let launchd = InventoryItem(category: .launchItem, key: "/Library/LaunchDaemons/a.plist", name: "a")
+        let wifi = InventoryItem(category: .profile, key: "profile:com.example.wifi", name: "Office Wi-Fi", scope: ChangeReaders.deviceScope)
+        let docker = InventoryItem(category: .launchItem, key: "btm:2.com.docker.docker", name: "Docker", scope: "Login Items (app)")
+        let vpn = InventoryItem(category: .profile, key: "profile:com.example.vpn", name: "VPN", scope: ChangeReaders.deviceScope)
+        func inv(_ t: Double, _ read: (items: [InventoryItem], profilesOK: Bool, itemsOK: Bool)?, previous: Inventory?) -> Inventory {
+            var i = Inventory(time: Date(timeIntervalSince1970: t), items: [launchd])
+            ChangeReaders.addHelperItems(read, to: &i, previous: previous)
+            return i
+        }
+        let off = inv(1000, nil, previous: nil)
+        let unlocked = inv(2000, ([wifi, docker], true, true), previous: off)
+        XCTAssertEqual(ChangeDiff.diff(old: off, new: unlocked), [], "first unlock adds nothing")
+        let locked = inv(3000, ([], false, false), previous: unlocked)
+        XCTAssertEqual(locked.helperProfiles, true)
+        XCTAssertEqual(ChangeDiff.diff(old: unlocked, new: locked), [], "locking carries over")
+        let again = inv(4000, ([wifi, docker, vpn], true, true), previous: locked)
+        XCTAssertEqual(ChangeDiff.diff(old: locked, new: again).map(\.item.key), ["profile:com.example.vpn"])
+        let turnedOff = inv(5000, nil, previous: again)
+        XCTAssertNil(turnedOff.helperBackgroundItems)
+        XCTAssertEqual(ChangeDiff.diff(old: again, new: turnedOff), [], "turning the helper off removes nothing")
+        // Locked from launch (helper on, never unlocked): nothing to carry, nothing to report on a later unlock.
+        let lockedFirst = inv(6000, ([], false, false), previous: turnedOff)
+        XCTAssertNil(lockedFirst.helperProfiles)
+        XCTAssertEqual(ChangeDiff.diff(old: lockedFirst, new: inv(7000, ([wifi], true, true), previous: lockedFirst)), [])
+    }
+
     func testRefusalFallsBack() {
         let fake = FakeHelperClient()
         let s = HelperSession.unlockedForTests(fake)

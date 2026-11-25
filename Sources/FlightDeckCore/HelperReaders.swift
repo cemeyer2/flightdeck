@@ -97,9 +97,16 @@ extension ChangeReaders {
         }
     }
 
+    /// A Mac-wide profile, which only the helper reads.
+    static func isHelperProfile(_ i: InventoryItem) -> Bool { i.category == .profile && i.scope == deviceScope }
+    /// A Login Items background record, which only the helper reads.
+    static func isBackgroundItem(_ i: InventoryItem) -> Bool { i.category == .launchItem && i.key.hasPrefix(backgroundKeyPrefix) }
+
     /// Adds what the helper read. When the helper is on but couldn't read (locked, failed), the previous inventory's
     /// helper-only items are carried over instead, so locking FlightDeck never reports them as removed. With the
-    /// helper off (`read` nil) nothing is carried over and the inventory is exactly what the app reads itself.
+    /// helper off (`read` nil) nothing is carried over and the inventory is exactly what the app reads itself. The
+    /// inventory's helper flags record which parts are included, so the diff can tell a helper turning on or off
+    /// (no events) from items really appearing or going away.
     static func addHelperItems(_ read: (items: [InventoryItem], profilesOK: Bool, itemsOK: Bool)?, to inv: inout Inventory,
                                previous: Inventory?) {
         guard let read else { return }
@@ -107,11 +114,17 @@ extension ChangeReaders {
         inv.items += read.items.filter { !have.contains($0.id) }
         let prev = previous?.items ?? []
         let have2 = Set(inv.items.map(\.id))
-        if !read.profilesOK {
-            inv.items += prev.filter { $0.category == .profile && $0.scope == deviceScope && !have2.contains($0.id) }
+        if read.profilesOK {
+            inv.helperProfiles = true
+        } else {
+            inv.items += prev.filter { isHelperProfile($0) && !have2.contains($0.id) }
+            inv.helperProfiles = previous?.helperProfiles
         }
-        if !read.itemsOK {
-            inv.items += prev.filter { $0.category == .launchItem && $0.key.hasPrefix(backgroundKeyPrefix) && !have2.contains($0.id) }
+        if read.itemsOK {
+            inv.helperBackgroundItems = true
+        } else {
+            inv.items += prev.filter { isBackgroundItem($0) && !have2.contains($0.id) }
+            inv.helperBackgroundItems = previous?.helperBackgroundItems
         }
     }
 }
