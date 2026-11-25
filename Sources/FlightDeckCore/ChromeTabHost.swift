@@ -14,8 +14,18 @@ public enum ChromeTabHost {
         guard let colon = url.firstIndex(of: ":") else { return "page" }
         switch url[..<colon].lowercased() {
         case "http", "https":
-            guard let c = URLComponents(string: url), let h = c.percentEncodedHost ?? c.host, !h.isEmpty else { return "page" }
-            return h.lowercased()
+            // Parsed by hand: URLComponents decodes punycode to Unicode.
+            var rest = url[url.index(after: colon)...]
+            while rest.first == "/" || rest.first == "\\" { rest = rest.dropFirst() }
+            var authority = rest.prefix { !"/?#\\".contains($0) }
+            if let at = authority.lastIndex(of: "@") { authority = authority[authority.index(after: at)...] }
+            let host: Substring
+            if authority.first == "[", let close = authority.firstIndex(of: "]") { host = authority[...close] }
+            else { host = authority.prefix { $0 != ":" } }
+            guard !host.isEmpty else { return "page" }
+            // Chrome sends hosts in punycode; a raw Unicode host can only come from a crafted table, so it's shown escaped.
+            if !host.allSatisfy(\.isASCII) { return host.lowercased().addingPercentEncoding(withAllowedCharacters: .urlHostAllowed) ?? "page" }
+            return host.lowercased()
         case "file": return "local file"
         case "data", "blob": return "embedded page"
         case "chrome", "chrome-extension", "devtools", "about": return "Chrome page"

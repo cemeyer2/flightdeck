@@ -153,4 +153,129 @@ final class ChromeTabsTests: XCTestCase {
         XCTAssertEqual(ChromeTabsMessage.parse(ChromeTabsMessage.refresh.encoded()), .refresh)
         if case .tabs(let t)? = ChromeTabsMessage.parse(tabsMessage([tabJSON()])) { XCTAssertEqual(t.tabs[0].frames[0].processId, 7) } else { XCTFail() }
     }
+
+    // MARK: Host derivation and sanitising
+
+    func testHostDerivation() {
+        XCTAssertEqual(ChromeTabHost.derive(url: "https://WWW.YouTube.com/watch?v=x"), "www.youtube.com")
+        XCTAssertEqual(ChromeTabHost.derive(url: "https://xn--bcher-kva.example/"), "xn--bcher-kva.example", "never decoded to Unicode")
+        XCTAssertFalse(ChromeTabHost.derive(url: "https://gооgle.com/").contains("о"), "a raw Cyrillic host from a crafted table is escaped")
+        XCTAssertEqual(ChromeTabHost.derive(url: "file:///Users/me/secret.pdf"), "local file")
+        XCTAssertEqual(ChromeTabHost.derive(url: "data:text/html,hi"), "embedded page")
+        XCTAssertEqual(ChromeTabHost.derive(url: "blob:https://a.com/uuid"), "embedded page")
+        XCTAssertEqual(ChromeTabHost.derive(url: "chrome://settings"), "Chrome page")
+        XCTAssertEqual(ChromeTabHost.derive(url: "chrome-extension://abc/page.html"), "Chrome page")
+        XCTAssertEqual(ChromeTabHost.derive(url: "devtools://devtools/bundled/x.html"), "Chrome page")
+        XCTAssertEqual(ChromeTabHost.derive(url: "about:blank"), "Chrome page")
+        XCTAssertEqual(ChromeTabHost.derive(url: "ftp://x.y/"), "page")
+        XCTAssertEqual(ChromeTabHost.derive(url: "garbage"), "page")
+        XCTAssertEqual(ChromeTabHost.derive(url: "http://192.168.1.10:8080/a"), "192.168.1.10")
+        XCTAssertEqual(ChromeTabHost.derive(url: "https://user:pw@mail.example.com/u/0"), "mail.example.com")
+        XCTAssertEqual(ChromeTabHost.derive(origin: "https://ads.example.net"), "ads.example.net")
+        XCTAssertEqual(ChromeTabHost.derive(origin: "null"), "page")
+    }
+
+    func testForMCP() {
+        for ip in ["192.168.1.10", "::1", "[fe80::1]", "fe80::1%en0", "[fe80::1%25en0]"] { XCTAssertEqual(ChromeTabHost.forMCP(ip), "IP address", ip) }
+        XCTAssertEqual(ChromeTabHost.forMCP("wiki"), "local network host")
+        XCTAssertEqual(ChromeTabHost.forMCP("localhost"), "local network host")
+        XCTAssertEqual(ChromeTabHost.forMCP("payroll.corp.example"), "payroll.corp.example")
+        XCTAssertEqual(ChromeTabHost.forMCP("youtube.com"), "youtube.com")
+        for fixed in ["local file", "embedded page", "Chrome page", "page"] { XCTAssertEqual(ChromeTabHost.forMCP(fixed), fixed) }
+    }
+
+    func testSanitize() {
+        XCTAssertEqual(ChromeTabHost.sanitizeTitle("a\u{202E}b\n\tc\u{0007}  d"), "ab c d")
+        XCTAssertEqual(ChromeTabHost.sanitizeTitle("  x\u{2066}y\u{0085}z\u{009B} "), "xy z")
+        XCTAssertEqual(ChromeTabHost.sanitizeTitle(String(repeating: "x", count: 10_000)).count, 200)
+    }
+
+    // MARK: Labels and text
+
+    func entry(_ host: String, _ title: String = "", url: String = "", active: Bool = false, last: Double = 0,
+               frameIn: String? = nil) -> ChromeTabEntry {
+        ChromeTabEntry(kind: frameIn.map { .frame(inTabHost: $0) } ?? .tab, host: host, title: title, url: url,
+                       active: active, audible: false, lastAccessed: last)
+    }
+    func attr(_ e: [ChromeTabEntry], ext: Bool = false) -> ChromeTabAttribution { ChromeTabAttribution(entries: e, isExtensionProcess: ext) }
+
+    func testLabelKernelTaskTitleStillMarked() throws {
+        let l = try XCTUnwrap(ChromeTabLabel(attr([entry("youtube.com", "kernel_task")])))
+        XCTAssertEqual(l.host, "youtube.com"); XCTAssertEqual(l.title, "kernel_task"); XCTAssertEqual(l.suffix, "(Chrome tab)")
+        XCTAssertEqual(l.plain, "youtube.com — kernel_task (Chrome tab)")
+    }
+
+    func testLabelEmptyTitleHostAlone() throws {
+        let l = try XCTUnwrap(ChromeTabLabel(attr([entry("youtube.com", ChromeTabHost.sanitizeTitle("\u{200E} "))])))
+        XCTAssertNil(l.title)
+        XCTAssertEqual(l.plain, "youtube.com (Chrome tab)")
+        XCTAssertNil(ChromeTabLabel(attr([])), "nothing to show")
+    }
+
+    func testLabelMultiTabActiveFirst() throws {
+        // As the resolver orders them: tabs active first, then by last use.
+        let a = attr(ChromeTabsResolver.ordered([entry("b.example", "B", last: 9), entry("a.example", "A", active: true, last: 1),
+                                                 entry("c.example", "C", last: 5)]))
+        let l = try XCTUnwrap(ChromeTabLabel(a))
+        XCTAssertEqual(l.host, "a.example")
+        XCTAssertEqual(l.suffix, "(Chrome tab) +2 more tabs")
+        XCTAssertEqual(ChromeTabLabel(attr([entry("a.example"), entry("b.example")]))?.suffix, "(Chrome tab) +1 more tab")
+        XCTAssertEqual(ChromeTabText.tooltip(a), "a.example — A\nb.example — B\nc.example — C")
+    }
+
+    func testLabelFrameAndExtension() throws {
+        XCTAssertEqual(ChromeTabLabel(attr([entry("ads.example.net", frameIn: "youtube.com")]))?.plain, "ads.example.net — frame in youtube.com tab")
+        XCTAssertEqual(ChromeTabLabel(attr([entry("ads.example.net", frameIn: "youtube.com")]))?.suffix, "— frame in youtube.com tab")
+        let e = try XCTUnwrap(ChromeTabLabel(attr([], ext: true)))
+        XCTAssertEqual(e.plain, "Chrome extension process"); XCTAssertEqual(e.suffix, ""); XCTAssertNil(e.title)
+    }
+
+    func testSummaryLinesNeverContainURL() {
+        let a = attr([entry("mail.example.com", "Inbox (3)", url: "https://mail.example.com/u/0/inbox?q=secret#x"),
+                      entry("ads.example.net", frameIn: "mail.example.com")])
+        let s = ChromeTabText.summaryLines(a)
+        for banned in ["https://", "/u/0", "?q=", "secret", "#x"] { XCTAssertFalse(s.contains(banned), banned) }
+        XCTAssertTrue(s.hasPrefix("Chrome tabs\n"))
+        XCTAssertTrue(s.contains("mail.example.com — Inbox (3)"))
+        XCTAssertTrue(s.contains("ads.example.net — frame in mail.example.com tab"))
+        XCTAssertEqual(ChromeTabText.summaryLines(attr([])), "")
+        XCTAssertTrue(ChromeTabText.searchText(a).contains("inbox (3)"))
+        XCTAssertFalse(ChromeTabText.searchText(a).contains("secret"), "the filter matches what's shown, not the address")
+    }
+
+    func testKillWarningNamesTabsOnly() {
+        XCTAssertEqual(ChromeTabText.killWarning(attr([entry("a.example"), entry("b.example"), entry("x.net", frameIn: "a.example")])),
+                       "This closes 2 Chrome tabs: a.example, b.example")
+        XCTAssertEqual(ChromeTabText.killWarning(attr([entry("a.example")])), "This closes 1 Chrome tab: a.example")
+        XCTAssertNil(ChromeTabText.killWarning(attr([entry("x.net", frameIn: "a.example")])))
+    }
+
+    func sample(_ pid: Int32, cpu: Double) -> ProcessSample {
+        ProcessSample(identity: ProcessIdentity(pid: pid, startTime: 1), ppid: 100, name: "Google Chrome Helper (Renderer)", path: "/x",
+                      user: "me", uid: 501, cpu: cpu, cpuTime: 0, memory: 0, threads: 1, diskReadBps: 0, diskWriteBps: 0,
+                      diskRead: 0, diskWritten: 0, energyWatts: nil, wakeups: 0, restricted: false)
+    }
+
+    func testMostlyLineOnlyForChromePIDs() {
+        let procs = [sample(1, cpu: 50), sample(2, cpu: 90), sample(3, cpu: 3), sample(4, cpu: 80)]
+        let at: [ProcessIdentity: ChromeTabAttribution] = [
+            procs[0].identity: attr([entry("docs.google.com", "Plan")]),
+            procs[1].identity: attr([entry("youtube.com", "Lofi")]),
+            procs[2].identity: attr([entry("quiet.example", "Q")]),
+        ]
+        XCTAssertNil(ChromeTabText.mostlyLine(pids: [4], processes: procs, attribution: at))
+        XCTAssertEqual(ChromeTabText.mostlyLine(pids: [2, 4, 1, 3], processes: procs, attribution: at),
+                       "Mostly: youtube.com — Lofi (90%), docs.google.com — Plan (50%)", "order follows pids; under 5% skipped")
+    }
+
+    func testMostlyLineWholeFiguresNotSplit() {
+        let procs = [sample(1, cpu: 120)]
+        let at = [procs[0].identity: attr([entry("docs.google.com", "Plan", active: true), entry("b.example", "B"), entry("c.example", "C")])]
+        XCTAssertEqual(ChromeTabText.mostlyLine(pids: [1], processes: procs, attribution: at),
+                       "Mostly: docs.google.com +2 more tabs (120%, shared)")
+        let four = (1...4).map { sample(Int32($0), cpu: 10) }
+        let at4 = Dictionary(uniqueKeysWithValues: four.map { ($0.identity, attr([entry("s\($0.pid).example")])) })
+        XCTAssertEqual(ChromeTabText.mostlyLine(pids: [1, 2, 3, 4], processes: four, attribution: at4)?.components(separatedBy: "), ").count, 3,
+                       "at most three renderers")
+    }
 }
