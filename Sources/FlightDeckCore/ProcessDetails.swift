@@ -276,8 +276,8 @@ public enum ProcessInspector {
         return anchored(code, team: team, flags: SecCSFlags(rawValue: kSecCSDoNotValidateExecutable | kSecCSDoNotValidateResources))
     }
 
-    /// `anchor apple generic` covers Developer ID and App Store certificates; the leaf's OU is the team the certificate
-    /// was issued to. A team ID is 10 letters and digits, so anything else is refused rather than put in the requirement.
+    /// `anchor apple generic` with the leaf's OU as the team matches Developer ID certificates, which are issued to
+    /// that team. Mac App Store apps don't match: their leaf is Apple's own, so its OU isn't the developer's team. A team ID is 10 letters and digits, so anything else is refused rather than put in the requirement.
     private static func anchored(_ code: SecStaticCode, team: String, flags: SecCSFlags) -> Bool {
         guard !team.isEmpty, team.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber) }) else { return false }
         var req: SecRequirement?
