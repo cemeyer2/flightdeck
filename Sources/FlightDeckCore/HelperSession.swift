@@ -192,4 +192,11 @@ public final class HelperSession: @unchecked Sendable {
         guard defaults.bool(forKey: enabledKey), !defaults.bool(forKey: "demo"), case .eligible(let team) = build else { return nil }
         return HelperSession(client: XPCHelperClient(teamID: team), authorization: { nil }, clock: Date.init, standalone: true)
     }
+
+    /// The line `--snapshot` / `--findings` print when other users' processes are left out: on a build that could use
+    /// the helper, whenever the running app doesn't hold an unlock (H2). nil when unlocked or on a build that can't.
+    public static func snapshotNote(build: HelperBuildStatus, state: HelperAccessState?) -> String? {
+        guard case .eligible = build, state != .unlocked else { return nil }
+        return "Only your own processes' details are included: unlock in FlightDeck to include all users."
+    }
 }

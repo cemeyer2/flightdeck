@@ -198,6 +198,15 @@ final class HelperClientTests: XCTestCase {
         XCTAssertNil(HelperSession.standalone(build: eligible, defaults: d))
     }
 
+    func testSnapshotNote() {
+        XCTAssertNotNil(HelperSession.snapshotNote(build: eligible, state: nil), "toggle off on an eligible build")
+        XCTAssertNotNil(HelperSession.snapshotNote(build: eligible, state: .locked))
+        XCTAssertNotNil(HelperSession.snapshotNote(build: eligible, state: .off))
+        XCTAssertNil(HelperSession.snapshotNote(build: eligible, state: .unlocked))
+        XCTAssertNil(HelperSession.snapshotNote(build: .needsSignedBuild, state: nil))
+        XCTAssertNil(HelperSession.snapshotNote(build: .moveToApplications, state: nil))
+    }
+
     func testStandaloneSendsNoAuthorization() {
         let fake = FakeHelperClient()
         fake.replies["hello"] = .hello(HelperHello(version: 1, rightInPlace: true, eligible: true))

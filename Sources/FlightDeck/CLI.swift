@@ -3,6 +3,7 @@
 // starts normally (so does a mode whose arguments are missing or incomplete).
 import Foundation
 import FlightDeckCore
+import FlightDeckHelperProtocol
 
 /// Command-line interface of the app binary (FlightDeck.app/Contents/MacOS/FlightDeck):
 ///   --snapshot [--json] [--top N]   one warmed-up sample: summary + findings (or full JSON)
@@ -59,8 +60,17 @@ enum CLI {
         if a.contains("--snapshot") || a.contains("--findings") {
             // CLI findings come from a single sample, so only instantaneous conditions are found; "sustained for N
             // minutes" findings need the long-running app.
-            let s = warmSample()
+            // Counters for other users' processes while the running app holds an unlock (H2); never a prompt.
+            let build = HelperEligibility.evaluate(HelperEligibility.readSelf(), bundlePath: Bundle.main.bundlePath)
+            let helper = HelperSession.standalone(build: build)
+            // The control deadline, not one tick's 0.1 s: launchd may still be starting the helper.
+            helper?.refreshStatus()
+            let s = warmSample(helper: helper)
             let findings = Analyzer().ingest(s)
+            // On stderr, so --json output stays parseable.
+            if let note = HelperSession.snapshotNote(build: build, state: helper?.state) {
+                FileHandle.standardError.write(Data((note + "\n").utf8))
+            }
             if a.contains("--json") {
                 let enc = JSONEncoder(); enc.outputFormatting = [.prettyPrinted, .sortedKeys]; enc.dateEncodingStrategy = .iso8601
                 struct Out: Encodable { var snapshot: Snapshot; var findings: [Finding] }
@@ -149,8 +159,8 @@ enum CLI {
     }
 
     /// Two samples a second apart: delta-based values (CPU %, disk/network rates) are unavailable in the first one.
-    static func warmSample() -> Snapshot {
-        let sampler = Sampler(); _ = sampler.sample(); Thread.sleep(forTimeInterval: 1); return sampler.sample()
+    static func warmSample(helper: HelperSession? = nil) -> Snapshot {
+        let sampler = Sampler(); sampler.processes.helper = helper; _ = sampler.sample(); Thread.sleep(forTimeInterval: 1); return sampler.sample()
     }
 
     /// Reads a trace file, exiting with an error message if it can't be read.
