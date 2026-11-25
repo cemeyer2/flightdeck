@@ -136,6 +136,21 @@ final class HelperServiceTests: XCTestCase {
         XCTAssertEqual(code(send(s, .processRusage(ids: [pid500]))), .notAuthorized)
     }
 
+    func testVerifiedUnlockIsCachedThenRechecked() {
+        let s = greeted(app, standalone)
+        for _ in 0..<5 {
+            guard case .rusage = send(s, .processRusage(ids: [pid500]), auth: form) else { return XCTFail() }
+            now = now.addingTimeInterval(1)
+        }
+        XCTAssertEqual(authority.verifyCount, 1)
+        // The right is revoked: the next check after the re-verify interval notices, and the holder's unlock ends.
+        authority.validForms = []
+        now = now.addingTimeInterval(HelperLimits.authReverifyInterval)
+        XCTAssertEqual(code(send(s, .processRusage(ids: [pid500]), auth: form)), .notAuthorized)
+        XCTAssertEqual(authority.verifyCount, 2)
+        XCTAssertEqual(code(send(s, .processRusage(ids: [pid500]), from: standalone)), .notAuthorized)
+    }
+
     func testStatusReportsUnlock() {
         let s = greeted(app, standalone)
         XCTAssertEqual(send(s, .status, auth: form), .status(HelperServiceStatus(unlocked: true, holderAlive: true, agentContents: false)))

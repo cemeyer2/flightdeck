@@ -55,9 +55,12 @@ public final class HelperService {
 
         // The authd check runs outside the lock; the registry is only touched under it.
         var verified = withLock { registry.cachedVerification(connection: c.connection) }
-        if !verified, let form = e.authorization, authority.verify(externalForm: form, right: HelperIDs.rightName) {
-            verified = true
-            withLock { registry.recordVerification(connection: c.connection) }
+        if !verified, let form = e.authorization {
+            verified = authority.verify(externalForm: form, right: HelperIDs.rightName)
+            withLock {
+                if verified { registry.recordVerification(connection: c.connection) }
+                else { registry.verificationFailed(connection: c.connection) }
+            }
         }
         let access = withLock { registry.access(connection: c.connection, uid: c.uid, verified: verified) }
 

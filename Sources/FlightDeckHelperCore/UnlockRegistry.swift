@@ -33,10 +33,13 @@ public final class UnlockRegistry {
 
     public func cachedVerification(connection: ConnectionID) -> Bool {
         guard let t = verifiedAt[connection] else { return false }
-        return clock().timeIntervalSince(t) < HelperLimits.authCacheTTL
+        return clock().timeIntervalSince(t) < HelperLimits.authReverifyInterval
     }
 
     public func recordVerification(connection: ConnectionID) { verifiedAt[connection] = clock() }
+
+    /// A presented authorization no longer verifies (the right was revoked): the connection's unlock ends.
+    public func verificationFailed(connection: ConnectionID) { end(connection) }
 
     public func holderAlive(uid: uid_t) -> Bool { holders[uid] != nil }
 
