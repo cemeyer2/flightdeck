@@ -7,6 +7,12 @@ cd "$(dirname "$0")/.."
 ./scripts/bundle.sh
 APP=build/FlightDeck.app
 if [ -n "${SIGN_ID:-}" ]; then
+  # The root helper: pin launchd to this team's signature, then sign it before the app.
+  HELPER="$APP/Contents/Library/LaunchServices/app.flightdeck.Flightdeck.helper"
+  TEAM_ID="${SIGN_ID##*(}"; TEAM_ID="${TEAM_ID%)}"
+  plutil -insert SpawnConstraint -json "{\"team-identifier\":\"$TEAM_ID\",\"signing-identifier\":\"app.flightdeck.Flightdeck.helper\"}" \
+    "$APP/Contents/Library/LaunchDaemons/app.flightdeck.Flightdeck.helper.plist"
+  codesign --force --options runtime --timestamp --sign "$SIGN_ID" --identifier app.flightdeck.Flightdeck.helper "$HELPER"
   codesign --force --options runtime --timestamp --entitlements scripts/FlightDeck.entitlements --sign "$SIGN_ID" "$APP"
   codesign --verify --strict --verbose=2 "$APP"
 else
