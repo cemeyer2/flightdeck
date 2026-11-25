@@ -3,7 +3,9 @@ import Foundation
 /// The helper's own settings. Root-owned on disk so a program running as the user can't switch agent access to
 /// process contents on by itself (user defaults would let it).
 public protocol HelperSettingsStoring: AnyObject {
-    var agentContents: Bool { get set }
+    var agentContents: Bool { get }
+    /// Throws when the setting couldn't be saved; the stored value is then unchanged.
+    func setAgentContents(_ on: Bool) throws
     func removeAll()
 }
 
@@ -18,20 +20,15 @@ public final class FileHelperSettingsStore: HelperSettingsStoring {
     }
 
     public var agentContents: Bool {
-        get {
-            guard let d = try? Data(contentsOf: url), let c = try? JSONDecoder().decode(Contents.self, from: d) else { return false }
-            return c.agentContents
-        }
-        set {
-            let dir = url.deletingLastPathComponent()
-            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true,
-                                                     attributes: [.posixPermissions: 0o700])
-            guard let d = try? JSONEncoder().encode(Contents(agentContents: newValue)) else { return }
-            do {
-                try d.write(to: url, options: .atomic)
-                try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
-            } catch {}
-        }
+        guard let d = try? Data(contentsOf: url), let c = try? JSONDecoder().decode(Contents.self, from: d) else { return false }
+        return c.agentContents
+    }
+
+    public func setAgentContents(_ on: Bool) throws {
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true,
+                                                attributes: [.posixPermissions: 0o700])
+        try JSONEncoder().encode(Contents(agentContents: on)).write(to: url, options: .atomic)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
     }
 
     public func removeAll() {

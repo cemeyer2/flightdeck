@@ -47,9 +47,10 @@ public enum HelperLimits {
     /// Kinds that start a tool (lsof, sample, footprint) or walk another process; an agent can't flood these.
     public static let rateLimitedKinds: Set<String> = ["sampleStacks", "memoryFootprint", "listeningSockets", "internetSockets", "processDetails"]
     public static let minInterval: TimeInterval = 2       // per rate-limited kind
-    /// A verified authorization is trusted for this long per connection, so the per-tick rusage call doesn't pay
-    /// for an authd round-trip each time. Dropped on lock.
-    public static let authCacheTTL: TimeInterval = 0.5
+    /// A verified authorization stays trusted per connection until lock, disconnect or a failed check, so the
+    /// per-tick rusage call doesn't pay for an authd round-trip each time. It is re-checked after this long, so a
+    /// revoked right is noticed.
+    public static let authReverifyInterval: TimeInterval = 60
 }
 
 public enum HelperValidation {

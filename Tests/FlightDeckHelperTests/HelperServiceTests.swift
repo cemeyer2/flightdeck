@@ -136,6 +136,21 @@ final class HelperServiceTests: XCTestCase {
         XCTAssertEqual(code(send(s, .processRusage(ids: [pid500]))), .notAuthorized)
     }
 
+    func testVerifiedUnlockIsCachedThenRechecked() {
+        let s = greeted(app, standalone)
+        for _ in 0..<5 {
+            guard case .rusage = send(s, .processRusage(ids: [pid500]), auth: form) else { return XCTFail() }
+            now = now.addingTimeInterval(1)
+        }
+        XCTAssertEqual(authority.verifyCount, 1)
+        // The right is revoked: the next check after the re-verify interval notices, and the holder's unlock ends.
+        authority.validForms = []
+        now = now.addingTimeInterval(HelperLimits.authReverifyInterval)
+        XCTAssertEqual(code(send(s, .processRusage(ids: [pid500]), auth: form)), .notAuthorized)
+        XCTAssertEqual(authority.verifyCount, 2)
+        XCTAssertEqual(code(send(s, .processRusage(ids: [pid500]), from: standalone)), .notAuthorized)
+    }
+
     func testStatusReportsUnlock() {
         let s = greeted(app, standalone)
         XCTAssertEqual(send(s, .status, auth: form), .status(HelperServiceStatus(unlocked: true, holderAlive: true, agentContents: false)))
@@ -199,6 +214,37 @@ final class HelperServiceTests: XCTestCase {
         XCTAssertFalse(settings.agentContents)
         XCTAssertEqual(send(s, .setAgentContents(true), auth: form), .ok)
         XCTAssertTrue(settings.agentContents)
+    }
+
+    func testSetAgentContentsReportsAFailedWrite() {
+        let s = greeted()
+        settings.failWrite = true
+        let r = send(s, .setAgentContents(true), auth: form)
+        XCTAssertEqual(code(r), .toolFailed)
+        if case .refused(let x) = r { XCTAssertTrue(x.message.contains("couldn't save")) }
+        XCTAssertFalse(settings.agentContents)
+        XCTAssertEqual(send(s, .status, auth: form), .status(HelperServiceStatus(unlocked: true, holderAlive: true, agentContents: false)))
+    }
+
+    func testSettingsFileRoundTripsWithOwnerOnlyMode() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = FileHelperSettingsStore(url: dir.appendingPathComponent("sub/settings.json"))
+        XCTAssertFalse(store.agentContents)
+        try store.setAgentContents(true)
+        XCTAssertTrue(store.agentContents)
+        let mode = try FileManager.default.attributesOfItem(atPath: store.url.path)[.posixPermissions] as? Int
+        XCTAssertEqual(mode, 0o600)
+    }
+
+    func testSettingsFileWriteFailureThrows() throws {
+        // The parent "folder" is a regular file, so neither the folder nor the file can be made.
+        let blocker = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try Data().write(to: blocker)
+        defer { try? FileManager.default.removeItem(at: blocker) }
+        let store = FileHelperSettingsStore(url: blocker.appendingPathComponent("settings.json"))
+        XCTAssertThrowsError(try store.setAgentContents(true))
+        XCTAssertFalse(store.agentContents)
     }
 
     func testRemoveRightAndSettings() {

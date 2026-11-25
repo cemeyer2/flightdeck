@@ -131,7 +131,7 @@ public enum HelperParsers {
 
     /// KERN_PROCARGS2 buffer: Int32 argc, the exec path (NUL-terminated), NUL padding, then exactly argc
     /// NUL-terminated arguments (an empty argument is just a NUL, so they are counted, not skipped), then the
-    /// environment's strings, ended by an empty string. The same walk as FlightDeckCore's ProcessDetails.
+    /// environment's strings, ended by an empty string. FlightDeckCore's ProcessDetails uses it too.
     public static func procArgs(_ buf: [UInt8]) -> (args: [String], env: [String])? {
         let size = buf.count
         guard size > 4 else { return nil }

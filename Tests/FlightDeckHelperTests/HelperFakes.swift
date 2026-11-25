@@ -8,6 +8,7 @@ final class FakeAuthority: AuthorizationAuthority {
     var failSet = false
     var removed: [String] = []
     var validForms: Set<Data> = []
+    var verifyCount = 0
 
     func storedRule(_ right: String) -> [String: Any]? { rules[right] }
     func setRule(_ right: String, _ rule: [String: Any]) -> Bool {
@@ -22,7 +23,8 @@ final class FakeAuthority: AuthorizationAuthority {
         return true
     }
     func verify(externalForm: Data, right: String) -> Bool {
-        right == HelperIDs.rightName && externalForm.count == 32 && validForms.contains(externalForm)
+        verifyCount += 1
+        return right == HelperIDs.rightName && externalForm.count == 32 && validForms.contains(externalForm)
     }
 }
 
@@ -54,7 +56,13 @@ final class FakeRunner: ToolRunning {
 }
 
 final class MemorySettings: HelperSettingsStoring {
+    struct WriteFailed: Error {}
     var agentContents = false
     var removed = false
+    var failWrite = false
+    func setAgentContents(_ on: Bool) throws {
+        if failWrite { throw WriteFailed() }
+        agentContents = on
+    }
     func removeAll() { agentContents = false; removed = true }
 }

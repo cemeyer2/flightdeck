@@ -97,16 +97,26 @@ final class HelperAuthorizationTests: XCTestCase {
         XCTAssertNotEqual(r.access(connection: 1, uid: 501, verified: false), .full)
     }
 
-    func testAuthCacheExpires() {
+    func testAuthCacheLastsUntilReverify() {
         var now = Date(timeIntervalSince1970: 1000)
         let r = UnlockRegistry(clock: { now })
         r.recordVerification(connection: 1)
-        now = now.addingTimeInterval(0.4)
+        now = now.addingTimeInterval(HelperLimits.authReverifyInterval - 1)
         XCTAssertTrue(r.cachedVerification(connection: 1))
-        now = now.addingTimeInterval(0.2)
+        now = now.addingTimeInterval(2)
         XCTAssertFalse(r.cachedVerification(connection: 1))
         r.recordVerification(connection: 1)
         r.lock(connection: 1)
         XCTAssertFalse(r.cachedVerification(connection: 1))
+    }
+
+    func testFailedVerificationEndsUnlock() {
+        let r = UnlockRegistry()
+        r.recordVerification(connection: 1)
+        _ = r.access(connection: 1, uid: 501, verified: true)
+        r.verificationFailed(connection: 1)
+        XCTAssertFalse(r.cachedVerification(connection: 1))
+        XCTAssertFalse(r.holderAlive(uid: 501))
+        XCTAssertEqual(r.access(connection: 2, uid: 501, verified: false), .none)
     }
 }
