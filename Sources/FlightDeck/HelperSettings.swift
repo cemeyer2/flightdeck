@@ -283,13 +283,11 @@ final class HelperModel: ObservableObject {
 /// Settings › Integrations: the toggle, one status line with its fix, what the helper unlocks and the agent setting.
 struct HelperSettingsSection: View {
     @ObservedObject private var model = HelperModel.shared
-    @State private var on = UserDefaults.standard.bool(forKey: HelperSession.enabledKey)
 
     var body: some View {
         Section("System-wide details") {
-            Toggle("Allow FlightDeck to read system-wide details (installs a helper that runs as root)", isOn: $on)
+            Toggle("Allow FlightDeck to read system-wide details (installs a helper that runs as root)", isOn: Binding(get: { model.isOn }, set: { if $0 != model.isOn { model.setEnabled($0) } }))
                 .disabled(!model.status.toggleEnabled || Demo.isEnabled || model.busy)
-                .onChange(of: on) { _, v in if v != model.isOn { model.setEnabled(v) } }
             HStack {
                 Text(model.status.title).font(.callout.bold())
                 Spacer()
@@ -319,7 +317,7 @@ struct HelperSettingsSection: View {
             }
             if Demo.isEnabled { note("Not available in demo mode.") }
         }
-        .onAppear { on = model.isOn; model.refresh() }
+        .onAppear { model.refresh() }
     }
 
     private func note(_ s: String) -> some View {
@@ -356,6 +354,9 @@ struct HelperInspectorPanel: View {
     @State private var result: String?
     @State private var working = false
     @State private var lastFetch = Date.distantPast
+    /// The process the panel currently shows. Replies are checked against it after they arrive, since `sample` in an
+    /// async continuation is the view value captured when the request was sent.
+    @State private var shownID: HelperProcessID?
 
     var body: some View {
         if sample.uid != getuid() && model.build != .needsSignedBuild && !Demo.isEnabled {
@@ -386,7 +387,12 @@ struct HelperInspectorPanel: View {
                 }
             }
             // On selection and every 10 s at most (the helper rate-limits this request across every caller).
-            .task(id: "\(sample.identity.pid)-\(model.status == .unlocked)") { await fetch() }
+            // Keyed on the full identity: a reused PID is another process. A new selection starts empty, so a
+            // rate-limited or busy reply never leaves the previous process's details under this one.
+            .task(id: "\(sample.identity.pid)-\(sample.identity.startTime)-\(model.status == .unlocked)") {
+                shownID = sample.identity.helperID; contents = nil; result = nil
+                await fetch()
+            }
             .onChange(of: sample.cpuTime) { if Date().timeIntervalSince(lastFetch) > 10 { Task { await fetch() } } }
         }
     }
@@ -398,7 +404,9 @@ struct HelperInspectorPanel: View {
         let r = await Task.detached(priority: .utility) {
             s.request(.processDetails(id: id, parts: [.args, .env, .cwd, .files, .sockets]), deadline: 10)
         }.value
-        // Rate-limited or busy: keep what is shown.
+        // The selection moved on while the helper answered: this reply belongs to another process.
+        guard id == shownID else { return }
+        // Rate-limited or busy: keep what is shown (it is this process's, or nothing).
         if case .success(.contents(let c)) = r { contents = c }
         else if case .failure(.refused(let x)) = r, x.code == .processChanged { contents = nil }
     }
@@ -406,14 +414,16 @@ struct HelperInspectorPanel: View {
     private func run(_ request: HelperRequest) {
         guard let s = HelperModel.currentSession() else { return }
         working = true
+        let id = sample.identity.helperID
         Task {
             let r = await Task.detached(priority: .userInitiated) { s.request(request, deadline: 30) }.value
+            working = false
+            guard id == shownID else { return }
             switch r {
             case .success(.toolText(let t)): result = t
             case .failure(let e): result = e.description
             default: result = "The helper's reply wasn't recognised."
             }
-            working = false
         }
     }
 }
