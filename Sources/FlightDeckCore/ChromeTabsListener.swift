@@ -52,12 +52,14 @@ public final class ChromeTabsListener: @unchecked Sendable {
 
     /// Closes the listener and every connection, removes the socket and clears the store.
     public func stop() {
+        // shutdown runs under the lock: `serve` closes its fd under the same lock, so a number the kernel has already
+        // handed to another socket (say an MCP connection) is never shut down here.
         lock.lock()
-        let src = source, fds = Array(connections.values), had = listenFD >= 0
+        let src = source, had = listenFD >= 0
+        for fd in connections.values { shutdown(fd, SHUT_RDWR) }   // wakes each reader, which then closes its fd
         source = nil; listenFD = -1; connections.removeAll()
         lock.unlock()
         src?.cancel()
-        for fd in fds { shutdown(fd, SHUT_RDWR) }   // wakes each reader, which then closes its fd
         if had { unlink(socketURL.path) }
         store.removeAll()
         onChange?()
@@ -86,8 +88,7 @@ public final class ChromeTabsListener: @unchecked Sendable {
     private func serve(_ fd: Int32, _ key: ChromeTabStore.Key) {
         defer {
             store.remove(key)
-            lock.lock(); connections[key.connection] = nil; lock.unlock()
-            close(fd)
+            lock.lock(); connections[key.connection] = nil; close(fd); lock.unlock()   // together: see stop()
             onChange?()
         }
         let read: (Int) -> Data? = { ChromeFraming.readExact(fd: fd, count: $0) }
