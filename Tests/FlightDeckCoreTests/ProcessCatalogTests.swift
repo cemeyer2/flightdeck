@@ -38,8 +38,10 @@ final class ProcessCatalogTests: XCTestCase {
         ])
     }
 
-    static func sig(apple: Bool = false, valid: Bool = true, team: String? = nil, id: String? = nil) -> ProcessDetails.Signature {
-        ProcessDetails.Signature(identifier: id, teamID: team, authority: [], isApple: apple, valid: valid, hardenedRuntime: false)
+    /// `anchored` defaults to "a team ID means an Apple-issued certificate for that team"; pass false for a self-signed one.
+    static func sig(apple: Bool = false, valid: Bool = true, team: String? = nil, anchored: Bool? = nil, id: String? = nil) -> ProcessDetails.Signature {
+        ProcessDetails.Signature(identifier: id, teamID: team, authority: [], isApple: apple, valid: valid, hardenedRuntime: false,
+                                 teamAnchored: anchored ?? (team != nil))
     }
 
     func id(_ m: ProcessMatch) -> String? { m.known?.id }
@@ -270,6 +272,25 @@ final class ProcessCatalogTests: XCTestCase {
         XCTAssertTrue(isLookalike(c.lookup(pid: getpid() + 1, name: "FlightDeck", path: odd, signature: nil, ownExecutable: "/elsewhere/FlightDeck")))
     }
 
+    /// Process paths keep /private (/private/tmp/...), so FlightDeck's own executable is resolved the same way, with
+    /// realpath, and a symlinked path to it still counts. URL.resolvingSymlinksInPath would strip /private and miss.
+    func testOwnExecutableUnderPrivateTmp() throws {
+        let dir = "/tmp/fd-own-\(UUID().uuidString)"
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let exe = dir + "/FlightDeck"
+        XCTAssertTrue(FileManager.default.createFile(atPath: exe, contents: Data()))
+        let own = ProcessCatalog.realPath(exe)
+        XCTAssertEqual(own, "/private" + exe)
+        let c = ProcessCatalog.shared
+        let m = c.lookup(pid: getpid() + 1, name: "FlightDeck", path: "/private" + exe, signature: nil, ownExecutable: own)
+        XCTAssertEqual(m.known?.id, "flightdeck"); XCTAssertEqual(verified(m), true)
+        try FileManager.default.createDirectory(atPath: dir + "/bin", withIntermediateDirectories: true)
+        let link = dir + "/bin/FlightDeck"
+        try FileManager.default.createSymbolicLink(atPath: link, withDestinationPath: exe)
+        XCTAssertEqual(c.lookup(pid: getpid() + 1, name: "FlightDeck", path: link, signature: nil, ownExecutable: own).known?.id, "flightdeck")
+    }
+
     /// A name match outside the vendor's folders is vouched for by a valid signature from the vendor's team.
     func testVendorNameVouchedForBySignature() {
         let c = ProcessCatalog.shared
@@ -280,6 +301,19 @@ final class ProcessCatalogTests: XCTestCase {
         XCTAssertEqual(reason(c.lookup(name: "iTerm2", path: path, signature: Self.sig())), .signer)
         XCTAssertEqual(reason(c.lookup(name: "iTerm2", path: path, signature: Self.sig(valid: false, team: "H7V7XYVQ7D"))), .location)
         XCTAssertEqual(reason(c.lookup(name: "iTerm2", path: path, signature: nil)), .location)
+    }
+
+    /// Anyone can put a vendor's team ID in the OU of a self-signed certificate, so only a team ID on an Apple-issued
+    /// certificate vouches for a name or bundle-ID match outside the vendor's folders.
+    func testSelfSignedTeamDoesNotVouch() {
+        let c = ProcessCatalog.shared
+        let path = NSHomeDirectory() + "/Applications/iTerm.app/Contents/MacOS/iTerm2"
+        XCTAssertEqual(reason(c.lookup(name: "iTerm2", path: path, signature: Self.sig(team: "H7V7XYVQ7D", anchored: false))), .location)
+        XCTAssertEqual(verified(c.lookup(name: "iTerm2", path: path, signature: Self.sig(team: "H7V7XYVQ7D", anchored: true))), true)
+        let f = Self.fixture()
+        let fake = f.lookup(name: "chrome", path: "/opt/x/chrome", signature: Self.sig(team: "EQHXZ8M8AV", anchored: false, id: "com.google.Chrome"))
+        XCTAssertEqual(reason(fake), .signer)
+        XCTAssertEqual(id(f.lookup(name: "chrome", path: "/opt/x/chrome", signature: Self.sig(team: "EQHXZ8M8AV", anchored: true, id: "com.google.Chrome"))), "chrome")
     }
 
     func testKnownFactsLaunchedByStartupItem() {
