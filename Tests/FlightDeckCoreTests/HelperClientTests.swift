@@ -192,6 +192,34 @@ final class HelperClientTests: XCTestCase {
         XCTAssertTrue(fake.authorizations.allSatisfy { $0 == nil })
     }
 
+    func testRusageReconnectsAfterHelperRestart() {
+        let fake = FakeHelperClient()
+        let s = HelperSession.unlockedForTests(fake)
+        var restarted = true
+        fake.handler = { [usage] r in
+            guard case .processRusage(let ids) = r else { return nil }
+            if restarted { restarted = false; return .refused(HelperRefusal(code: .helloRequired, message: "")) }
+            return .rusage(ids.map { HelperRusageEntry(id: $0, rusage: usage) })
+        }
+        XCTAssertEqual(s.rusage(for: ids(2))?.count, 2)
+        XCTAssertEqual(fake.calls(of: "hello").count, 2)
+    }
+
+    func testStandaloneFollowsHolder() {
+        var now = Date(timeIntervalSince1970: 1000)
+        let fake = FakeHelperClient()
+        fake.replies["hello"] = .hello(HelperHello(version: 1, rightInPlace: true, eligible: true))
+        fake.replies["status"] = .status(HelperServiceStatus(unlocked: false, holderAlive: true, agentContents: false))
+        fake.echoRusage(usage)
+        let s = HelperSession(client: fake, authorization: { nil }, clock: { now }, standalone: true)
+        XCTAssertEqual(s.rusage(for: ids(1))?.count, 1)
+        fake.replies["status"] = .status(HelperServiceStatus(unlocked: false, holderAlive: false, agentContents: false))
+        XCTAssertNotNil(s.rusage(for: ids(1)))   // status still fresh
+        now = now.addingTimeInterval(6)
+        XCTAssertNil(s.rusage(for: ids(1)))
+        XCTAssertEqual(s.state, .locked)
+    }
+
     func testExternalFormNeverInErrors() {
         let fake = FakeHelperClient()
         let s = HelperSession.unlockedForTests(fake)

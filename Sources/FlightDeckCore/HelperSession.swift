@@ -20,7 +20,9 @@ public final class HelperSession: @unchecked Sendable {
     /// The per-sample rusage call's hard deadline; past it the tick uses app-only values.
     public static let perTickDeadline: TimeInterval = 0.1
     /// hello and status may take longer (the helper may be launching).
-    static let controlDeadline: TimeInterval = 2
+    public static let controlDeadline: TimeInterval = 2
+    /// How stale a standalone session's view of the app's unlock may get.
+    static let standaloneStatusAge: TimeInterval = 5
 
     private let client: HelperClient
     private let authorization: () -> Data?
@@ -29,6 +31,7 @@ public final class HelperSession: @unchecked Sendable {
     private let mutex = NSLock()
     private var hello: HelloOutcome?
     private var status: HelperServiceStatus?
+    private var statusTime: Date?
     private var gate = HelperCallGate()
 
     public convenience init(client: HelperClient, authorization: @escaping () -> Data?, clock: @escaping () -> Date = Date.init) {
@@ -61,9 +64,9 @@ public final class HelperSession: @unchecked Sendable {
     /// Sends hello. On a version mismatch the connection is dropped (an old helper may still be running after an
     /// update; launchd starts the new one after its idle exit). Never call on the main thread.
     @discardableResult
-    public func connect() -> HelloOutcome {
+    public func connect(deadline: TimeInterval = controlDeadline) -> HelloOutcome {
         let outcome: HelloOutcome
-        switch raw(.hello(version: HelperIDs.protocolVersion), deadline: Self.controlDeadline) {
+        switch raw(.hello(version: HelperIDs.protocolVersion), deadline: deadline) {
         case .success(.hello(let h)) where h.version == HelperIDs.protocolVersion: outcome = .ok(rightInPlace: h.rightInPlace)
         case .success(.hello): outcome = .mismatch
         case .failure(.refused(let r)) where r.code == .versionMismatch: outcome = .mismatch
@@ -78,16 +81,26 @@ public final class HelperSession: @unchecked Sendable {
         return outcome
     }
 
-    public func refreshStatus() {
-        let r = request(.status, deadline: Self.controlDeadline)
+    public func refreshStatus(deadline: TimeInterval = controlDeadline) {
+        let r = request(.status, deadline: deadline)
         mutex.lock(); defer { mutex.unlock() }
         if case .success(.status(let s)) = r { status = s } else { status = nil }
+        statusTime = clock()
+    }
+
+    /// Refreshes the status when it is older than `maxAge`. A standalone session has no unlock of its own, so this is
+    /// how it notices the app unlocking, locking or quitting.
+    public func refreshIfStale(maxAge: TimeInterval, deadline: TimeInterval = controlDeadline) {
+        mutex.lock()
+        let stale = statusTime.map { clock().timeIntervalSince($0) >= maxAge } ?? true
+        mutex.unlock()
+        if stale { refreshStatus(deadline: deadline) }
     }
 
     /// Passes through the back-off gate, connecting first if needed. A helper that restarted (idle exit) asks for
     /// hello again; that is answered once, transparently.
     public func request(_ r: HelperRequest, deadline: TimeInterval) -> Result<HelperResponse, HelperClientError> {
-        if lastHello == nil || lastHello == .unreachable { connect() }
+        if lastHello == nil || lastHello == .unreachable { connect(deadline: max(deadline, Self.perTickDeadline)) }
         guard case .ok? = lastHello else { return .failure(.unreachable) }
         let first = raw(r, deadline: deadline)
         if case .failure(.refused(let x)) = first, x.code == .helloRequired, case .ok = connect() {
@@ -115,17 +128,29 @@ public final class HelperSession: @unchecked Sendable {
     /// Counters for the identities the app couldn't read, in batches of at most HelperLimits.maxBatch, all within one
     /// per-tick deadline. nil = no helper values this tick (locked, off, slow or backing off).
     public func rusage(for ids: [ProcessIdentity]) -> [ProcessIdentity: HelperRusage]? {
-        guard !ids.isEmpty, state == .unlocked else { return nil }
+        guard !ids.isEmpty else { return nil }
         let end = clock().addingTimeInterval(Self.perTickDeadline)
+        if standaloneMode { refreshIfStale(maxAge: Self.standaloneStatusAge, deadline: Self.perTickDeadline) }
+        guard state == .unlocked else { return nil }
         var out: [ProcessIdentity: HelperRusage] = [:]
         var answered = false
+        var reconnected = false
         var start = 0
         while start < ids.count {
             let remaining = end.timeIntervalSince(clock())
             guard remaining > 0 else { break }
             let batch = ids[start..<min(start + HelperLimits.maxBatch, ids.count)].map(\.helperID)
+            var result = raw(.processRusage(ids: batch), deadline: remaining)
+            // A helper that relaunched (idle exit, update) asks for hello again: answer it once, within this tick.
+            if case .failure(.refused(let x)) = result, x.code == .helloRequired, !reconnected {
+                reconnected = true
+                let left = end.timeIntervalSince(clock())
+                if left > 0, case .ok = connect(deadline: left) {
+                    result = raw(.processRusage(ids: batch), deadline: max(end.timeIntervalSince(clock()), 0.001))
+                }
+            }
             start += HelperLimits.maxBatch
-            guard case .success(.rusage(let entries)) = raw(.processRusage(ids: batch), deadline: remaining) else { continue }
+            guard case .success(.rusage(let entries)) = result else { continue }
             answered = true
             for e in entries { out[ProcessIdentity(e.id)] = e.rusage }
         }

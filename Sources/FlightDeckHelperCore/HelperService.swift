@@ -170,12 +170,13 @@ public final class HelperService {
     }
 
     /// netstat as root first (it lists every socket with its process); lsof as root if netstat gave nothing. The
-    /// first line says which, so the app picks the matching parser.
+    /// first line says which, so the app picks the matching parser; netstat's UDP table follows a "#udp" line, since
+    /// the app parses each table separately.
     private func listening() -> HelperResponse {
         let tcp = runner.run(.netstatTCP), udp = runner.run(.netstatUDP)
         if case .output(let t) = tcp, case .output(let u) = udp,
            !t.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !u.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return .toolText("#netstat\n" + t + "\n" + u)
+            return .toolText("#netstat\n" + t + "\n#udp\n" + u)
         }
         return toolResponse(runner.run(.lsofListening)) { .toolText("#lsof\n" + $0) }
     }

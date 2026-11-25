@@ -18,12 +18,13 @@ final class HelperServiceTests: XCTestCase {
     func testRunnerReturnsOutput() {
         XCTAssertEqual(BoundedToolRunner().run(path: "/bin/echo", arguments: ["hi"]), .output("hi\n"))
         XCTAssertEqual(BoundedToolRunner().run(path: "/usr/bin/false", arguments: []), .failed)
+        XCTAssertEqual(BoundedToolRunner().run(path: "/bin/sh", arguments: ["-c", "echo partial; exit 1"]), .output("partial\n"))
         XCTAssertEqual(BoundedToolRunner().run(path: "/nonexistent/tool", arguments: []), .failed)
     }
 
     func testRunnerToolArgumentsAreConstants() {
-        XCTAssertEqual(HelperTool.sample(pid: 42, seconds: 3).arguments, ["42", "3"])
-        XCTAssertEqual(HelperTool.footprint(pid: 42).arguments, ["42"])
+        XCTAssertEqual(HelperTool.sample(pid: 42, seconds: 3).arguments, ["42", "3", "-mayDie", "-file", "/dev/stdout"])
+        XCTAssertEqual(HelperTool.footprint(pid: 42).arguments, ["--swapped", "-f", "bytes", "42"])
         let all: [HelperTool] = [.netstatTCP, .netstatUDP, .lsofListening, .lsofInternet, .tmutilSnapshots, .profilesDevice,
                                  .sfltoolDumpbtm, .sample(pid: 1, seconds: 1), .footprint(pid: 1)]
         for t in all { XCTAssertTrue(t.path.hasPrefix("/usr/") || t.path.hasPrefix("/bin/"), t.path) }
@@ -217,7 +218,7 @@ final class HelperServiceTests: XCTestCase {
         runner.results[.netstatUDP] = .output("udp4 0 0 *.5353 *.*\n")
         guard case .toolText(let t) = send(s, .listeningSockets, auth: form) else { return XCTFail() }
         XCTAssertTrue(t.hasPrefix("#netstat\n"))
-        XCTAssertTrue(t.contains("*.22") && t.contains("*.5353"))
+        XCTAssertTrue(t.contains("*.22") && t.contains("\n#udp\nudp4 0 0 *.5353"))
         XCTAssertFalse(runner.calls.contains(.lsofListening))
     }
 

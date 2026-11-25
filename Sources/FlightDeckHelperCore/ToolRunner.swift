@@ -37,8 +37,10 @@ public enum HelperTool: Sendable, Hashable {
         case .tmutilSnapshots: return ["listlocalsnapshots", "/"]
         case .profilesDevice: return ["list", "-all"]
         case .sfltoolDumpbtm: return ["dumpbtm"]
-        case .sample(let pid, let seconds): return [String(pid), String(seconds)]
-        case .footprint(let pid): return [String(pid)]
+        // sample otherwise also writes its report to a file in /tmp; the helper writes no files.
+        case .sample(let pid, let seconds): return [String(pid), String(seconds), "-mayDie", "-file", "/dev/stdout"]
+        // The same flags as MemoryBreakdown, so the app parses the output with parseFootprint.
+        case .footprint(let pid): return ["--swapped", "-f", "bytes", String(pid)]
         }
     }
 }
@@ -103,7 +105,9 @@ public final class BoundedToolRunner: ToolRunning {
         out.fileHandleForReading.readabilityHandler = nil
         lock.lock(); defer { lock.unlock() }
         if overflow { return .tooLarge }
-        guard p.terminationReason == .exit, p.terminationStatus == 0 else { return .failed }
+        // Like Shell.run, output counts whatever the exit status (lsof exits 1 when one of its -i specs matched
+        // nothing, yet prints the rest); a tool that printed nothing and failed has failed.
+        guard p.terminationReason == .exit, p.terminationStatus == 0 || !data.isEmpty else { return .failed }
         return .output(String(decoding: data, as: UTF8.self))
     }
 }
