@@ -40,6 +40,11 @@ public enum HelperStatus: Equatable, Sendable {
         if i.registration == .notRegistered || i.registration == .notFound { return .off }
         if i.hello == .refused(.bundleMissing) { return .failed("the helper couldn't find FlightDeck") }
         if i.hello == .ok(rightInPlace: false) { return .failed("couldn't set up the administrator check") }
+        // Any other refusal of hello (notably the helper's own signature check failing where the app's passed) can't
+        // be fixed by unlocking, so it must not read as Locked with an Unlock button that does nothing.
+        if case .refused(let code)? = i.hello {
+            return .failed(code == .notEligible ? "the helper didn't accept this copy's signature" : "the helper refused to connect (\(code.rawValue))")
+        }
         if i.hello == .mismatch { return i.mismatchSurvivedRelaunch ? .outOfDate : .notResponding }
         if i.notResponding || i.hello == .unreachable { return .notResponding }
         return i.unlocked ? .unlocked : .locked

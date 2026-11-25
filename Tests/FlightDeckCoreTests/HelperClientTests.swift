@@ -59,6 +59,16 @@ final class HelperClientTests: XCTestCase {
         XCTAssertEqual(HelperStatus.resolve(inputs { $0.hello = .refused(.bundleMissing) }), .failed("the helper couldn't find FlightDeck"))
     }
 
+    /// The helper's own signature check refusing this copy is a failure with no fix, never Locked with an Unlock
+    /// button that can't do anything.
+    func testHelperRefusalIsNotLocked() {
+        let s = HelperStatus.resolve(inputs { $0.hello = .refused(.notEligible) })
+        XCTAssertEqual(s, .failed("the helper didn't accept this copy's signature"))
+        XCTAssertNil(s.fix)
+        XCTAssertEqual(HelperStatus.resolve(inputs { $0.hello = .refused(.notAuthorized) }),
+                       .failed("the helper refused to connect (notAuthorized)"))
+    }
+
     func testRegistrationProblems() {
         XCTAssertEqual(HelperStatus.resolve(inputs { $0.registrationRefused = true }), .notSupported)
         XCTAssertEqual(HelperStatus.notSupported.title, "Not supported on this macOS")
