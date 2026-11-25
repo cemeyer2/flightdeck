@@ -278,4 +278,29 @@ final class ChromeTabsTests: XCTestCase {
         XCTAssertEqual(ChromeTabText.mostlyLine(pids: [1, 2, 3, 4], processes: four, attribution: at4)?.components(separatedBy: "), ").count, 3,
                        "at most three renderers")
     }
+    // MARK: Processes filter
+
+    func testSearchTextHostsTitlesAndExtension() {
+        XCTAssertEqual(ChromeTabText.searchText(attr([entry("youtube.com", "Lofi Girl"), entry("ads.example", frameIn: "youtube.com")])),
+                       "youtube.com\nlofi girl\nads.example\n")
+        XCTAssertEqual(ChromeTabText.searchText(attr([], ext: true)), "chrome extension process")
+    }
+
+    /// Each text term may match a renderer's tabs while the other terms still apply to the process, so a filter with
+    /// several terms finds tabs too.
+    func testFilterTermsMatchTabsOneByOne() {
+        let r = ChromeTabsResolverTests()
+        var busy = r.proc(pid: 201), idle = r.proc(pid: 202), other = r.proc(pid: 300, name: "Finder", path: "/System/Library/CoreServices/Finder.app/Contents/MacOS/Finder")
+        busy.cpu = 10; idle.cpu = 1; other.cpu = 50
+        let yt = ChromeTabText.searchText(attr([entry("youtube.com", "Lofi Girl")]))
+        let tabs: [Int32: String] = [201: yt, 202: yt]
+        func q(_ s: String) -> [Int32] { [busy, idle, other].filter { ProcessQuery(s).matches($0, extraText: tabs[$0.pid]) }.map(\.pid) }
+        XCTAssertEqual(q("youtube"), [201, 202])
+        XCTAssertEqual(q("youtube cpu>5"), [201])
+        XCTAssertEqual(q("app:chrome youtube"), [201, 202])
+        XCTAssertEqual(q("lofi girl"), [201, 202], "a two-word title matches word by word")
+        XCTAssertEqual(q("youtube finder"), [], "every term must still match")
+        XCTAssertEqual(q("cpu>5"), [201, 300])
+        XCTAssertEqual(q("finder"), [300])
+    }
 }

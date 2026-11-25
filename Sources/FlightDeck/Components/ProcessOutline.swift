@@ -273,8 +273,8 @@ struct ProcessOutline: NSViewRepresentable {
                 roots = sorted(appGroups(Array(next.values)))
             } else if !f.isEmpty || !parent.tree {
                 let q = ProcessQuery(f)
-                let tabs = parent.tabLabels   // a renderer also matches its tabs' sites and titles
-                roots = sorted(next.values.filter { q.isEmpty || q.matches($0.s) || tabs[$0.s.identity].map { ChromeTabText.searchText($0).contains(f) } == true })
+                let tabs = parent.tabLabels   // a renderer's text terms also match its tabs' sites and titles
+                roots = sorted(next.values.filter { q.isEmpty || q.matches($0.s, extraText: tabs[$0.s.identity].map(ChromeTabText.searchText)) })
             } else {
                 // Tree by parent PID. Processes whose parent is launchd (1) or the kernel, or isn't in this sample, are roots.
                 // ppid is a bare PID, so parent lookup is by PID rather than identity.
