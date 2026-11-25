@@ -152,7 +152,8 @@ final class MCPToolTests: XCTestCase {
         s.processes += [proc("mdworker_shared", path: ProcessCatalogTests.mdworkerPath, pid: 50, cpu: 1, mem: 1 << 20),
                         proc("falcond", path: "/Library/CS/falcond", pid: 51, cpu: 1, mem: 1 << 20),
                         proc("mdworker_shared", path: NSHomeDirectory() + "/Downloads/mdworker_shared", pid: 52, cpu: 1, mem: 1 << 20),
-                        proc("coreaudiod", path: "", pid: 53, cpu: 1, mem: 1 << 20)]
+                        proc("coreaudiod", path: "", pid: 53, cpu: 1, mem: 1 << 20),
+                        proc("Google Chrome", path: ProcessCatalogTests.chromeMain, pid: 54, cpu: 1, mem: 1 << 20)]
         src.snap = s
         var t = tools(src); t.catalog = ProcessCatalogTests.fixture()
         func about(_ pid: Int32) async throws -> JSON? { try await call(t, "get_process", ["pid": .int(Int(pid))])["about"] }
@@ -178,6 +179,8 @@ final class MCPToolTests: XCTestCase {
         let unknown = try await about(getpid()), nameOnly = try await about(53)
         XCTAssertEqual(unknown, ["known": false])
         XCTAssertEqual(nameOnly?["path_verified"]?.bool, false)
+        let app = try await about(54)
+        XCTAssertEqual(app?["quit"]?.string, "app", "an ordinary app the user opened")
     }
 
     func testSampleStacksOnlyOwnProcesses() async throws {

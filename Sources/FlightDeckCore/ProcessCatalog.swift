@@ -16,6 +16,8 @@ public struct ProcessExplanation: Sendable, Hashable {
         case avoid
         /// Part of macOS itself: quitting logs you out, freezes or restarts the Mac.
         case never
+        /// An ordinary app the user opened: quitting it is safe once its work is saved.
+        case app
     }
     public var id: String
     public var title: String

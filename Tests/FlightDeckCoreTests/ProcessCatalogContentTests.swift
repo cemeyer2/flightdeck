@@ -96,6 +96,21 @@ final class ProcessCatalogContentTests: XCTestCase {
         }
     }
 
+    /// Ordinary apps the user opened are safe to quit once their work is saved. FlightDeck itself stays `.avoid`
+    /// (quitting it stops its monitoring, alerts and rules), as does Docker Desktop's bundle as a whole (its backend and
+    /// VM run the containers); only Docker Desktop's own interface app is an ordinary app.
+    func testOrdinaryAppsAreApp() {
+        let apps = ["apps-zoom", "apps-1password", "browser-chrome", "browser-arc", "browser-firefox", "dev-iterm2", "dev-docker-desktop-app"]
+        XCTAssertEqual(Set(catalog.entries.filter { $0.quit == .app }.map(\.id)), Set(apps))
+        for id in apps { XCTAssertEqual(catalog.entry(id: id)?.isApple, false, id); XCTAssertEqual(catalog.entry(id: id)?.managed, false, id) }
+        XCTAssertEqual(catalog.entry(id: "flightdeck")?.quit, .avoid)
+        XCTAssertEqual(catalog.entry(id: "dev-docker-desktop")?.quit, .avoid)
+        let ui = "/Applications/Docker.app/Contents/MacOS/Docker Desktop.app/Contents/MacOS/Docker Desktop"
+        XCTAssertEqual(catalog.lookup(name: "Docker Desktop", path: ui, signature: nil).known?.id, "dev-docker-desktop-app")
+        let vm = "/Applications/Docker.app/Contents/MacOS/com.docker.virtualization"
+        XCTAssertEqual(catalog.lookup(name: "com.docker.virtualization", path: vm, signature: nil).known?.id, "dev-docker-desktop")
+    }
+
     /// The thermal finding explains kernel_task by entry id.
     func testKernelTaskEntryExists() {
         XCTAssertNotNil(catalog.entry(id: "kernel-task"))

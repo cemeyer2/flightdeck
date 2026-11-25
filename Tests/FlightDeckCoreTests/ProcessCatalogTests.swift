@@ -25,7 +25,7 @@ final class ProcessCatalogTests: XCTestCase {
             entry("mdworker", names: ["mdworker_shared"], bundleIDs: ["com.apple.mdworker_shared"]),
             entry("windowserver", quit: .never, paths: ["/System/Library/PrivateFrameworks/SkyLight.framework/Versions/A/Resources/WindowServer"]),
             entry("webkit", quit: .safe, namePrefixes: ["com.apple.WebKit."]),
-            entry("chrome", maker: .vendor("Google"), quit: .safe, pathPrefixes: ["/Applications/Google Chrome.app/"],
+            entry("chrome", maker: .vendor("Google"), quit: .app, pathPrefixes: ["/Applications/Google Chrome.app/"],
                   bundleIDs: ["com.google.Chrome"], teamIDs: ["EQHXZ8M8AV"]),
             entry("chrome-helper", maker: .vendor("Google"), quit: .safe, pathPrefixes: [chromeHelpers]),
             entry("dropbox", maker: .vendor("Dropbox"), quit: .avoid, names: ["Dropbox"], pathPrefixes: ["/Applications/Dropbox.app/"]),
@@ -181,7 +181,7 @@ final class ProcessCatalogTests: XCTestCase {
             XCTAssertTrue(d.hasPrefix(e.findingNote), d); XCTAssertGreaterThan(d.count, e.findingNote.count + 1, d)
             switch q {
             case .relaunches, .never: XCTAssertTrue(d.contains("won't help"), d)
-            case .safe, .avoid: XCTAssertTrue(d.hasSuffix(action), d)
+            case .safe, .avoid, .app: XCTAssertTrue(d.hasSuffix(action), d)
             }
         }
         let m = Self.fixture().entry(id: "crowdstrike")!
@@ -206,6 +206,7 @@ final class ProcessCatalogTests: XCTestCase {
         XCTAssertEqual(ProcessExplanation.QuitSafety.relaunches.sentence, "macOS starts it again within seconds, so quitting it doesn't help.")
         XCTAssertEqual(ProcessExplanation.QuitSafety.avoid.sentence, "Quitting it interrupts something you'll notice, such as sound, sync or your display.")
         XCTAssertEqual(ProcessExplanation.QuitSafety.never.sentence, "Don't. It's part of macOS, and quitting it can log you out, freeze or restart the Mac.")
+        XCTAssertEqual(ProcessExplanation.QuitSafety.app.sentence, "An app you opened. Quitting it is safe; save your work first.")
         let rows = ProcessCatalogText.inspectorRows(Self.entry("x", quit: .relaunches, whatToDo: "Restart the Mac."))
         XCTAssertEqual(rows.map(\.label), ["Maker", "Usually busy when", "Quitting it", "If it misbehaves"])
         let bare = ProcessExplanation(id: "y", title: "Y", summary: "Y.", maker: .apple, quit: .safe, findingNote: "Y.", names: ["y"], groundedIn: "x-man-page://1/y")
