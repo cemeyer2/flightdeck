@@ -12,7 +12,18 @@ public struct UniFiNetwork: Sendable, Equatable, Hashable {
 
 enum UniFiNetworks {
     static func classic(_ data: Data) -> [UniFiNetwork]? {
-        struct Row: Decodable { var name: String?; var ip_subnet: String?; var vlan: Int? }
+        // Each field is read leniently, so one row with an unexpected type (vlan as a string) is skipped or
+        // degraded rather than failing the whole list.
+        struct Row: Decodable {
+            var name: String?, ip_subnet: String?, vlan: Int?
+            enum CodingKeys: String, CodingKey { case name, ip_subnet, vlan }
+            init(from decoder: Decoder) throws {
+                guard let c = try? decoder.container(keyedBy: CodingKeys.self) else { return }
+                name = try? c.decodeIfPresent(String.self, forKey: .name)
+                ip_subnet = try? c.decodeIfPresent(String.self, forKey: .ip_subnet)
+                vlan = (try? c.decodeIfPresent(Int.self, forKey: .vlan)) ?? (try? c.decodeIfPresent(String.self, forKey: .vlan)).flatMap { Int($0) }
+            }
+        }
         struct Envelope: Decodable { var data: [Row] }
         guard let rows = try? JSONDecoder().decode(Envelope.self, from: data).data else { return nil }
         return rows.compactMap { r in
