@@ -36,15 +36,20 @@ public enum ChromeTabHost {
     /// The same rules for a frame's origin ("https://ads.example.net", or "null" for an opaque one).
     public static func derive(origin: String) -> String { derive(url: origin) }
 
-    /// The form a host takes in MCP output, which usually goes on to a cloud model: an IP literal becomes "IP address" and
-    /// a single-label name (an intranet host such as `wiki`, or `localhost`) becomes "local network host". Dotted names
-    /// and the fixed labels ("local file", …) pass through.
+    /// The form a host takes in MCP output, which usually goes on to a cloud model: an IP literal becomes "IP address", and
+    /// a single-label name (an intranet host such as `wiki`, or `localhost`) or a name ending in `.local`, `.lan`,
+    /// `.internal` or `.home.arpa` becomes "local network host". Case doesn't matter and a trailing dot is ignored. Other
+    /// dotted names and the fixed labels ("local file", …) pass through.
     public static func forMCP(_ host: String) -> String {
         if fixedLabels.contains(host) { return host }
-        if isIPLiteral(host) { return "IP address" }
-        if !host.contains(".") { return "local network host" }
+        var h = host.lowercased()
+        if h.hasSuffix(".") { h.removeLast() }
+        if isIPLiteral(h) { return "IP address" }
+        if !h.contains(".") || localSuffixes.contains(where: h.hasSuffix) { return "local network host" }
         return host
     }
+
+    static let localSuffixes = [".local", ".lan", ".internal", ".home.arpa"]
 
     static let fixedLabels: Set<String> = ["local file", "embedded page", "Chrome page", "page"]
 

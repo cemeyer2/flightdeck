@@ -1,7 +1,7 @@
 import Foundation
 // Chrome tabs in MCP output. MCP clients usually forward what they get to a cloud model, so they see sites only: no
-// URL, path, query or page title, and IP addresses and single-label intranet names are generalised
-// (ChromeTabHost.forMCP). The reduction happens once, here, when the view is built from the app's attribution.
+// URL, path, query or page title, and IP addresses and local network names (single-label, or ending in .local, .lan,
+// .internal or .home.arpa) are generalised (ChromeTabHost.forMCP). The reduction happens once, here, when the view is built from the app's attribution.
 
 public struct ChromeTabMCPEntry: Sendable, Equatable {
     public var host: String

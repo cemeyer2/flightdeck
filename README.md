@@ -1222,9 +1222,10 @@ and the copied folder); remove FlightDeck Tabs in `chrome://extensions` yourself
 `nativeMessaging` to talk to FlightDeck, are its only permissions: it has no access to page content and accepts no
 messages from websites or other extensions. It sends the tab list only to FlightDeck on this Mac. FlightDeck keeps tab
 titles and addresses in memory while it runs; they are never saved (not in the black box, recordings, the Flight Log,
-notifications or Fleet) and never leave the Mac. AI assistants (MCP) see only site names, with IP addresses and
-single-label intranet names generalised. **Copy Summary** in the inspector includes each tab's site and title, never
-its address.
+notifications or Fleet) and never leave the Mac. AI assistants (MCP) see only site names; an IP address shows as "IP
+address", and a single-label name (`wiki`, `localhost`) or one ending in `.local`, `.lan`, `.internal` or `.home.arpa`
+shows as "local network host". Other names, including company intranet names such as `jira.corp.example.com`, are
+passed on as they are. **Copy Summary** in the inspector includes each tab's site and title, never its address.
 
 Google Chrome stable only; FlightDeck must run from a bundled `FlightDeck.app` (not a `swift build` binary) and not from
 a disk image.
@@ -1238,7 +1239,7 @@ a disk image.
 - **Light in the background.** With no FlightDeck window on screen, view updates stop (graphs catch up instantly when you return) and sampling drops to every 2 s (Settings); the black box, findings and alerts keep running. Background cost is about 2.5% of one core.
 - **Self-monitoring.** FlightDeck appears in its own process list by default (Settings → toggle).
 - **Identity-safe actions.** Signals are sent only if the PID still has the same start time (`ProcessIdentity`).
-- **Chrome tabs stay in memory.** Tab titles and URLs are never saved or shared; AI assistants see sites, not pages, and IP addresses and intranet names are generalised.
+- **Chrome tabs stay in memory.** Tab titles and URLs are never saved or shared; AI assistants see sites, not pages, and IP addresses and local network names (single-label, or ending in .local, .lan, .internal or .home.arpa) are generalised; other intranet names are not.
 - **Private by design.** FlightDeck sends no data anywhere. By default it makes no network requests at all; the exceptions are the opt-in latency probe (Settings › Network › Network quality), which pings your router and one host you choose, the UniFi view, which talks only to the console you configure (and, while nothing is configured, checks whether your router looks like one), and update checks (Settings › About, off by default), which ask GitHub once a day for the latest release; Check Now there asks once when clicked, even with them off. The opt-in Prometheus and MCP servers only accept connections from this Mac. The opt-in web dashboard serves this Mac's readings unencrypted and without a password to allowed addresses — the local network unless you allow your tailnet or, under Advanced, other addresses. The optional root helper's process contents are never saved; MCP gets them only with their own setting on. The Camera & Mic history records only that a device was in use, never audio
 or video, and never leaves this Mac.
 

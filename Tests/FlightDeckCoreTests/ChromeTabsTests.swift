@@ -182,6 +182,10 @@ final class ChromeTabsTests: XCTestCase {
         XCTAssertEqual(ChromeTabHost.forMCP("payroll.corp.example"), "payroll.corp.example")
         XCTAssertEqual(ChromeTabHost.forMCP("youtube.com"), "youtube.com")
         for fixed in ["local file", "embedded page", "Chrome page", "page"] { XCTAssertEqual(ChromeTabHost.forMCP(fixed), fixed) }
+        for local in ["synology.local", "NAS.LOCAL", "printer.lan.", "build.internal", "router.home.arpa", "Router.Home.Arpa.", "wiki."] {
+            XCTAssertEqual(ChromeTabHost.forMCP(local), "local network host", local)
+        }
+        for site in ["notlocal.com", "foo.locals", "lan.example.com", "home.arpa.example", "YouTube.com"] { XCTAssertEqual(ChromeTabHost.forMCP(site), site) }
     }
 
     func testSanitize() {
