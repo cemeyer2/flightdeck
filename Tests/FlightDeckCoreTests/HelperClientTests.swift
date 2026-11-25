@@ -113,6 +113,31 @@ final class HelperClientTests: XCTestCase {
         XCTAssertLessThan(HelperSession.perTickDeadline, fake.delay)
     }
 
+    func testRusageBatchesShareOneTickDeadline() {
+        var now = Date(timeIntervalSince1970: 1000)
+        let fake = FakeHelperClient()
+        let s = HelperSession.unlockedForTests(fake, clock: { now })
+        let tickStart = now, step = HelperSession.perTickDeadline * 0.3
+        var startedAt: [TimeInterval] = []
+        // Each batch answers but takes 30% of the tick, on the session's clock rather than the wall clock.
+        fake.handler = { [usage] r in
+            guard case .processRusage(let ids) = r else { return nil }
+            startedAt.append(now.timeIntervalSince(tickStart))
+            now = now.addingTimeInterval(step)
+            return .rusage(ids.map { HelperRusageEntry(id: $0, rusage: usage) })
+        }
+        let before = fake.deadlines.count
+        XCTAssertNotNil(s.rusage(for: ids(HelperLimits.maxBatch * 5)))
+        let given = Array(fake.deadlines.dropFirst(before))
+        // Four batches fit in the tick; the fifth would start after it ended, so it isn't sent.
+        XCTAssertEqual(given.count, 4)
+        // Each batch gets only what is left of the one tick, so the time already spent plus its deadline never goes
+        // past perTickDeadline. (The deadlines themselves add up to more, since each batch answered early.)
+        for (start, d) in zip(startedAt, given) {
+            XCTAssertLessThanOrEqual(start + d, HelperSession.perTickDeadline + 0.001)   // Date arithmetic rounds
+        }
+    }
+
     func testBackoffAfterThreeFailures() {
         var now = Date(timeIntervalSince1970: 1000)
         let fake = FakeHelperClient()

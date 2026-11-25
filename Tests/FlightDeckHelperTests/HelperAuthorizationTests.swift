@@ -97,25 +97,36 @@ final class HelperAuthorizationTests: XCTestCase {
         XCTAssertNotEqual(r.access(connection: 1, uid: 501, verified: false), .full)
     }
 
+    let form = Data(repeating: 0xAB, count: 32)
+
+    func testAuthCacheIsForTheVerifiedFormOnly() {
+        let r = UnlockRegistry()
+        r.recordVerification(connection: 1, form: form)
+        XCTAssertTrue(r.cachedVerification(connection: 1, form: form))
+        XCTAssertFalse(r.cachedVerification(connection: 1, form: nil))
+        XCTAssertFalse(r.cachedVerification(connection: 1, form: Data(repeating: 1, count: 32)))
+        XCTAssertFalse(r.cachedVerification(connection: 2, form: form))
+    }
+
     func testAuthCacheLastsUntilReverify() {
         var now = Date(timeIntervalSince1970: 1000)
         let r = UnlockRegistry(clock: { now })
-        r.recordVerification(connection: 1)
+        r.recordVerification(connection: 1, form: form)
         now = now.addingTimeInterval(HelperLimits.authReverifyInterval - 1)
-        XCTAssertTrue(r.cachedVerification(connection: 1))
+        XCTAssertTrue(r.cachedVerification(connection: 1, form: form))
         now = now.addingTimeInterval(2)
-        XCTAssertFalse(r.cachedVerification(connection: 1))
-        r.recordVerification(connection: 1)
+        XCTAssertFalse(r.cachedVerification(connection: 1, form: form))
+        r.recordVerification(connection: 1, form: form)
         r.lock(connection: 1)
-        XCTAssertFalse(r.cachedVerification(connection: 1))
+        XCTAssertFalse(r.cachedVerification(connection: 1, form: form))
     }
 
     func testFailedVerificationEndsUnlock() {
         let r = UnlockRegistry()
-        r.recordVerification(connection: 1)
+        r.recordVerification(connection: 1, form: form)
         _ = r.access(connection: 1, uid: 501, verified: true)
         r.verificationFailed(connection: 1)
-        XCTAssertFalse(r.cachedVerification(connection: 1))
+        XCTAssertFalse(r.cachedVerification(connection: 1, form: form))
         XCTAssertFalse(r.holderAlive(uid: 501))
         XCTAssertEqual(r.access(connection: 2, uid: 501, verified: false), .none)
     }

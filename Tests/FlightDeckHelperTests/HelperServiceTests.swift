@@ -152,6 +152,65 @@ final class HelperServiceTests: XCTestCase {
         XCTAssertEqual(code(send(s, .processRusage(ids: [pid500]), from: standalone)), .notAuthorized)
     }
 
+    func testCachedUnlockNeedsTheSameForm() {
+        let s = greeted()
+        guard case .rusage = send(s, .processRusage(ids: [pid500]), auth: form) else { return XCTFail() }
+        // No form at all is never a cache hit.
+        XCTAssertEqual(code(send(s, .processRusage(ids: [pid500]))), .notAuthorized)
+        XCTAssertEqual(authority.verifyCount, 1)
+    }
+
+    func testCachedUnlockChecksADifferentForm() {
+        let s = greeted()
+        guard case .rusage = send(s, .processRusage(ids: [pid500]), auth: form) else { return XCTFail() }
+        XCTAssertEqual(code(send(s, .processRusage(ids: [pid500]), auth: Data(repeating: 1, count: 32))), .notAuthorized)
+        XCTAssertEqual(authority.verifyCount, 2)
+        // A different form that does verify is an unlock of its own.
+        let other = Data(repeating: 2, count: 32)
+        authority.validForms.insert(other)
+        guard case .rusage = send(s, .processRusage(ids: [pid500]), auth: other) else { return XCTFail() }
+        XCTAssertEqual(authority.verifyCount, 3)
+    }
+
+    /// Holds the app's first verify in flight while `during` runs (a lock, or the connection closing), then lets it
+    /// finish and returns its response.
+    func verifyRacing(_ s: HelperService, during: () -> Void) -> HelperResponse? {
+        let entered = DispatchSemaphore(value: 0), release = DispatchSemaphore(value: 0), done = DispatchSemaphore(value: 0)
+        let authority = self.authority
+        authority.onVerify = { [unowned authority] in
+            authority.onVerify = nil
+            entered.signal()
+            _ = release.wait(timeout: .now() + 10)
+        }
+        var response: HelperResponse?
+        DispatchQueue.global().async { [self] in
+            response = send(s, .processRusage(ids: [pid500]), auth: form)
+            done.signal()
+        }
+        guard entered.wait(timeout: .now() + 10) == .success else { XCTFail("verify never started"); return nil }
+        during()
+        release.signal()
+        guard done.wait(timeout: .now() + 10) == .success else { XCTFail("the request never finished"); return nil }
+        return response
+    }
+
+    func testLockDuringVerifyGrantsNothing() {
+        let s = greeted(app, standalone)
+        let r = verifyRacing(s) { XCTAssertEqual(send(s, .lock), .ok) }
+        XCTAssertEqual(r.flatMap(code), .notAuthorized)
+        XCTAssertEqual(send(s, .status, from: standalone), .status(HelperServiceStatus(unlocked: false, holderAlive: false, agentContents: false)))
+        // Nothing was cached for the locked connection: its next request is checked again.
+        guard case .rusage = send(s, .processRusage(ids: [pid500]), auth: form) else { return XCTFail() }
+        XCTAssertEqual(authority.verifyCount, 2)
+    }
+
+    func testCloseDuringVerifyGrantsNothing() {
+        let s = greeted(app, standalone)
+        let r = verifyRacing(s) { s.connectionClosed(app.connection) }
+        XCTAssertEqual(r.flatMap(code), .notAuthorized)
+        XCTAssertEqual(send(s, .status, from: standalone), .status(HelperServiceStatus(unlocked: false, holderAlive: false, agentContents: false)))
+    }
+
     func testStatusReportsUnlock() {
         let s = greeted(app, standalone)
         XCTAssertEqual(send(s, .status, auth: form), .status(HelperServiceStatus(unlocked: true, holderAlive: true, agentContents: false)))
@@ -236,6 +295,23 @@ final class HelperServiceTests: XCTestCase {
         XCTAssertTrue(store.agentContents)
         let mode = try FileManager.default.attributesOfItem(atPath: store.url.path)[.posixPermissions] as? Int
         XCTAssertEqual(mode, 0o600)
+    }
+
+    func testSettingsFileModeFailureLeavesTheValueUnchanged() throws {
+        struct ModeFailed: Error {}
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        var fail = false
+        let store = FileHelperSettingsStore(url: dir.appendingPathComponent("settings.json")) { path in
+            if fail { throw ModeFailed() }
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path)
+        }
+        try store.setAgentContents(false)
+        fail = true
+        XCTAssertThrowsError(try store.setAgentContents(true))
+        XCTAssertFalse(store.agentContents)
+        // No half-written file is left beside it.
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: dir.path), ["settings.json"])
     }
 
     func testSettingsFileWriteFailureThrows() throws {

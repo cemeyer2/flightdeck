@@ -9,6 +9,8 @@ final class FakeAuthority: AuthorizationAuthority {
     var removed: [String] = []
     var validForms: Set<Data> = []
     var verifyCount = 0
+    /// Called inside verify, so a test can hold a check in flight while something else happens.
+    var onVerify: (() -> Void)?
 
     func storedRule(_ right: String) -> [String: Any]? { rules[right] }
     func setRule(_ right: String, _ rule: [String: Any]) -> Bool {
@@ -24,6 +26,7 @@ final class FakeAuthority: AuthorizationAuthority {
     }
     func verify(externalForm: Data, right: String) -> Bool {
         verifyCount += 1
+        onVerify?()
         return right == HelperIDs.rightName && externalForm.count == 32 && validForms.contains(externalForm)
     }
 }

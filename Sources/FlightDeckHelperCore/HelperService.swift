@@ -53,16 +53,7 @@ public final class HelperService {
         guard withLock({ greeted.contains(c.connection) }) else { return refuse(.helloRequired, "Say hello first.") }
         if let r = HelperValidation.validate(e.request) { return .refused(r) }
 
-        // The authd check runs outside the lock; the registry is only touched under it.
-        var verified = withLock { registry.cachedVerification(connection: c.connection) }
-        if !verified, let form = e.authorization {
-            verified = authority.verify(externalForm: form, right: HelperIDs.rightName)
-            withLock {
-                if verified { registry.recordVerification(connection: c.connection) }
-                else { registry.verificationFailed(connection: c.connection) }
-            }
-        }
-        let access = withLock { registry.access(connection: c.connection, uid: c.uid, verified: verified) }
+        let access = checkAccess(e.authorization, c)
 
         switch e.request.tier {
         case .control:
@@ -101,6 +92,30 @@ public final class HelperService {
         withLock {
             greeted.remove(c)
             registry.connectionClosed(c)
+        }
+    }
+
+    /// The authd check runs outside the lock; the registry is only touched under it. A lock or disconnect while the
+    /// check runs moves the connection's epoch on, and the check's answer is then dropped instead of granting an
+    /// unlock that has already ended. The cache only counts for the same form that verified, so a request with none,
+    /// or with another, is checked on its own.
+    private func checkAccess(_ form: Data?, _ c: HelperCaller) -> Access {
+        let (cached, epoch): (Access?, UInt64) = withLock {
+            let hit = registry.cachedVerification(connection: c.connection, form: form)
+            let unchecked = !hit && form != nil
+            return (unchecked ? nil : registry.access(connection: c.connection, uid: c.uid, verified: hit),
+                    registry.epoch(connection: c.connection))
+        }
+        if let cached { return cached }
+        guard let form else { return withLock { registry.access(connection: c.connection, uid: c.uid, verified: false) } }
+        let verified = authority.verify(externalForm: form, right: HelperIDs.rightName)
+        return withLock {
+            guard greeted.contains(c.connection), registry.epoch(connection: c.connection) == epoch else {
+                return registry.access(connection: c.connection, uid: c.uid, verified: false)
+            }
+            if verified { registry.recordVerification(connection: c.connection, form: form) }
+            else { registry.verificationFailed(connection: c.connection) }
+            return registry.access(connection: c.connection, uid: c.uid, verified: verified)
         }
     }
 
