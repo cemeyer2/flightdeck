@@ -281,6 +281,15 @@ final class NoiseTests: XCTestCase {
 
 /// User automation rules.
 final class RuleEngineTests: XCTestCase {
+    /// Rules and the process catalog share one list of macOS's own folders, and it covers Cryptexes (Safari lives there).
+    func testRulesUseSharedPlatformPrefixes() {
+        let safari = AnalyzerTests().proc("Safari", path: "/System/Volumes/Preboot/Cryptexes/App/System/Applications/Safari.app/Contents/MacOS/Safari", pid: 70)
+        XCTAssertFalse(RuleEngine().allowed(safari, for: .quit))
+        XCTAssertTrue(Platform.prefixes.contains("/System/Volumes/Preboot/Cryptexes/"))
+        XCTAssertFalse(Platform.isPlatformPath("/usr/local/bin/x"))
+        XCTAssertTrue(RuleEngine().allowed(AnalyzerTests().proc("x", path: "/usr/local/bin/x", pid: 71), for: .quit))
+    }
+
     /// Guards the safety properties of rules, which can quit processes: a rule fires only after its condition has held
     /// for `minutes`, once per occurrence (not every sample), targets every process of the matched app, respects its
     /// cooldown when the condition breaks and returns, and never targets protected processes (kernel_task,

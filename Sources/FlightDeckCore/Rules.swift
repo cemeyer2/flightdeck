@@ -132,8 +132,6 @@ public final class RuleEngine: @unchecked Sendable {
     /// Never matched by any rule: killing or suspending these would hang or log out the Mac, or stop FlightDeck itself.
     public static let protected: Set<String> = ["kernel_task", "launchd", "WindowServer", "loginwindow", "FlightDeck", "Flightdeck", "logd", "configd", "powerd",
                                                 "Finder", "Dock", "SystemUIServer", "ControlCenter", "coreaudiod", "sshd", "Terminal", "iTerm2"]
-    /// Platform locations: processes running from here are part of macOS and are never quit, suspended or reniced.
-    static let platformPrefixes = ["/System/", "/usr/libexec/", "/usr/sbin/", "/usr/bin/", "/bin/", "/sbin/", "/Library/Apple/"]
     /// The frontmost app's PID (set by the app each sample): the app you're using is never quit or suspended by a rule.
     public var frontmostPID: Int32?
 
@@ -143,7 +141,8 @@ public final class RuleEngine: @unchecked Sendable {
         guard p.pid > 1, p.pid != getpid() else { return false }
         if action == .notify || action == .command { return true }
         if Self.protected.contains(p.name) || p.pid == frontmostPID { return false }
-        if Self.platformPrefixes.contains(where: { p.path.hasPrefix($0) }) || p.path.isEmpty { return false }
+        // Platform locations (`Platform.prefixes`, including Cryptexes): part of macOS, never quit, suspended or reniced.
+        if Platform.isPlatformPath(p.path) || p.path.isEmpty { return false }
         return p.uid == getuid()   // other users' processes can't be signalled anyway; don't pretend
     }
     // All three are keyed "<rule id>|<subject key>"; subject keys are the app id or "<pid>-<start time>".
