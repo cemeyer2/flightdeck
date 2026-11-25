@@ -1,8 +1,9 @@
 // Chrome tabs: the app binary as Chrome's native-messaging host. Chrome launches it with the extension's origin as the
 // only argument (see ChromeHostArgv) and talks framed JSON over stdin/stdout. This mode is a thin relay: frames from
-// the extension go to the running app over the private socket (ChromeTabsSocket), and when the app connects the host
-// asks the extension to send its table again. stdout carries framed messages only; stderr, which Chrome may save to
-// its log, carries event kinds and byte counts, never message content.
+// the extension go to the running app over the private socket (ChromeTabsSocket) once the host has checked that the
+// listener carries our own signature, and when the app connects the host asks the extension to send its table again.
+// stdout carries framed messages only; stderr, which Chrome may save to its log, carries event kinds and byte counts,
+// never message content.
 import Foundation
 import FlightDeckCore
 
@@ -20,8 +21,14 @@ enum ChromeHost {
         let reader = Thread { readExtension() }
         reader.start()
         let sock = ChromeTabsSocket.defaultSocketURL()
+        let requirement = ChromePeerAuth.ownRequirement()
         while true {
             guard let fd = ChromeTabsSocket.connect(sock) else { sleep(5); continue }
+            // Nothing is sent (not even the origin) until the listener is known to be FlightDeck itself.
+            guard trustsAnyListener || ChromePeerAuth.isTrustedListener(fd: fd, requirement: requirement) else {
+                log("refused a socket listener that isn't FlightDeck")
+                close(fd); sleep(5); continue
+            }
             lock.lock()
             var ok = ChromeFraming.writeFrame(fd: fd, ChromeTabsMessage.origin(origin).encoded())
             for m in [latestHello, latestTabs].compactMap({ $0 }) where ok { ok = ChromeFraming.writeFrame(fd: fd, m) }
@@ -66,6 +73,16 @@ enum ChromeHost {
             }
             lock.unlock()
         }
+    }
+
+    /// Debug builds only, for the end-to-end test whose listener is the test runner rather than FlightDeck. Release
+    /// builds (the app bundle) always check the listener.
+    private static var trustsAnyListener: Bool {
+        #if DEBUG
+        return ProcessInfo.processInfo.environment["FLIGHTDECK_CHROME_TRUST_ANY_LISTENER"] == "1"
+        #else
+        return false
+        #endif
     }
 
     private static func log(_ s: String) { FileHandle.standardError.write(Data("FlightDeck Chrome host: \(s)\n".utf8)) }

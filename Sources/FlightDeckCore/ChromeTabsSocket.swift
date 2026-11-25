@@ -174,6 +174,14 @@ public enum ChromePeerAuth {
         return ProcessSampler.identity(of: ppid)
     }
 
+    /// The host's check before it sends anything: the process listening on the socket runs as this user and carries our
+    /// signature, so another program that binds the socket while FlightDeck isn't running never receives a tab. With no
+    /// requirement (an unsigned build) nothing is trusted, as on the app side.
+    public static func isTrustedListener(fd: Int32, requirement: SecRequirement?) -> Bool {
+        guard let requirement, let peer = peer(of: fd) else { return false }
+        return isTrusted(peer, requirement: requirement)
+    }
+
     /// The production check for an accepted connection: our user, our signature, launched by Google Chrome.
     public static func authorize(fd: Int32, requirement: SecRequirement?) -> ProcessIdentity? {
         guard let requirement, let peer = peer(of: fd), isTrusted(peer, requirement: requirement) else { return nil }

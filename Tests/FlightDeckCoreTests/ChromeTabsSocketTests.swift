@@ -2,6 +2,7 @@
 // listener's per-connection protocol, and the built binary in native-host mode end to end.
 import XCTest
 import Darwin
+import Security
 @testable import FlightDeckCore
 
 final class ChromeTabsSocketTests: XCTestCase {
@@ -103,6 +104,20 @@ final class ChromeTabsSocketTests: XCTestCase {
         XCTAssertNil(ChromePeerAuth.browser(ofHostPID: getpid()), "our parent isn't Google Chrome")
         // Our own signature satisfies our own requirement (skipped when the test runner is unsigned).
         if let req = ChromePeerAuth.ownRequirement() { XCTAssertTrue(ChromePeerAuth.isTrusted(p, requirement: req)) }
+    }
+
+    /// The host checks the listener before sending: our own process passes our requirement, and no requirement (an
+    /// unsigned build) trusts nobody.
+    func testHostChecksListener() throws {
+        var fds: [Int32] = [0, 0]
+        XCTAssertEqual(socketpair(AF_UNIX, SOCK_STREAM, 0, &fds), 0)
+        defer { close(fds[0]); close(fds[1]) }
+        XCTAssertFalse(ChromePeerAuth.isTrustedListener(fd: fds[1], requirement: nil))
+        XCTAssertFalse(ChromePeerAuth.isTrustedListener(fd: -1, requirement: ChromePeerAuth.ownRequirement()))
+        if let req = ChromePeerAuth.ownRequirement() { XCTAssertTrue(ChromePeerAuth.isTrustedListener(fd: fds[1], requirement: req)) }
+        var other: SecRequirement?
+        XCTAssertEqual(SecRequirementCreateWithString("identifier \"com.example.not-flightdeck\"" as CFString, [], &other), errSecSuccess)
+        XCTAssertFalse(ChromePeerAuth.isTrustedListener(fd: fds[1], requirement: try XCTUnwrap(other)))
     }
 
     // MARK: Listener
@@ -217,7 +232,10 @@ final class ChromeTabsSocketTests: XCTestCase {
         defer { close(lfd) }
         let p = Process()
         p.executableURL = binary; p.arguments = [ChromeTabsConstants.allowedOrigins[0]]
-        p.environment = ProcessInfo.processInfo.environment.merging(["FLIGHTDECK_CHROME_SOCKET_DIR": dir.path]) { _, b in b }
+        // The listener here is the test runner, not FlightDeck: a debug-only switch lets the host talk to it
+        // (testChromeHostRefusesForeignListener covers the check itself).
+        p.environment = ProcessInfo.processInfo.environment.merging(["FLIGHTDECK_CHROME_SOCKET_DIR": dir.path,
+                                                                     "FLIGHTDECK_CHROME_TRUST_ANY_LISTENER": "1"]) { _, b in b }
         let input = Pipe(), output = Pipe()
         p.standardInput = input; p.standardOutput = output; p.standardError = FileHandle.nullDevice
         try p.run()
@@ -249,6 +267,34 @@ final class ChromeTabsSocketTests: XCTestCase {
         p.waitUntilExit()
         XCTAssertEqual(p.terminationStatus, 0)
         XCTAssertEqual(output.fileHandleForReading.readDataToEndOfFile(), Data(), "nothing on stdout but frames")
+    }
+
+    /// A process that isn't FlightDeck binds the socket while the app isn't running: the host connects, checks the
+    /// listener's signature, and hangs up without sending anything, not even its origin.
+    func testChromeHostRefusesForeignListener() throws {
+        guard FileManager.default.isExecutableFile(atPath: binary.path) else { throw XCTSkip("FlightDeck binary not built at \(binary.path)") }
+        let dir = tempDir()
+        let lfd = try listenRaw(dir)
+        defer { close(lfd) }
+        let p = Process()
+        p.executableURL = binary; p.arguments = [ChromeTabsConstants.allowedOrigins[0]]
+        var env = ProcessInfo.processInfo.environment
+        env["FLIGHTDECK_CHROME_SOCKET_DIR"] = dir.path; env["FLIGHTDECK_CHROME_TRUST_ANY_LISTENER"] = nil
+        p.environment = env
+        let input = Pipe()
+        p.standardInput = input; p.standardOutput = FileHandle.nullDevice; p.standardError = FileHandle.nullDevice
+        try p.run()
+        defer { if p.isRunning { p.terminate() } }
+        var pfd = pollfd(fd: lfd, events: Int16(POLLIN), revents: 0)
+        XCTAssertEqual(poll(&pfd, 1, 5000), 1, "the host connects")
+        let conn = accept(lfd, nil, nil)
+        XCTAssertGreaterThanOrEqual(conn, 0)
+        defer { close(conn) }
+        input.fileHandleForWriting.write(ChromeFraming.encode(ChromeTabsMessage.hello(protocol: 1, extensionVersion: "1.0.0").encoded()))
+        var cfd = pollfd(fd: conn, events: Int16(POLLIN), revents: 0)
+        XCTAssertEqual(poll(&cfd, 1, 5000), 1)
+        var b: UInt8 = 0
+        XCTAssertEqual(read(conn, &b, 1), 0, "closed with nothing sent")
     }
 
     func testChromeHostCLIRejectsUnknownOrigin() throws {
