@@ -142,6 +142,11 @@ public final class WebDashboardServer: @unchecked Sendable {
             overdue[port]!.waiting.append(then)
             return true
         }
+
+        func isOverdue(_ port: UInt16) -> Bool {
+            lock.lock(); defer { lock.unlock() }
+            return overdue[port] != nil
+        }
     }
     static let releasing = Releasing()
     /// A cancel that never reports `.cancelled` stops holding up the port after this long (the default). A bind that
@@ -178,6 +183,7 @@ public final class WebDashboardServer: @unchecked Sendable {
         if requestedPort != 0 { hold.port = requestedPort }
         let attempt = hold.attempt
         lock.unlock()
+        let wasOverdue = requestedPort != 0 && Self.releasing.isOverdue(requestedPort)
         let params = NWParameters.tcp
         // No address reuse: with it, a bind on every interface succeeds even while another listener holds the port on
         // 127.0.0.1, and Settings would say "Serving" for a port that something else answers on this Mac.
@@ -210,7 +216,8 @@ public final class WebDashboardServer: @unchecked Sendable {
             case .failed(let e), .waiting(let e):
                 if !reported {
                     reported = true
-                    let retrying = retry && current && (self?.retryWhenOverdueEnds(error: "\(e)", ready: ready) ?? false)
+                    let retrying = retry && current
+                        && (self?.retryWhenOverdueEnds(error: "\(e)", wasOverdue: wasOverdue, ready: ready) ?? false)
                     if !retrying { ready("\(e)") }
                 }
                 l.cancel()
@@ -226,8 +233,10 @@ public final class WebDashboardServer: @unchecked Sendable {
 
     /// On `queue`, after a bind on a fixed port failed: when a stopped listener on it is past its fallback, binds once
     /// more after that listener reports `.cancelled`, or reports `error` after `releaseFallback`, whichever comes
-    /// first, and returns true. Neither happens once this server is stopped.
-    private func retryWhenOverdueEnds(error: String, ready: @escaping @Sendable (String?) -> Void) -> Bool {
+    /// first, and returns true. Neither happens once this server is stopped. `wasOverdue`: such a listener was there
+    /// when the bind started; if it has cancelled since, before the failure got here, the bind runs again at once.
+    private func retryWhenOverdueEnds(error: String, wasOverdue: Bool,
+                                      ready: @escaping @Sendable (String?) -> Void) -> Bool {
         guard requestedPort != 0 else { return false }
         var settled = false   // only touched on `queue`
         let waiting = Self.releasing.whenOverdueEnds(requestedPort) { [weak self] in
@@ -238,7 +247,11 @@ public final class WebDashboardServer: @unchecked Sendable {
                 self.listen(retry: false, ready: ready)
             }
         }
-        guard waiting else { return false }
+        guard waiting else {
+            guard wasOverdue else { return false }
+            queue.async { [self] in listen(retry: false, ready: ready) }
+            return true
+        }
         queue.asyncAfter(deadline: .now() + releaseFallback) { [weak self] in
             guard let self, !settled else { return }
             settled = true
