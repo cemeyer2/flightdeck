@@ -26,9 +26,9 @@ enum ProcessCatalogDeveloper {
             id: "dev-docker-desktop", title: "Docker Desktop",
             summary: "Docker Desktop, Docker's app for building, sharing and running containerised applications on the Mac.",
             maker: .vendor("Docker"),
-            busyWhen: "While containers are running or images are building.",
+            busyWhen: nil,
             quit: .avoid, whatToDo: nil,
-            findingNote: "Docker Desktop is busy, usually from containers that are running or images being built.",
+            findingNote: "Docker Desktop is busy.",
             pathPrefixes: ["/Applications/Docker.app/"], bundleIDs: ["com.docker.docker"], teamIDs: ["9BNSXJN65R"],
             groundedIn: "https://docs.docker.com/desktop/; file:///Applications/Docker.app"),
     ]

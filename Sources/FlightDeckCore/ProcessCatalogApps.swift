@@ -7,9 +7,9 @@ enum ProcessCatalogApps {
             id: "apps-zoom", title: "Zoom Workplace",
             summary: "Zoom Workplace, Zoom's app for meetings, chat, docs and more.",
             maker: .vendor("Zoom"),
-            busyWhen: "During meetings.",
+            busyWhen: nil,
             quit: .avoid, whatToDo: nil,
-            findingNote: "Zoom is busy, usually because a meeting is running.",
+            findingNote: "Zoom is busy.",
             pathPrefixes: ["/Applications/zoom.us.app/"], bundleIDs: ["us.zoom.xos"], teamIDs: ["BJ4HAAB9B3"],
             groundedIn: "https://www.zoom.com/en/products/collaboration-tools/; file:///Applications/zoom.us.app"),
         ProcessExplanation(
