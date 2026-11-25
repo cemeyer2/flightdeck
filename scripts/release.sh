@@ -1,6 +1,7 @@
 #!/bin/bash
 # Builds a distributable FlightDeck.dmg.
 #   SIGN_ID="Developer ID Application: Name (TEAMID)"   sign with hardened runtime (otherwise ad-hoc)
+#   TEAM_ID=<10-character team ID>                      required when SIGN_ID isn't "Name (TEAMID)" (e.g. a SHA-1)
 #   NOTARY_PROFILE=<keychain profile>                   notarize + staple (xcrun notarytool store-credentials …)
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -9,7 +10,11 @@ APP=build/FlightDeck.app
 if [ -n "${SIGN_ID:-}" ]; then
   # The root helper: pin launchd to this team's signature, then sign it before the app.
   HELPER="$APP/Contents/Library/LaunchServices/app.flightdeck.Flightdeck.helper"
-  TEAM_ID="${SIGN_ID##*(}"; TEAM_ID="${TEAM_ID%)}"
+  # A wrong team here means launchd never starts the helper, so stop rather than guess.
+  if [ -z "${TEAM_ID:-}" ] && [[ "$SIGN_ID" == *"("*")" ]]; then TEAM_ID="${SIGN_ID##*(}"; TEAM_ID="${TEAM_ID%)}"; fi
+  if ! [[ "${TEAM_ID:-}" =~ ^[A-Z0-9]{10}$ ]]; then
+    echo "Couldn't tell the team ID from SIGN_ID; set TEAM_ID to the 10-character Developer ID team." >&2; exit 1
+  fi
   plutil -insert SpawnConstraint -json "{\"team-identifier\":\"$TEAM_ID\",\"signing-identifier\":\"app.flightdeck.Flightdeck.helper\"}" \
     "$APP/Contents/Library/LaunchDaemons/app.flightdeck.Flightdeck.helper.plist"
   codesign --force --options runtime --timestamp --sign "$SIGN_ID" --identifier app.flightdeck.Flightdeck.helper "$HELPER"
