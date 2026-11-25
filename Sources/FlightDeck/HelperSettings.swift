@@ -69,7 +69,11 @@ final class HelperModel: ObservableObject {
     /// The session for the current state: nil unless the toggle is on, the build is eligible, the daemon is
     /// registered and demo mode is off.
     private(set) var session: HelperSession? {
-        didSet { Self.box.set(session); onSessionChange?(session) }
+        didSet {
+            // An error from the old session's change says nothing about the new one.
+            if oldValue !== session { agentContentsError = nil }
+            Self.box.set(session); onSessionChange?(session)
+        }
     }
     /// The Engine hands the session to the sampler on its queue.
     var onSessionChange: ((HelperSession?) -> Void)?
@@ -263,6 +267,7 @@ final class HelperModel: ObservableObject {
 
     func lock() {
         guard let s = session else { return }
+        agentContentsError = nil
         let holder = unlockHolder
         Task.detached(priority: .userInitiated) {
             s.lock()
