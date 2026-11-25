@@ -85,6 +85,13 @@ final class ChromeTabsSocketTests: XCTestCase {
         XCTAssertNotEqual(lstat(sock.path, &st), 0)
     }
 
+    /// The browser identity taken from the host's parent must equal the one the sampler reports for that process, or
+    /// the Engine's pruning would drop every table on the first sample.
+    func testDerivedIdentityMatchesSampler() throws {
+        let sampled = try XCTUnwrap(ProcessSampler().sample().first { $0.pid == getpid() })
+        XCTAssertEqual(ProcessSampler.identity(of: getpid()), sampled.identity)
+    }
+
     func testPeerOfSelfConnection() throws {
         var fds: [Int32] = [0, 0]
         XCTAssertEqual(socketpair(AF_UNIX, SOCK_STREAM, 0, &fds), 0)
@@ -231,6 +238,12 @@ final class ChromeTabsSocketTests: XCTestCase {
         let hello = ChromeTabsMessage.hello(protocol: 1, extensionVersion: "1.0.0")
         input.fileHandleForWriting.write(ChromeFraming.encode(hello.encoded()))
         XCTAssertEqual(try ChromeFraming.readFrame(fromHost).flatMap(ChromeTabsMessage.parse), hello, "relayed to the app")
+        // An invalid frame is relayed too, so the app drops that connection's previous table.
+        let tabs = ChromeTabsMessage.tabs(table)
+        let bad = Data(#"{"type":"tabs","seq":2,"tabs":[{"tabId":1.5}]}"#.utf8)
+        input.fileHandleForWriting.write(ChromeFraming.encode(tabs.encoded()) + ChromeFraming.encode(bad))
+        XCTAssertEqual(try ChromeFraming.readFrame(fromHost).flatMap(ChromeTabsMessage.parse), tabs)
+        XCTAssertEqual(try ChromeFraming.readFrame(fromHost), bad)
 
         try input.fileHandleForWriting.close()
         p.waitUntilExit()

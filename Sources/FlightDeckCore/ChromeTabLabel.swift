@@ -85,8 +85,10 @@ public enum ChromeTabText {
             let cpu = "\(Int(p.cpu.rounded()))%"
             if a.tabCount > 1 {
                 parts.append("\(label.host)\(more(a.tabCount - 1, "tab")) (\(cpu), shared)")
+            } else if a.tabCount == 1 {
+                parts.append(label.host + (label.title.map { " — \($0)" } ?? "") + " (\(cpu))")
             } else {
-                parts.append("\(label.plain.replacingOccurrences(of: " (Chrome tab)", with: "")) (\(cpu))")
+                parts.append("\(label.plain) (\(cpu))")   // a frame or an extension process
             }
         }
         return parts.isEmpty ? nil : "Mostly: " + parts.joined(separator: ", ")

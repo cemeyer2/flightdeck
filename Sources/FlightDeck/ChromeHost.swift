@@ -52,13 +52,15 @@ enum ChromeHost {
             } catch {
                 log("refused an oversized frame"); exit(65)
             }
-            // The app validates again; this check only decides what to keep for a reconnect.
-            switch ChromeTabsMessage.parse(frame) {
-            case .hello?: lock.lock(); latestHello = frame; lock.unlock()
-            case .tabs?: lock.lock(); latestTabs = frame; lock.unlock()
-            default: log("dropped an invalid message of \(frame.count) bytes"); continue
-            }
+            // Every frame is forwarded, valid or not: the app validates it, and an invalid one makes it drop that
+            // connection's previous table. This check only decides what to keep for a reconnect.
             lock.lock()
+            switch ChromeTabsMessage.parse(frame) {
+            case .hello?: latestHello = frame
+            case .tabs?: latestTabs = frame
+            case nil: latestTabs = nil; log("forwarding an invalid message of \(frame.count) bytes")
+            default: break
+            }
             if socketFD >= 0 && !ChromeFraming.writeFrame(fd: socketFD, frame) {
                 shutdown(socketFD, SHUT_RDWR)   // the connection loop sees the close and retries
             }

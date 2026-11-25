@@ -260,12 +260,12 @@ final class ChromeTabsTests: XCTestCase {
         let procs = [sample(1, cpu: 50), sample(2, cpu: 90), sample(3, cpu: 3), sample(4, cpu: 80)]
         let at: [ProcessIdentity: ChromeTabAttribution] = [
             procs[0].identity: attr([entry("docs.google.com", "Plan")]),
-            procs[1].identity: attr([entry("youtube.com", "Lofi")]),
+            procs[1].identity: attr([entry("youtube.com", "Lofi (Chrome tab)")]),
             procs[2].identity: attr([entry("quiet.example", "Q")]),
         ]
         XCTAssertNil(ChromeTabText.mostlyLine(pids: [4], processes: procs, attribution: at))
         XCTAssertEqual(ChromeTabText.mostlyLine(pids: [2, 4, 1, 3], processes: procs, attribution: at),
-                       "Mostly: youtube.com — Lofi (90%), docs.google.com — Plan (50%)", "order follows pids; under 5% skipped")
+                       "Mostly: youtube.com — Lofi (Chrome tab) (90%), docs.google.com — Plan (50%)", "order follows pids; under 5% skipped")
     }
 
     func testMostlyLineWholeFiguresNotSplit() {
