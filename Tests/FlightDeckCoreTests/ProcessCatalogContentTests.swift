@@ -59,16 +59,24 @@ final class ProcessCatalogContentTests: XCTestCase {
         }
     }
 
+    /// Rows have no signature, so an Apple entry keyed by a path outside macOS's own folders would always read as a
+    /// lookalike. Apple apps installed in /Applications are left out of the catalog for that reason.
+    func testAppleEntriesKeyOnlyPlatformPaths() {
+        for e in catalog.entries where e.isApple {
+            for p in e.paths + e.pathPrefixes { XCTAssertTrue(Platform.isPlatformPath(p), "\(e.id): \(p)") }
+        }
+    }
+
     func testBatchesAreSmall() {
         XCTAssertEqual(ProcessCatalogParts.batches.map(\.number), Array(1...12))
         for b in ProcessCatalogParts.batches { XCTAssertLessThanOrEqual(b.entries.count, 100, b.area) }
     }
 
-    /// Every name the old 13-row KnownProcess table explained still gets an explanation.
-    func testLegacyKnownNamesResolve() throws {
-        try XCTSkipIf(ProcessCatalogParts.all.isEmpty, "the catalog has no entries yet")
+    /// Every name the old 13-row KnownProcess table explained still gets an explanation, except
+    /// softwareupdate_download_service, which no longer exists on current macOS and so can't be grounded.
+    func testLegacyKnownNamesResolve() {
         let apple = ["mds", "mds_stores", "mdworker", "mdworker_shared", "mdsync", "backupd", "backupd-helper", "photoanalysisd",
-                     "photolibraryd", "mediaanalysisd", "softwareupdated", "softwareupdate_download_service", "mobileassetd",
+                     "photolibraryd", "mediaanalysisd", "softwareupdated", "mobileassetd",
                      "kernel_task", "WindowServer", "bird", "cloudd", "fileproviderd", "nsurlsessiond", "XprotectService", "XProtect",
                      "syspolicyd", "trustd", "corespotlightd", "suggestd", "knowledge-agent", "coreaudiod", "launchd",
                      "com.apple.WebKit.WebContent"]
@@ -80,8 +88,7 @@ final class ProcessCatalogContentTests: XCTestCase {
     }
 
     /// Rules refuse to touch these, so the catalog must not call them safe to quit.
-    func testProtectedNamesAreNotSafe() throws {
-        try XCTSkipIf(ProcessCatalogParts.all.isEmpty, "the catalog has no entries yet")
+    func testProtectedNamesAreNotSafe() {
         for n in RuleEngine.protected {
             let e = catalog.lookup(name: n, path: "", signature: nil).known
             XCTAssertNotNil(e, n)
@@ -90,8 +97,7 @@ final class ProcessCatalogContentTests: XCTestCase {
     }
 
     /// The thermal finding explains kernel_task by entry id.
-    func testKernelTaskEntryExists() throws {
-        try XCTSkipIf(ProcessCatalogParts.all.isEmpty, "the catalog has no entries yet")
+    func testKernelTaskEntryExists() {
         XCTAssertNotNil(catalog.entry(id: "kernel-task"))
     }
 
