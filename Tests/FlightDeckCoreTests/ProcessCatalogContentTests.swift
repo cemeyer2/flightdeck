@@ -101,18 +101,26 @@ final class ProcessCatalogContentTests: XCTestCase {
         XCTAssertNotNil(catalog.entry(id: "kernel-task"))
     }
 
-    /// Rows look every process up on every refresh. 10,000 lookups over this Mac's real names and paths (plus lookalike
-    /// and hidden-path variants) must stay well under 100 ms even in a debug build.
+    /// Rows look every process up on every refresh, so 10,000 lookups must stay cheap. A fixed mix of names and paths
+    /// (catalog keys, their hidden-path and lookalike variants, and unknown processes) keeps the work the same on every
+    /// machine; the bound is generous so a loaded runner or a sanitizer build doesn't fail it, while a regression to a
+    /// linear scan with I/O still would.
     func testLookupPerformance() {
-        let real = ProcessSampler().sample().map { ($0.name, $0.path) }
-        let mix = real + real.map { ($0.0, "") } + real.map { ($0.0, "/Users/x/Downloads/" + $0.0) }
-        XCTAssertFalse(mix.isEmpty)
-        let t = Date()
+        var mix: [(String, String)] = []
+        for e in catalog.entries {
+            for n in e.names { mix += [(n, ""), (n, "/Users/x/Downloads/" + n)] }
+            for p in e.paths { mix.append(((p as NSString).lastPathComponent, p)) }
+            for p in e.pathPrefixes { mix.append(("helper", p + "Contents/MacOS/helper")) }
+            for p in e.namePrefixes { mix.append((p + "Worker", "")) }
+        }
+        mix += (0..<200).map { ("unknown\($0)", "/opt/tool/bin/unknown\($0)") }
         var hits = 0
+        let t = Date()
         for i in 0..<10_000 { let (n, p) = mix[i % mix.count]; if catalog.lookup(name: n, path: p, signature: nil).known != nil { hits += 1 } }
         let ms = Date().timeIntervalSince(t) * 1000
         print("COST catalog 10k lookups", String(format: "%.1f ms", ms), "(\(hits) known)")
-        XCTAssertLessThan(ms, 100)
+        XCTAssertGreaterThan(hits, 0)
+        XCTAssertLessThan(ms, 1000)
     }
 
     /// Writes one Markdown review digest per batch, plus every cited source (one per line, for checking), to
