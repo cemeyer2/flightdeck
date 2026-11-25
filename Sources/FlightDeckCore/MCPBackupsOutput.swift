@@ -9,7 +9,7 @@ extension MCPTools {
         let r = await Task.detached(priority: .utility) {
             BackupsCollector.collect(store: BackupStore(dir: BackupStore.defaultDirectory, readOnly: true), scanLog: false)
         }.value
-        return Self.backupsJSON(r, days: days, now: now())
+        return withHelper(Self.backupsJSON(r, days: days, now: now()), await source.helperAccess())
     }
 
     static func runJSON(_ run: BackupRun) -> JSON {

@@ -1,4 +1,5 @@
 import Foundation
+import FlightDeckHelperProtocol
 // Where the MCP tools get their data. Two implementations:
 //   • the running app (EngineMCPSource in the app target): the Engine's live snapshot, sustained findings, the
 //     Flight Log, the black box and the Trends log, exactly as the windows show them;
@@ -36,6 +37,12 @@ public protocol MCPDataSource: AnyObject, Sendable {
     func batteryHistory() async -> (days: [BatteryDay], lifetime: BatteryLifetime?)?
     /// Destinations: the last 30 days (stored days plus the open one) and the known-destination list, or nil.
     func destinations() async -> (days: [DestinationDay], known: KnownDestinations)?
+    /// The root helper's state as MCP reports it. Never triggers the admin prompt.
+    func helperAccess() async -> HelperMCPAccess
+    /// Another user's process's contents, only while unlocked with agent access to contents turned on.
+    func helperContents(_ id: ProcessIdentity, parts: Set<DetailPart>) async -> HelperProcessContents?
+    /// `sample` of another user's or a root process via the helper; nil = the helper can't be used for it.
+    func helperSample(_ id: ProcessIdentity, seconds: Int) async -> Result<String, HelperRefusal>?
 }
 
 extension MCPDataSource {
@@ -55,6 +62,10 @@ extension MCPDataSource {
     }
     /// Sources without the app's tracker (tests) have no destinations.
     public func destinations() async -> (days: [DestinationDay], known: KnownDestinations)? { nil }
+    /// Sources without the helper (tests, other features' sources) report it off.
+    public func helperAccess() async -> HelperMCPAccess { .off }
+    public func helperContents(_ id: ProcessIdentity, parts: Set<DetailPart>) async -> HelperProcessContents? { nil }
+    public func helperSample(_ id: ProcessIdentity, seconds: Int) async -> Result<String, HelperRefusal>? { nil }
     /// Checkup with the swap trend taken from the black box's coarse tier, as the Checkup view does.
     public func runCheckup() async -> [CheckResult] {
         let trace = await blackBox(.coarse, from: Date().addingTimeInterval(-86_400), to: Date())
@@ -79,9 +90,21 @@ public final class StandaloneMCPSource: MCPDataSource, @unchecked Sendable {
     private let box: BlackBox
     private let incidentURL: URL
     private let dailyDir: URL
+    /// Counters from the root helper while the running app holds an unlock (never contents, never a prompt).
+    private let helper: HelperSession?
 
     public init(blackBoxDir: URL = BlackBox.defaultDirectory, incidentURL: URL = IncidentLog.defaultURL, dailyDir: URL = DailyLog.defaultDirectory) {
         box = BlackBox(dir: blackBoxDir); self.incidentURL = incidentURL; self.dailyDir = dailyDir
+        helper = HelperSession.standalone(build: HelperEligibility.evaluate(HelperEligibility.readSelf(), bundlePath: Bundle.main.bundlePath))
+        sampler.processes.helper = helper
+    }
+
+    public func helperAccess() async -> HelperMCPAccess {
+        guard let helper else { return .off }
+        return await Task.detached(priority: .userInitiated) {
+            helper.refreshIfStale(maxAge: 5)
+            return HelperMCPAccess(state: helper.state, agentContents: false)
+        }.value
     }
 
     public var blackBoxConfig: BlackBox.Config { box.config }

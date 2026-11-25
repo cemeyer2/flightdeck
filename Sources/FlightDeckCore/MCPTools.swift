@@ -189,9 +189,9 @@ public struct MCPTools: MCPToolProvider {
                                          "items": ["type": "string", "enum": .strings(Self.processSections)]]),
                         ], required: ["pid"])),
             MCPToolSpec(name: "sample_stacks", title: "Sample call stacks",
-                        description: "Samples a process's call stacks with Apple's /usr/bin/sample for 1-5 seconds (default 3; the call blocks that long) and returns a one-line summary of where the main thread spends its time plus its heaviest call path. Use it to explain why an app is busy or not responding. Only the user's own processes. Read-only, but it briefly attaches to the process.",
+                        description: "Samples a process's call stacks with Apple's /usr/bin/sample for 1-5 seconds (default 3; the call blocks that long) and returns a one-line summary of where the main thread spends its time plus its heaviest call path. Use it to explain why an app is busy or not responding. The user's own processes; another user's or a root process only while FlightDeck is unlocked and agent access to process details is on in its Settings, and that pauses the process briefly (WindowServer, launchd, kernel_task, coreaudiod and loginwindow are never sampled). Read-only, but it briefly attaches to the process.",
                         inputSchema: Self.schema([
-                            ("pid", ["type": "integer", "description": "Process ID (must belong to the current user)."]),
+                            ("pid", ["type": "integer", "description": "Process ID (the current user's, unless the helper allows otherwise)."]),
                             ("seconds", Self.int("How long to sample.", 1, 5, 3)),
                         ], required: ["pid"])),
             MCPToolSpec(name: "recent_incidents", title: "Flight Log incidents",
