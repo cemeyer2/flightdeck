@@ -101,8 +101,11 @@ final class ProcessCatalogContentTests: XCTestCase {
     /// VM run the containers); only Docker Desktop's own interface app is an ordinary app.
     func testOrdinaryAppsAreApp() {
         let apps = ["apps-zoom", "apps-1password", "browser-chrome", "browser-arc", "browser-firefox", "dev-iterm2", "dev-docker-desktop-app"]
-        XCTAssertEqual(Set(catalog.entries.filter { $0.quit == .app }.map(\.id)), Set(apps))
+        // Apple's own ordinary apps follow the same rule as everyone else's.
+        let appleApps = ["browser-safari", "desktop-terminal"]
+        XCTAssertEqual(Set(catalog.entries.filter { $0.quit == .app }.map(\.id)), Set(apps + appleApps))
         for id in apps { XCTAssertEqual(catalog.entry(id: id)?.isApple, false, id); XCTAssertEqual(catalog.entry(id: id)?.managed, false, id) }
+        for id in appleApps { XCTAssertEqual(catalog.entry(id: id)?.isApple, true, id) }
         XCTAssertEqual(catalog.entry(id: "flightdeck")?.quit, .avoid)
         XCTAssertEqual(catalog.entry(id: "dev-docker-desktop")?.quit, .avoid)
         let ui = "/Applications/Docker.app/Contents/MacOS/Docker Desktop.app/Contents/MacOS/Docker Desktop"
@@ -153,7 +156,7 @@ final class ProcessCatalogContentTests: XCTestCase {
         }
         var sources = Set<String>()
         for b in ProcessCatalogParts.batches {
-            var md = "# Batch \(b.number)/12: \(b.area) (PENDING USER REVIEW, \(b.entries.count) entries)\n"
+            var md = "# Batch \(b.number)/12: \(b.area) (\(b.entries.count) entries)\n"
             for e in b.entries {
                 let keys = [("names", e.names), ("name prefixes", e.namePrefixes), ("paths", e.paths), ("path prefixes", e.pathPrefixes),
                             ("bundle IDs", e.bundleIDs), ("team IDs", e.teamIDs)]

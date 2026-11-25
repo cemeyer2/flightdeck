@@ -1,4 +1,3 @@
-// PENDING USER REVIEW: batch 4/12, Window server, Finder, Dock, desktop
 import Foundation
 
 enum ProcessCatalogDesktop {
@@ -62,7 +61,7 @@ enum ProcessCatalogDesktop {
             summary: "Apple's Terminal app, for working with shells, command-line tools and scripts.",
             maker: .apple,
             busyWhen: nil,
-            quit: .avoid, whatToDo: nil,
+            quit: .app, whatToDo: nil,
             findingNote: "Terminal itself is busy, rather than a command running in it.",
             names: ["Terminal"], pathPrefixes: ["/System/Applications/Utilities/Terminal.app/"],
             groundedIn: "https://support.apple.com/guide/terminal/welcome/mac; file:///System/Applications/Utilities/Terminal.app"),

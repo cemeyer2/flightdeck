@@ -1,4 +1,3 @@
-// PENDING USER REVIEW: batch 9/12, Browsers and web content
 import Foundation
 
 enum ProcessCatalogBrowsers {
@@ -27,7 +26,7 @@ enum ProcessCatalogBrowsers {
             summary: "Apple's web browser. Like other apps that use WebKit, it shows each page's content through separate WebKit processes.",
             maker: .apple,
             busyWhen: nil,
-            quit: .avoid, whatToDo: nil,
+            quit: .app, whatToDo: nil,
             findingNote: "Safari itself is busy. Busy pages usually show up as separate WebKit processes.",
             names: ["Safari"], pathPrefixes: ["/System/Volumes/Preboot/Cryptexes/App/System/Applications/Safari.app/", "/System/Cryptexes/App/System/Applications/Safari.app/"],
             groundedIn: "https://support.apple.com/guide/safari/welcome/mac; https://webkit.org/; https://trac.webkit.org/wiki/WebKit2; file:///System/Cryptexes/App/System/Applications/Safari.app"),
