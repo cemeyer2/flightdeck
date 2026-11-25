@@ -69,3 +69,13 @@ final class ChromeTabsService: ObservableObject {
         }
     }
 }
+
+extension Engine {
+    /// The in-app line under a Chrome CPU finding naming the busiest tabs ("Mostly: youtube.com — Lofi (120%)"), from the
+    /// live attribution only (nil while replaying). The finding itself, and so notifications and the Flight Log, keep
+    /// the app-level wording.
+    func chromeTabsLine(for f: Finding) -> String? {
+        guard mode == .live, f.id.hasPrefix("cpu:"), !chromeTabs.isEmpty else { return nil }
+        return ChromeTabText.mostlyLine(pids: f.pids ?? [], processes: liveSnapshot?.processes ?? [], attribution: chromeTabs)
+    }
+}

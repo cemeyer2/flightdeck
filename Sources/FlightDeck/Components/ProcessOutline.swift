@@ -65,6 +65,8 @@ struct ProcessOutline: NSViewRepresentable {
     @Binding var selection: ProcessIdentity?
     var menu: (ProcessSample) -> NSMenu
     var onOpen: ((ProcessSample) -> Void)? = nil
+    /// Chrome renderers' tabs (live only), shown in the name cell and matched by the filter. Never stored.
+    var tabLabels: [ProcessIdentity: ChromeTabAttribution] = [:]
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -271,7 +273,8 @@ struct ProcessOutline: NSViewRepresentable {
                 roots = sorted(appGroups(Array(next.values)))
             } else if !f.isEmpty || !parent.tree {
                 let q = ProcessQuery(f)
-                roots = sorted(next.values.filter { q.isEmpty || q.matches($0.s) })
+                let tabs = parent.tabLabels   // a renderer also matches its tabs' sites and titles
+                roots = sorted(next.values.filter { q.isEmpty || q.matches($0.s) || tabs[$0.s.identity].map { ChromeTabText.searchText($0).contains(f) } == true })
             } else {
                 // Tree by parent PID. Processes whose parent is launchd (1) or the kernel, or isn't in this sample, are roots.
                 // ppid is a bare PID, so parent lookup is by PID rather than identity.
@@ -394,6 +397,11 @@ struct ProcessOutline: NSViewRepresentable {
                 v.textField?.stringValue = c.text(it.s)
                 v.barColor = NSColor(parent.palette.level(it.s.cpu / 100))
                 return v
+            }
+            if c == .name, it.s.pid > 0, let a = parent.tabLabels[it.s.identity], let label = ChromeTabLabel(a) {   // ChromeTabNameCell.swift
+                let cell = (ov.makeView(withIdentifier: ChromeTabNameCell.reuseID, owner: nil) as? ChromeTabNameCell) ?? ChromeTabNameCell()
+                cell.configure(label: label, icon: icon(for: it.s.path), font: font, tooltip: ChromeTabText.tooltip(a) + "\n" + it.s.name)
+                return cell
             }
             let cell = (ov.makeView(withIdentifier: col.identifier, owner: nil) as? NSTableCellView) ?? makeCell(col.identifier, icon: c == .name)
             cell.textField?.stringValue = c.text(it.s)

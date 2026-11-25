@@ -145,7 +145,10 @@ struct MenuBarPanel: View {
                 Button { dismiss(); AppActions.showMain(navigate: finding.destination, engine: e) } label: {
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
                         Image(systemName: finding.icon).foregroundStyle(p.color(finding.severity)).frame(width: 16)
-                        Text(finding.title).font(.system(size: 12)).lineLimit(2).multilineTextAlignment(.leading)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(finding.title).font(.system(size: 12)).lineLimit(2).multilineTextAlignment(.leading)
+                            if let tabs = e.chromeTabsLine(for: finding) { Text(tabs).font(.system(size: 10)).foregroundStyle(p.dim).lineLimit(1) }
+                        }
                         Spacer(minLength: 0)
                     }.contentShape(Rectangle())
                 }.buttonStyle(.plain)
