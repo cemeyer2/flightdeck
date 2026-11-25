@@ -37,6 +37,17 @@ final class HelperRoutingTests: XCTestCase {
         XCTAssertEqual(out.processes.map(\.identity), [own.identity])
     }
 
+    /// rusage worked but task info was refused: the row is the app's, but its thread count is the helper's.
+    func testWithoutHelperValuesDropsHelperThreadCounts() {
+        var s = BlackBoxTests.base
+        var own = s.processes[0]; own.uid = 501; own.threads = 9
+        var other = own; other.identity = ProcessIdentity(pid: 88, startTime: 5); other.uid = 0; other.threads = 12
+        s.processes = [own, other]
+        let out = s.withoutHelperValues(ownUID: 501)
+        XCTAssertEqual(out.processes.map(\.threads), [9, 0])
+        XCTAssertEqual(out.processes.map(\.identity), [own.identity, other.identity])
+    }
+
     func testCopySummaryCarriesNoContents() {
         let contents = HelperProcessContents(args: ["--token=hunter2"], env: ["SECRET=xyzzy"], cwd: "/private/var/secret")
         let text = ProcessSummaryText.make(helperRow(), details: nil)

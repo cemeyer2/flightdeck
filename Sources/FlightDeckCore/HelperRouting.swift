@@ -6,10 +6,16 @@ import Foundation
 
 public extension Snapshot {
     /// For outputs that must carry no helper data (the web dashboard): drops every process whose counters came from
-    /// the helper. Processes the app measured itself are kept as they are.
-    func withoutHelperValues() -> Snapshot {
+    /// the helper. Processes the app measured itself are kept, except that another user's thread count is zeroed:
+    /// the app can't read it without root (task info is refused), so a nonzero one there came from the helper even
+    /// when the app's own rusage read the rest of the row.
+    func withoutHelperValues(ownUID: UInt32 = getuid()) -> Snapshot {
         var s = self
-        s.processes = s.processes.filter(\.isAppMeasured)
+        s.processes = s.processes.filter(\.isAppMeasured).map { p in
+            var p = p
+            if ownUID != 0, p.uid != ownUID { p.threads = 0 }
+            return p
+        }
         return s
     }
 }
