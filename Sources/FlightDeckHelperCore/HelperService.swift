@@ -145,15 +145,15 @@ public final class HelperService {
         case .memoryFootprint(let id):
             return pausing(id) { .footprint(pid: id.pid) }
         case .listeningSockets:
-            return text(.netstatTCP)
+            return listening()
         case .internetSockets:
             return text(.lsofInternet)
         case .snapshotSizes:
-            return text(.tmutilSnapshots)
+            return parsed(.tmutilSnapshots, "tmutil", HelperParsers.snapshotSizes) { .snapshotSizes($0) }
         case .deviceProfiles:
-            return text(.profilesDevice)
+            return parsed(.profilesDevice, "profiles", HelperParsers.deviceProfiles) { .profiles($0) }
         case .backgroundItems:
-            return text(.sfltoolDumpbtm)
+            return parsed(.sfltoolDumpbtm, "sfltool", HelperParsers.backgroundItems) { .backgroundItems($0) }
         case .hello, .status, .lock, .removeRightAndSettings:
             return refuse(.invalidParameter, "Not a data request.")
         }
@@ -167,6 +167,25 @@ public final class HelperService {
         let result = runner.run(tool())
         guard processes.identity(of: id.pid) == id else { return processChanged() }
         return toolResponse(result) { .toolText($0) }
+    }
+
+    /// netstat as root first (it lists every socket with its process); lsof as root if netstat gave nothing. The
+    /// first line says which, so the app picks the matching parser.
+    private func listening() -> HelperResponse {
+        let tcp = runner.run(.netstatTCP), udp = runner.run(.netstatUDP)
+        if case .output(let t) = tcp, case .output(let u) = udp,
+           !t.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !u.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return .toolText("#netstat\n" + t + "\n" + u)
+        }
+        return toolResponse(runner.run(.lsofListening)) { .toolText("#lsof\n" + $0) }
+    }
+
+    private func parsed<T>(_ tool: HelperTool, _ name: String, _ parse: (String) -> T?,
+                           _ wrap: (T) -> HelperResponse) -> HelperResponse {
+        toolResponse(runner.run(tool)) { out in
+            guard let v = parse(out) else { return refuse(.toolFailed, "couldn't read \(name) output") }
+            return wrap(v)
+        }
     }
 
     private func text(_ tool: HelperTool) -> HelperResponse {

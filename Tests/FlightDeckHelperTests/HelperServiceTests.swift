@@ -209,6 +209,54 @@ final class HelperServiceTests: XCTestCase {
         XCTAssertFalse(settings.agentContents)
     }
 
+    // MARK: Data handlers
+
+    func testListeningPrefersNetstat() {
+        let s = greeted()
+        runner.results[.netstatTCP] = .output("tcp4 0 0 *.22 *.* LISTEN\n")
+        runner.results[.netstatUDP] = .output("udp4 0 0 *.5353 *.*\n")
+        guard case .toolText(let t) = send(s, .listeningSockets, auth: form) else { return XCTFail() }
+        XCTAssertTrue(t.hasPrefix("#netstat\n"))
+        XCTAssertTrue(t.contains("*.22") && t.contains("*.5353"))
+        XCTAssertFalse(runner.calls.contains(.lsofListening))
+    }
+
+    func testListeningFallsBackToLsof() {
+        let s = greeted()
+        runner.results[.netstatTCP] = .output("")
+        runner.results[.netstatUDP] = .output("")
+        runner.results[.lsofListening] = .output("COMMAND PID USER\n")
+        guard case .toolText(let t) = send(s, .listeningSockets, auth: form) else { return XCTFail() }
+        XCTAssertTrue(t.hasPrefix("#lsof\n"))
+    }
+
+    func testBackgroundItemsParsed() {
+        let s = greeted()
+        runner.results[.sfltoolDumpbtm] = .output(HelperFixtures.dumpbtm)
+        guard case .backgroundItems(let items) = send(s, .backgroundItems, auth: form) else { return XCTFail() }
+        XCTAssertEqual(items.count, 2)
+    }
+
+    func testUnparseableProfilesRefused() {
+        let s = greeted()
+        runner.results[.profilesDevice] = .output("garbage")
+        XCTAssertEqual(code(send(s, .deviceProfiles, auth: form)), .toolFailed)
+    }
+
+    func testSnapshotSizesParsed() {
+        let s = greeted()
+        runner.results[.tmutilSnapshots] = .output(HelperFixtures.tmutilSized)
+        guard case .snapshotSizes(let sizes) = send(s, .snapshotSizes, auth: form) else { return XCTFail() }
+        XCTAssertEqual(sizes.count, 2)
+    }
+
+    func testSampleUsesFixedArgs() {
+        let s = greeted()
+        runner.fallback = .output("Call graph:\n")
+        guard case .toolText = send(s, .sampleStacks(id: pid500, seconds: 2), auth: form) else { return XCTFail() }
+        XCTAssertEqual(runner.calls.last, .sample(pid: 500, seconds: 2))
+    }
+
     func testInvalidParameterBeforeAuthorization() {
         let s = greeted()
         XCTAssertEqual(code(send(s, .sampleStacks(id: pid500, seconds: 60), auth: form)), .invalidParameter)

@@ -29,7 +29,8 @@ public enum HelperTool: Sendable, Hashable {
         switch self {
         case .netstatTCP: return ["-anv", "-p", "tcp"]
         case .netstatUDP: return ["-anv", "-p", "udp"]
-        case .lsofListening: return ["-nP", "-iTCP", "-sTCP:LISTEN", "-iUDP"]
+        // -F output, so the app parses it with the same ListeningPorts.parseLsof it uses for its own lsof run.
+        case .lsofListening: return ["-nP", "-iTCP", "-sTCP:LISTEN", "-iUDP", "-FpcPn"]
         case .lsofInternet: return ["-nP", "-i", "-FpcPnT"]   // same as Connections.list
         // No tmutil subcommand was found that sizes local snapshots (checked on macOS 26 without root); this lists
         // them, and HelperParsers.snapshotSizes picks up sizes only if root's output carries them.
