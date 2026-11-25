@@ -113,15 +113,26 @@ final class ChromeTabsTests: XCTestCase {
         XCTAssertNotNil(ChromeTabsMessage.parse(tabsMessage(Array(repeating: tabJSON(), count: 1000))))
         XCTAssertNil(ChromeTabsMessage.parse(tabsMessage(Array(repeating: tabJSON(), count: 1001))))
     }
-    func testValidationRejectsTooManyFrames() {
-        XCTAssertNil(ChromeTabsMessage.parse(tabsMessage([tabJSON(frames: .array(Array(repeating: frameJSON(), count: 201)))])))
+    /// The tab ids that survive parsing a table of one good tab (id 1) and `bad` (id 2), or nil when the table is refused.
+    func survivors(_ bad: JSON) -> [Int]? {
+        guard case .tabs(let t)? = ChromeTabsMessage.parse(tabsMessage([tabJSON(1), bad])) else { return nil }
+        return t.tabs.map(\.tabId)
     }
-    func testValidationRejectsLongStrings() {
-        XCTAssertNotNil(ChromeTabsMessage.parse(tabsMessage([tabJSON(url: String(repeating: "u", count: 8192))])))
-        XCTAssertNil(ChromeTabsMessage.parse(tabsMessage([tabJSON(url: String(repeating: "u", count: 8193))])))
-        XCTAssertNil(ChromeTabsMessage.parse(tabsMessage([tabJSON(frames: [frameJSON(origin: String(repeating: "o", count: 2049))])])))
-        XCTAssertNil(ChromeTabsMessage.parse(tabsMessage([tabJSON(title: String(repeating: "t", count: 2049))])))
-        XCTAssertNil(ChromeTabsMessage.parse(tabsMessage([tabJSON(title: String(repeating: "é", count: 1025))])), "bytes, not characters")
+    func testValidationDropsTabWithTooManyFrames() {
+        XCTAssertEqual(survivors(tabJSON(2, frames: .array(Array(repeating: frameJSON(), count: 200)))), [1, 2])
+        XCTAssertEqual(survivors(tabJSON(2, frames: .array(Array(repeating: frameJSON(), count: 201)))), [1])
+    }
+    func testValidationDropsTabWithLongStrings() {
+        XCTAssertEqual(survivors(tabJSON(2, url: String(repeating: "u", count: 8192))), [1, 2])
+        XCTAssertEqual(survivors(tabJSON(2, url: String(repeating: "u", count: 8193))), [1])
+        XCTAssertEqual(survivors(tabJSON(2, frames: [frameJSON(origin: String(repeating: "o", count: 2049))])), [1])
+        XCTAssertEqual(survivors(tabJSON(2, title: String(repeating: "t", count: 2049))), [1])
+        XCTAssertEqual(survivors(tabJSON(2, title: String(repeating: "é", count: 1025))), [1], "bytes, not characters")
+    }
+    func testValidationOversizedTabDoesntExcuseMalformedOne() {
+        // Size is checked after type, so an over-long value of the wrong type still refuses the whole table.
+        XCTAssertNil(survivors(tabJSON(2.5, url: String(repeating: "u", count: 8193))))
+        XCTAssertNil(survivors(tabJSON(2, frames: [frameJSON(process: "3"), frameJSON(origin: String(repeating: "o", count: 2049))])))
     }
     func testValidationRejectsWrongIntegerTypes() {
         XCTAssertNil(ChromeTabsMessage.parse(tabsMessage([tabJSON(1.5)])))
