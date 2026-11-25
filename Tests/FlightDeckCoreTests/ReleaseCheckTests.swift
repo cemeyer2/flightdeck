@@ -210,4 +210,196 @@ final class ReleaseCheckTests: XCTestCase {
             XCTAssertEqual(ReleaseCheck.shouldRequestPermission(toggledOn: t, alertsEnabled: a, alreadyRequested: r), t && a && !r)
         } } }
     }
+
+    // MARK: Saved state and the response step
+
+    var suite = ""
+    var defaults: UserDefaults!
+    override func setUp() { suite = "ReleaseCheckTests-\(UUID())"; defaults = UserDefaults(suiteName: suite)! }
+    override func tearDown() { defaults.removePersistentDomain(forName: suite) }
+
+    func cached() -> ReleaseCheckState {
+        var s = ReleaseCheckState()
+        s.latest = release("1.7.0"); s.etag = "W/\"abc\""; s.lastCheckedAt = now - 86_400
+        return s
+    }
+
+    func testStateRoundTrip() {
+        var s = ReleaseCheckState()
+        s.lastCheckedAt = now; s.etag = "W/\"abc\""
+        s.latest = ReleaseInfo(tag: "v1.7.0", version: v("1.7.0"), name: nil,
+                               url: URL(string: "https://github.com/cemeyer2/flightdeck/releases/tag/v1.7.0")!, publishedAt: now - 3600)
+        s.lastNotifiedVersion = "1.7.0"; s.retryNotBefore = now + 600; s.lastError = "Couldn't check: offline"
+        s.permissionRequested = true
+        s.save(to: defaults)
+        XCTAssertEqual(ReleaseCheckState.load(from: defaults), s)
+        // nil fields remove their keys
+        ReleaseCheckState().save(to: defaults)
+        XCTAssertEqual(ReleaseCheckState.load(from: defaults), ReleaseCheckState())
+        XCTAssertNil(defaults.object(forKey: "updateCheck.etag"))
+    }
+
+    func testLoadDropsInvalidCacheAndETag() {
+        defaults.set("v1.7.0", forKey: "updateCheck.latestTag")
+        defaults.set("https://evil.example/x", forKey: "updateCheck.latestURL")
+        defaults.set("W/\"abc\"", forKey: "updateCheck.etag")
+        let s = ReleaseCheckState.load(from: defaults)
+        XCTAssertNil(s.latest)
+        XCTAssertNil(s.etag)
+    }
+
+    func testMarkNotifiedOnlyWhenDelivered() {
+        var s = cached()
+        let installed = v("1.6.0")
+        let first = ReleaseCheck.notice(latest: s.latest, installed: installed, lastNotified: s.lastNotifiedVersion, alertsEnabled: true)!
+        s.markNotified(first, delivered: false)
+        XCTAssertNil(s.lastNotifiedVersion)
+        // Alerts off: no notice at all, and nothing recorded.
+        XCTAssertNil(ReleaseCheck.notice(latest: s.latest, installed: installed, lastNotified: s.lastNotifiedVersion, alertsEnabled: false))
+        // Alerts turned on later: told once.
+        let later = ReleaseCheck.notice(latest: s.latest, installed: installed, lastNotified: s.lastNotifiedVersion, alertsEnabled: true)!
+        s.markNotified(later, delivered: true)
+        XCTAssertEqual(s.lastNotifiedVersion, "1.7.0")
+        XCTAssertNil(ReleaseCheck.notice(latest: s.latest, installed: installed, lastNotified: s.lastNotifiedVersion, alertsEnabled: true))
+    }
+
+    func step(_ s: ReleaseCheckState, _ r: ReleaseHTTPResponse) -> (state: ReleaseCheckState, outcome: ReleaseStepOutcome) {
+        ReleaseCheck.next(state: s, response: r, now: now)
+    }
+
+    func testStep200StoresResultAndETag() {
+        let (s, o) = step(ReleaseCheckState(), .http(status: 200, headers: ["etag": "W/\"abc\""], body: Self.fixture()))
+        XCTAssertEqual(s.latest?.version, v("1.7.0"))
+        XCTAssertEqual(s.etag, "W/\"abc\"")
+        XCTAssertEqual(s.lastCheckedAt, now)
+        XCTAssertNil(s.lastError)
+        XCTAssertEqual(o, .done)
+    }
+
+    func testStep200NoStableReleaseKeepsLatestClearsETag() {
+        let (s, o) = step(cached(), .http(status: 200, headers: ["ETag": "W/\"new\""], body: Self.fixture(tag: "v1.8.0-beta.1")))
+        XCTAssertEqual(s.latest, release("1.7.0"))
+        XCTAssertNil(s.etag)
+        XCTAssertNil(s.lastError)
+        XCTAssertEqual(o, .done)
+    }
+
+    func testStep304WithCacheReuses() {
+        var start = cached(); start.lastError = "Couldn't check: offline"
+        let (s, o) = step(start, .http(status: 304, headers: [:], body: Data()))
+        XCTAssertEqual(s.latest, start.latest)
+        XCTAssertEqual(s.etag, start.etag)
+        XCTAssertNil(s.lastError)
+        XCTAssertEqual(s.lastCheckedAt, now)
+        XCTAssertEqual(o, .done)
+    }
+
+    func testStep304WithoutCacheRetriesOnce() {
+        var start = ReleaseCheckState(); start.etag = "W/\"abc\""
+        let (s, o) = step(start, .http(status: 304, headers: [:], body: Data()))
+        XCTAssertEqual(o, .retryWithoutETag)
+        XCTAssertNil(s.etag)
+    }
+
+    func testStepDecodeFailureClearsETag() {
+        let (s, _) = step(cached(), .http(status: 200, headers: ["ETag": "W/\"x\""], body: Data("<html>".utf8)))
+        XCTAssertNil(s.etag)
+        XCTAssertNil(s.latest)
+        XCTAssertEqual(s.lastError, "Couldn't read the latest release")
+    }
+
+    func testStepRateLimitKeepsCacheAndSetsRetry() {
+        let (s, o) = step(cached(), .http(status: 429, headers: ["Retry-After": "120"], body: Data()))
+        XCTAssertEqual(s.retryNotBefore, now + 120)
+        XCTAssertEqual(s.lastError, "GitHub rate limit; will retry later")
+        XCTAssertEqual(s.latest, release("1.7.0"))
+        XCTAssertEqual(s.etag, "W/\"abc\"")
+        XCTAssertEqual(o, .done)
+    }
+
+    func testStepPlain403IsOrdinaryError() {
+        let (s, _) = step(cached(), .http(status: 403, headers: [:], body: Data()))
+        XCTAssertEqual(s.lastError, "Couldn't check: GitHub returned 403")
+        XCTAssertNil(s.retryNotBefore)
+        XCTAssertEqual(s.latest, release("1.7.0"))
+    }
+
+    func testStep404IsUnreadable() {
+        let (s, _) = step(cached(), .http(status: 404, headers: [:], body: Data()))
+        XCTAssertEqual(s.lastError, "Couldn't read the latest release")
+        XCTAssertEqual(s.latest, release("1.7.0"))
+        XCTAssertEqual(s.lastCheckedAt, now)
+    }
+
+    func testStepOfflineKeepsLastGood() {
+        let (s, _) = step(cached(), .transport(.notConnectedToInternet))
+        XCTAssertEqual(s.lastError, "Couldn't check: offline")
+        XCTAssertEqual(s.latest, release("1.7.0"))
+        XCTAssertEqual(s.lastCheckedAt, now)
+        XCTAssertEqual(step(cached(), .transport(.timedOut)).state.lastError, "Couldn't check: timed out")
+        XCTAssertEqual(step(cached(), .transport(.dnsLookupFailed)).state.lastError, "Couldn't check: GitHub not found (DNS)")
+        XCTAssertEqual(step(cached(), .transport(.serverCertificateUntrusted)).state.lastError, "Couldn't check: secure connection failed")
+        XCTAssertEqual(step(cached(), .transport(.badServerResponse)).state.lastError, "Couldn't check: couldn't reach GitHub")
+    }
+
+    func testStatusText() {
+        func t(_ s: ReleaseCheckState, installed: String? = "1.6.0", demo: Bool = false) -> String {
+            ReleaseCheck.statusText(state: s, installed: installed.map(v), demo: demo)
+        }
+        XCTAssertEqual(t(cached(), demo: true), "Not available in demo mode")
+        XCTAssertEqual(t(cached(), installed: nil), "Version unknown (development build); update checks are off")
+        var err = cached(); err.lastError = "Couldn't check: offline"
+        XCTAssertEqual(t(err), "Couldn't check: offline")
+        XCTAssertEqual(t(cached()), "FlightDeck 1.7.0 is available")
+        XCTAssertEqual(t(ReleaseCheckState()), "Never checked")
+        XCTAssertEqual(t(cached(), installed: "1.7.0"), "Up to date")
+    }
+
+    // MARK: The one GET
+
+    func testClientSendsPlainRequest() async {
+        let body = String(decoding: Self.fixture(), as: UTF8.self)
+        ReleaseStub.set { _ in (200, ["ETag": "W/\"abc\""], body) }
+        let client = ReleaseCheckClient(timeout: 5, protocolClasses: [ReleaseStub.self])
+        let r = await client.fetchLatest(etag: nil)
+        guard case .http(let status, let headers, let data) = r else { return XCTFail("\(r)") }
+        XCTAssertEqual(status, 200)
+        XCTAssertEqual(headers.first { $0.key.lowercased() == "etag" }?.value, "W/\"abc\"")
+        XCTAssertEqual(data, Self.fixture())
+        XCTAssertEqual(ReleaseStub.log.count, 1)
+        let req = ReleaseStub.log[0]
+        XCTAssertEqual(req.url?.absoluteString, "https://api.github.com/repos/cemeyer2/flightdeck/releases/latest")
+        XCTAssertEqual(req.value(forHTTPHeaderField: "User-Agent"), "FlightDeck")
+        XCTAssertEqual(req.value(forHTTPHeaderField: "Accept"), "application/vnd.github+json")
+        XCTAssertEqual(req.value(forHTTPHeaderField: "X-GitHub-Api-Version"), "2022-11-28")
+        XCTAssertNil(req.value(forHTTPHeaderField: "If-None-Match"))
+        XCTAssertNil(req.value(forHTTPHeaderField: "Cookie"))
+
+        ReleaseStub.set { _ in (304, [:], "") }
+        _ = await client.fetchLatest(etag: "W/\"abc\"")
+        XCTAssertEqual(ReleaseStub.log.count, 1)
+        XCTAssertEqual(ReleaseStub.log[0].value(forHTTPHeaderField: "If-None-Match"), "W/\"abc\"")
+    }
+}
+
+/// Answers every request from `route` and records requests (the same shape as `UniFiStub`, kept separate).
+final class ReleaseStub: URLProtocol, @unchecked Sendable {
+    typealias Reply = (status: Int, headers: [String: String], body: String)
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var _route: (@Sendable (URLRequest) -> Reply)?
+    nonisolated(unsafe) private static var _log: [URLRequest] = []
+    static func set(_ r: @escaping @Sendable (URLRequest) -> Reply) { lock.lock(); _route = r; _log = []; lock.unlock() }
+    static var log: [URLRequest] { lock.lock(); defer { lock.unlock() }; return _log }
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        Self.lock.lock(); Self._log.append(request); let route = Self._route; Self.lock.unlock()
+        let r: Reply = route?(request) ?? (404, [:], "")
+        let resp = HTTPURLResponse(url: request.url!, statusCode: r.status, httpVersion: "HTTP/1.1", headerFields: r.headers)!
+        client?.urlProtocol(self, didReceive: resp, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(r.body.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
 }
