@@ -231,6 +231,8 @@ struct WebDashboardSection: View {
     @AppStorage(WebDashboardEndpoint.advancedKey) private var advanced = false
     @ObservedObject private var endpoint = WebDashboardEndpoint.shared
     @State private var note: String?
+    @State private var unifiNetworks: [UniFiNetwork] = []
+    @State private var unifiError: String?
 
     static let warning = "No password and no encryption. Anyone on an allowed network can see this Mac's readings, findings and the names of running apps. Read-only: nothing can be changed from the browser."
     static let advancedWarning = "Addresses outside your local network can see this Mac's readings and running apps over unencrypted HTTP with no password. Anyone between you and them can read it too."
@@ -244,7 +246,8 @@ struct WebDashboardSection: View {
     var body: some View {
         let list = WebAllowlist.parse(allow), ctx = ctx
         let local = WebSuggestions.local(ctx)
-        let suggestions = WebSuggestions.visible(local + [WebSuggestions.tailnet(ctx)].compactMap { $0 }, current: list)
+        let suggestions = WebSuggestions.visible(local + WebSuggestions.unifi(unifiNetworks, context: ctx)
+                                                 + [WebSuggestions.tailnet(ctx)].compactMap { $0 }, current: list)
         Section("Web dashboard") {
             Toggle("Serve a live dashboard to browsers on the local network", isOn: $enabled)
                 .disabled(Demo.isEnabled)
@@ -280,6 +283,9 @@ struct WebDashboardSection: View {
                     Button("Add") { add(s) }.disabled(!enabled)
                 }
             }
+            if let unifiError {
+                Text("Couldn't read networks from UniFi: \(unifiError)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
             if let note {
                 HStack(alignment: .firstTextBaseline) {
                     Text(note).font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
@@ -312,10 +318,23 @@ struct WebDashboardSection: View {
             }
         }
         .onAppear { endpoint.refreshContext() }
+        .task { await readUniFiNetworks() }
         .onChange(of: enabled) { endpoint.apply() }
         .onChange(of: port) { endpoint.apply() }
         .onChange(of: allow) { endpoint.settingsChanged() }
         .onChange(of: advanced) { endpoint.settingsChanged() }
+    }
+
+    /// The UniFi console's networks, read once each time the section is shown (no polling), if UniFi is set up.
+    private func readUniFiNetworks() async {
+        let model = UniFiModel.shared
+        guard !Demo.isEnabled, let c = model.config, let creds = model.credentials(for: c) else { return }
+        do {
+            unifiNetworks = try await UniFiAPIClient(config: c, credentials: creds).networks()
+            unifiError = nil
+        } catch {
+            unifiError = error.localizedDescription
+        }
     }
 
     private func add(_ s: WebSuggestion) {
