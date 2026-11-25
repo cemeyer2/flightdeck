@@ -54,12 +54,14 @@ public enum WebAccess {
         allowlist.entries.contains { !isTailnet($0.prefix) && $0.prefix.contains(remote) }
     }
 
-    /// How Settings labels an entry. The two "ignored" labels mean the entry currently matches nothing.
+    /// How Settings labels an entry. The two "ignored" labels mean the entry currently matches nothing; `localOnly` is
+    /// a broader entry (0.0.0.0/0) that, with Advanced off, admits only its local part.
     public enum EntryLabel: Equatable, Sendable {
-        case local, tailnet, tailnetIgnored, notLocal, notLocalIgnored
+        case local, localOnly, tailnet, tailnetIgnored, notLocal, notLocalIgnored
         public var text: String {
             switch self {
             case .local: return "local network"
+            case .localOnly: return "Allows local devices only (turn on Advanced to allow the rest)"
             case .tailnet: return "tailnet"
             case .tailnetIgnored: return "Tailscale not detected — ignored"
             case .notLocal: return "outside the local network"
@@ -71,8 +73,11 @@ public enum WebAccess {
 
     public static func label(_ p: WebPrefix, context: WebNetworkContext) -> EntryLabel {
         if isTailnet(p) { return context.tailscaleInterfaceUp ? .tailnet : .tailnetIgnored }
-        if localRanges.contains(where: { $0.contains(p) }) || context.lanPrefixes.contains(where: { $0.contains(p) }) { return .local }
-        return context.advanced ? .notLocal : .notLocalIgnored
+        let local = localRanges + context.lanPrefixes
+        if local.contains(where: { $0.contains(p) }) { return .local }
+        if context.advanced { return .notLocal }
+        // Prefixes overlap only by nesting, so an entry reaching into a local range contains it.
+        return local.contains(where: { p.contains($0) }) ? .localOnly : .notLocalIgnored
     }
 }
 
