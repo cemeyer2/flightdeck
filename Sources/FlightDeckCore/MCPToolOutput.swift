@@ -19,9 +19,10 @@ extension MCPTools {
 
     /// A restricted process (another user's) reports placeholder zeros when the kernel refused its counters.
     /// The kernel refused this process's task counters: CPU, threads, wake-ups and disk I/O are placeholders.
-    static func unreadable(_ p: ProcessSample) -> Bool { p.restricted && p.cpuTime == 0 }
+    /// Counters the root helper filled in are real readings, not placeholders.
+    static func unreadable(_ p: ProcessSample) -> Bool { p.restricted && p.cpuTime == 0 && p.source != .helper }
     static func cpu(_ p: ProcessSample) -> Double? { unreadable(p) ? nil : p.cpu }
-    static func memory(_ p: ProcessSample) -> Double? { p.restricted && p.memory == 0 ? nil : Double(p.memory) }
+    static func memory(_ p: ProcessSample) -> Double? { p.restricted && p.memory == 0 && p.source != .helper ? nil : Double(p.memory) }
 
     static func finding(_ f: Finding) -> JSON {
         ["severity": F.severity(f.severity), "title": .str(f.title), "detail": f.detail.map(JSON.str), "since": F.time(f.since),
