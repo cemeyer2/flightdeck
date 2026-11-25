@@ -387,11 +387,8 @@ struct InspectorView: View {
     /// Plain-text summary for the clipboard (Actions › Copy Summary).
     func summaryText(_ s: ProcessSample?) -> String {
         guard let s else { return "" }
-        var out = "\(s.name) (PID \(s.pid), parent \(s.ppid), user \(s.user))\n\(s.path)\n"
-        out += String(format: "CPU %.1f%%, memory %@, threads %d, CPU time %@\n", s.cpu, Fmt.bytes(s.memory), s.threads, Fmt.duration(s.cpuTime))
-        if let a = model.details?.arguments.value { out += "Arguments: \(a.joined(separator: " "))\n" }
-        if let sig = model.details?.signature { out += "Signature: \(sig.summary)\n" }
-        return out
+        // Never the helper's contents of another user's process (they are live-only).
+        return ProcessSummaryText.make(s, details: model.details)
     }
 }
 
