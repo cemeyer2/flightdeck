@@ -284,6 +284,7 @@ struct SettingsView: View {
                 MCPSection()
                 ChromeTabsSettingsSection()
                 WebDashboardSection()
+                HelperSettingsSection()
             }
             .tabItem { Label("Integrations", systemImage: "puzzlepiece.extension") }
             tab { AboutSettingsSection() }

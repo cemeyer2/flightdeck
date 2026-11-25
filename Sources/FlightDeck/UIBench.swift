@@ -239,6 +239,9 @@ enum UIBench {
             ForEach(Array(DemoChromeTabs.labels.enumerated()), id: \.offset) { _, a in if let l = ChromeTabLabel(a) { ChromeTabHeaderName(label: l) } }
             ChromeTabsInspectorSection(attribution: DemoChromeTabs.labels[1])
         })
+        // The helper's Settings section as this build shows it (ad-hoc builds: "Needs a signed build").
+        // (A VStack, not a Form: a Form scrolls, and scroll views draw empty in off-screen captures.)
+        out("settings-helper", width: 600, height: 400, VStack(alignment: .leading, spacing: 8) { HelperSettingsSection() }.padding())
         // Camera & Mic: invented sessions (no listeners, nothing written) in each range, then this Mac: its saved history,
         // read-only, and one reading of the devices (never opens a camera or microphone). Models are built first.
         let cmDemo = CameraMicModel(preview: DemoCameraMic.sessions(now: Date()), live: DemoCameraMic.live(now: Date()))

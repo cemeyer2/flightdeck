@@ -64,7 +64,8 @@ final class StorageModel: ObservableObject {
         if demo { breakdown = .success(Demo.storageBreakdown()); return }
         loadingBreakdown = true
         Task {
-            breakdown = await Task.detached(priority: .userInitiated) { StorageBreakdownReader.read() }.value
+            let helper = HelperModel.currentSession()
+            breakdown = await Task.detached(priority: .userInitiated) { StorageBreakdownReader.read(helper: helper) }.value
             loadingBreakdown = false
         }
     }

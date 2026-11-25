@@ -41,6 +41,8 @@ public struct LocalSnapshot: Sendable, Hashable, Identifiable {
     public var kind: Kind
     /// Parsed from the Time Machine snapshot name (local time); nil for the other kinds.
     public var date: Date?
+    /// Bytes this snapshot holds, from the root helper (macOS reports snapshot sizes only to administrators).
+    public var size: UInt64? = nil
     public init(name: String, kind: Kind, date: Date?) { self.name = name; self.kind = kind; self.date = date }
 }
 
@@ -127,6 +129,8 @@ public struct StorageBreakdown: Sendable {
     /// Nil when tmutil couldn't list them; `snapshotNote` then says why.
     public var snapshots: [LocalSnapshot]?
     public var snapshotNote: String?
+    /// Snapshot sizes came from the root helper.
+    public var snapshotsViaHelper: Bool = false
     public init(container: APFSContainerUsage, volumeName: String?, purgeable: UInt64?, snapshots: [LocalSnapshot]?, snapshotNote: String? = nil) {
         self.container = container; self.volumeName = volumeName; self.purgeable = purgeable
         self.snapshots = snapshots; self.snapshotNote = snapshotNote

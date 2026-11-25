@@ -1,4 +1,5 @@
 import Foundation
+import FlightDeckHelperProtocol
 // Output of the "right now" MCP tools: get_status, list_processes, get_process and sample_stacks. The history tools
 // are in MCPHistoryOutput.swift. See MCPTools.swift for the formatting conventions.
 
@@ -19,9 +20,10 @@ extension MCPTools {
 
     /// A restricted process (another user's) reports placeholder zeros when the kernel refused its counters.
     /// The kernel refused this process's task counters: CPU, threads, wake-ups and disk I/O are placeholders.
-    static func unreadable(_ p: ProcessSample) -> Bool { p.restricted && p.cpuTime == 0 }
+    /// Counters the root helper filled in are real readings, not placeholders.
+    static func unreadable(_ p: ProcessSample) -> Bool { p.restricted && p.cpuTime == 0 && p.source != .helper }
     static func cpu(_ p: ProcessSample) -> Double? { unreadable(p) ? nil : p.cpu }
-    static func memory(_ p: ProcessSample) -> Double? { p.restricted && p.memory == 0 ? nil : Double(p.memory) }
+    static func memory(_ p: ProcessSample) -> Double? { p.restricted && p.memory == 0 && p.source != .helper ? nil : Double(p.memory) }
 
     static func finding(_ f: Finding, tabs: ChromeTabsView? = nil) -> JSON {
         ["severity": F.severity(f.severity), "title": .str(f.title), "detail": f.detail.map(JSON.str), "since": F.time(f.since),
@@ -103,6 +105,7 @@ extension MCPTools {
         let filter = try a.string("filter") ?? ""
         let byApp = try a.bool("by_app")
         guard let s = await source.snapshot() else { throw noSample() }
+        let helper = await source.helperAccess()
         let q = ProcessQuery(filter)
         let procs = s.processes.filter(q.matches)
         // Larger first; nil (unmeasured) always last, whatever the direction.
@@ -128,7 +131,7 @@ extension MCPTools {
             }
             return object([("time", F.time(s.time)), ("apps", .int(apps.count)), ("shown", .int(rows.count)), ("sort", .str(sort)),
                            ("columns", ["app", "processes", "cpu_percent", "memory", "energy_w", "gpu_percent", "disk", "network", "wakeups_per_s", "pids"]),
-                           ("rows", .array(rows))])
+                           ("rows", .array(rows))] + helperPairs(helper))
         }
         let sorted = procs.sorted { x, y in
             switch sort {
@@ -149,7 +152,7 @@ extension MCPTools {
             if p.notResponding == true { flags.append("not responding") }
             if p.powerAssertions != nil { flags.append("keeps Mac awake") }
             if p.translated == true { flags.append("Intel (Rosetta)") }
-            if p.restricted { flags.append("restricted") }
+            if p.restricted { flags.append(p.source == .helper ? "via helper" : "restricted") }
             return [.int(Int(p.pid)), .str(p.name), .str(p.user), Self.cpu(p).map(F.r1) ?? .null, Self.memory(p).map(F.bytes) ?? .null,
                     p.energyWatts.map(F.r1) ?? .null, p.gpu.map(F.r1) ?? .null, Self.unreadable(p) ? .null : F.rate(p.diskReadBps + p.diskWriteBps),
                     p.network.map { F.rate($0.inBps + $0.outBps) } ?? .null, Self.unreadable(p) ? .null : F.r1(p.wakeups),
@@ -162,7 +165,7 @@ extension MCPTools {
         return object([("time", F.time(s.time)), ("processes", .int(s.processes.count)), ("matched", .int(procs.count)),
                        ("shown", .int(rows.count)), ("sort", .str(sort)),
                        ("columns", .strings(["pid", "name", "user", "cpu_percent", "memory", "energy_w", "gpu_percent", "disk", "network", "wakeups_per_s", "threads", "flags"] + (tabs == nil ? [] : ["chrome_tabs"]))),
-                       ("rows", .array(tabRows)), ("chrome_tabs", tabs == nil ? ChromeTabsView.unavailable : nil)])
+                       ("rows", .array(tabRows)), ("chrome_tabs", tabs == nil ? ChromeTabsView.unavailable : nil)] + helperPairs(helper))
     }
 
     // MARK: get_process
@@ -187,6 +190,7 @@ extension MCPTools {
         let inspect = inspector
         // Signature checks and the fd scan are slow-ish blocking calls; keep them off the caller's executor.
         let d = await Task.detached(priority: .userInitiated) { inspect(pid, p.path) }.value
+        let helper = await source.helperAccess()
         func measured<T>(_ m: Measured<T>, _ f: (T) -> JSON) -> JSON {
             switch m { case .value(let v): return f(v); case .unavailable(let r): return F.unavailable(r) }
         }
@@ -238,7 +242,9 @@ extension MCPTools {
                 })
             }))
         }
-        return object(pairs)
+        if p.uid != ownUID { await applyHelperContents(&pairs, p, include: include, access: helper) }
+        if p.source == .helper { pairs.append(("counters_from", .str("helper"))) }   // "source" is the data source line
+        return object(pairs + helperPairs(helper))
     }
 
     // MARK: sample_stacks
@@ -252,15 +258,53 @@ extension MCPTools {
         }
         // Without root, `sample` can only attach to the user's own processes; refusing up front gives a clear answer
         // and keeps this tool from probing anything else.
-        guard p.uid == ownUID else {
-            throw ArgError(message: "PID \(pid) (\(p.name)) belongs to \(p.user); only your own processes can be sampled.")
+        let helper = await source.helperAccess()
+        let report: String
+        if p.uid == ownUID {
+            let sampler = stackSampler
+            report = await Task.detached(priority: .userInitiated) { sampler(pid, seconds) }.value
+        } else {
+            // Another user's or a root process: only through the helper, only with agent access to contents on, and
+            // only because this call asked for it (never automatically).
+            let refused = "PID \(pid) (\(p.name)) belongs to \(p.user); only your own processes can be sampled"
+            guard helper.contentsAllowed else {
+                throw ArgError(message: "\(refused) (\(helper.state == .unlocked ? Self.contentsOffNote : Self.unlockNote)).")
+            }
+            switch await source.helperSample(p.identity, seconds: seconds) {
+            case .success(let r)?: report = r
+            case .failure(let r)?: throw ArgError(message: r.message)
+            case nil: throw ArgError(message: "\(refused) (\(Self.unlockNote)).")
+            }
         }
-        let sampler = stackSampler
-        let report = await Task.detached(priority: .userInitiated) { sampler(pid, seconds) }.value
         guard report.contains("Call graph") || report.contains("Thread_") else { throw ArgError(message: String(report.prefix(500))) }
         return object([("pid", .int(Int(pid))), ("name", .str(p.name)), ("seconds", .int(seconds)),
                        ("summary", .str(StackSummary.summarize(report) ?? "No main-thread call graph found in the sample.")),
-                       ("main_thread", .strings(Self.mainThreadLines(report)))])
+                       ("main_thread", .strings(Self.mainThreadLines(report)))] + helperPairs(helper))
+    }
+
+    /// get_process on another user's process: arguments, working folder and open files come from the helper only
+    /// with agent access to contents on; unlocked with it off, they say how to turn it on; otherwise today's values.
+    func applyHelperContents(_ pairs: inout [(String, JSON?)], _ p: ProcessSample, include: Set<String>, access: HelperMCPAccess) async {
+        func set(_ key: String, _ v: JSON?) {
+            if let i = pairs.firstIndex(where: { $0.0 == key }) { pairs[i].1 = v } else { pairs.append((key, v)) }
+        }
+        guard access.state == .unlocked else { return }
+        var keys = ["cwd", "open_files"]
+        if include.contains("arguments") { keys.append("arguments") }
+        if include.contains("files") { keys.append("files") }
+        guard access.agentContents else {
+            for k in keys { set(k, F.unavailable(Self.contentsOffNote)) }
+            return
+        }
+        var parts: Set<DetailPart> = [.cwd, .files]
+        if include.contains("arguments") { parts.insert(.args) }
+        guard let c = await source.helperContents(p.identity, parts: parts) else { return }
+        if let cwd = c.cwd { set("cwd", .str(cwd)) }
+        if let files = c.files {
+            set("open_files", .int(files.count))
+            if include.contains("files") { set("files", .array(files.prefix(100).map { .str($0) })) }
+        }
+        if include.contains("arguments"), let args = c.args { set("arguments", .strings(args.prefix(64).map { String($0.prefix(500)) })) }
     }
 
     /// The first lines of the main thread's call graph from `sample` output (its heaviest path comes first), trimmed

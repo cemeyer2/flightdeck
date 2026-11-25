@@ -12,9 +12,16 @@ public enum ChangeDiff {
     public static func diff(old: Inventory, new: Inventory, home: String = NSHomeDirectory()) -> [ChangeEvent] {
         var out: [ChangeEvent] = []
         let readBefore = Set(ChangeCategory.allCases.filter { old.unavailable[$0] == nil })
+        // Helper-only items are compared only when both inventories include them: the helper being unlocked for the
+        // first time, or turned off, is not every Mac-wide profile and background item being added or removed.
+        let skipProfiles = (old.helperProfiles ?? false) != (new.helperProfiles ?? false)
+        let skipBackground = (old.helperBackgroundItems ?? false) != (new.helperBackgroundItems ?? false)
+        func compared(_ i: InventoryItem) -> Bool {
+            !(skipProfiles && ChangeReaders.isHelperProfile(i)) && !(skipBackground && ChangeReaders.isBackgroundItem(i))
+        }
         for c in ChangeCategory.allCases where readBefore.contains(c) && new.unavailable[c] == nil {
-            let a = Dictionary(old.items(c).map { ($0.key, $0) }, uniquingKeysWith: { x, _ in x })
-            let b = Dictionary(new.items(c).map { ($0.key, $0) }, uniquingKeysWith: { x, _ in x })
+            let a = Dictionary(old.items(c).filter(compared).map { ($0.key, $0) }, uniquingKeysWith: { x, _ in x })
+            let b = Dictionary(new.items(c).filter(compared).map { ($0.key, $0) }, uniquingKeysWith: { x, _ in x })
             for (k, n) in b {
                 if let o = a[k] {
                     if let e = changed(o, n, old: old, new: new, home: home) { out.append(e) }

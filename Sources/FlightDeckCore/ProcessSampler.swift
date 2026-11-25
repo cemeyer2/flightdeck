@@ -1,5 +1,6 @@
 import Foundation
 import Darwin
+import FlightDeckHelperProtocol
 
 // The per-process table: enumerates every PID with libproc (proc_listallpids / proc_pidinfo / proc_pid_rusage) and
 // turns cumulative kernel counters into per-second rates by diffing against the previous sample. Sampler
@@ -55,15 +56,37 @@ public struct ProcessSample: Codable, Sendable, Identifiable, Hashable {
     public var translated: Bool? = nil
     /// Power assertions this process holds that keep the Mac or display awake (nil = none).
     public var powerAssertions: [PowerAssertion]? = nil
+    /// Where the counters came from: nil = measured by the app (old traces decode as nil); .helper = filled by the
+    /// optional root helper because the app couldn't read this process itself. `restricted` keeps meaning "the app
+    /// couldn't read it", so a helper-filled row is restricted with source .helper.
+    public var source: ValueSource? = nil
     public var startDate: Date { Date(timeIntervalSince1970: Double(identity.startTime) / 1e6) }
 }
+
+public enum ValueSource: String, Codable, Sendable { case app, helper }
+
+public extension ProcessSample {
+    var isAppMeasured: Bool { source != .helper }
+    /// No usable counters: the app couldn't read the process and the helper didn't fill it in.
+    var valuesUnreadable: Bool { restricted && source != .helper }
+}
+
+/// Counters for processes the app couldn't read itself (the root helper's session). nil = no values this tick.
+public protocol HelperRusageProviding: AnyObject {
+    func rusage(for ids: [ProcessIdentity]) -> [ProcessIdentity: HelperRusage]?
+}
+extension HelperSession: HelperRusageProviding {}
+
+/// One process's cumulative counters as read in the gather pass, before rates. CPU in ns, disk in bytes, energy in
+/// nanojoules, wakeups as a count; `footprint` is the Memory value (phys footprint, or resident size as fallback).
+struct RawCounters: Equatable { var cpuNs, r, w, energy, wake, footprint: UInt64; var threads: Int; var ruOK: Bool }
 
 /// Produces the process list each tick. Stateful (it remembers the previous counters to compute rates) and not
 /// thread-safe: owned by Sampler and only called on the app's sampling queue.
 public final class ProcessSampler {
     /// Cumulative counters from the previous sample, used to compute deltas. CPU is already converted to ns;
     /// disk in bytes, energy in nanojoules, wakeups as a count.
-    struct Prev { var cpuNs: UInt64; var r: UInt64; var w: UInt64; var energy: UInt64; var wake: UInt64 }
+    struct Prev { var cpuNs: UInt64; var r: UInt64; var w: UInt64; var energy: UInt64; var wake: UInt64; var source: ValueSource = .app }
     private var prev: [ProcessIdentity: Prev] = [:]
     private var lastTime: Date?
     private var userCache: [UInt32: String] = [:]
@@ -90,7 +113,32 @@ public final class ProcessSampler {
     }()
     /// Whether FlightDeck lists itself. Engine sets this from the user's preference before each sample.
     public var includeSelf = true
+    /// The root helper, while unlocked (Engine sets it; nil otherwise). Asked once per sample, only about the
+    /// processes whose task info the app was refused.
+    public var helper: HelperRusageProviding? = nil
     public init() {}
+
+    /// Helper values fill only what the app couldn't read; app-measured values are never overwritten.
+    static func merge(app: RawCounters, taskRefused: Bool, helper: HelperRusage?) -> (RawCounters, ValueSource) {
+        guard taskRefused, let h = helper else { return (app, .app) }
+        var out = app
+        // rusage worked: the app's counters stand, and only the thread count (task info) comes from the helper,
+        // which doesn't touch any rate, so the source stays .app.
+        if app.ruOK {
+            if let t = h.threads { out.threads = t }
+            return (out, .app)
+        }
+        out = RawCounters(cpuNs: h.cpuNs, r: h.diskRead, w: h.diskWritten, energy: h.energyNJ, wake: h.idleWakeups,
+                          footprint: h.physFootprint, threads: h.threads ?? app.threads, ruOK: true)
+        return (out, .helper)
+    }
+
+    /// The previous counters to diff against, or nil when the source changed (the rate restarts, as for a new
+    /// process, instead of dividing a lifetime of CPU time by one tick on unlock, lock or a helper dropout).
+    static func rateBasis(_ prev: Prev?, source: ValueSource) -> Prev? {
+        guard let prev, prev.source == source else { return nil }
+        return prev
+    }
 
     /// Mach ticks to nanoseconds. Wrapping multiply so a pathological counter can't trap; real values are far below
     /// the overflow point.
@@ -147,6 +195,12 @@ public final class ProcessSampler {
         var next: [ProcessIdentity: Prev] = [:]
         var out: [ProcessSample] = []
         let me = getpid()
+        // Gather pass: read every process's counters. Rates are computed in a second pass so counters the helper
+        // fills in for refused processes are merged before any rate is derived from them.
+        struct Row { var ident: ProcessIdentity; var bsd: proc_bsdinfo; var restricted: Bool; var raw: RawCounters }
+        var rows: [Row] = []
+        rows.reserveCapacity(prev.count + 64)
+        var refused: [ProcessIdentity] = []
         for pid in Self.allPIDs() {
             if !includeSelf && pid == me { continue }
             // Try the richest query first. PROC_PIDTASKALLINFO (BSD info + task info: threads, resident size, CPU
@@ -196,8 +250,27 @@ public final class ProcessSampler {
             // with no rusage gets 0 here (shown as restricted in the UI rather than as a real idle process).
             let cpuNs: UInt64 = ruOK ? ns(ru.ri_user_time &+ ru.ri_system_time)
                 : (restricted ? 0 : ns(all.ptinfo.pti_total_user &+ all.ptinfo.pti_total_system))
-            let cur = Prev(cpuNs: cpuNs, r: ruOK ? ru.ri_diskio_bytesread : 0, w: ruOK ? ru.ri_diskio_byteswritten : 0,
-                           energy: ruOK ? ru.ri_energy_nj : 0, wake: ruOK ? ru.ri_pkg_idle_wkups : 0)
+            // Memory is the physical footprint (what Activity Monitor's Memory column shows), falling back to resident
+            // size from task info. Threads are only available from task info, so restricted processes report 0.
+            let raw = RawCounters(cpuNs: cpuNs, r: ruOK ? ru.ri_diskio_bytesread : 0, w: ruOK ? ru.ri_diskio_byteswritten : 0,
+                                  energy: ruOK ? ru.ri_energy_nj : 0, wake: ruOK ? ru.ri_pkg_idle_wkups : 0,
+                                  footprint: ruOK ? ru.ri_phys_footprint : (restricted ? 0 : all.ptinfo.pti_resident_size),
+                                  threads: restricted ? 0 : Int(all.ptinfo.pti_threadnum), ruOK: ruOK)
+            rows.append(Row(ident: ident, bsd: bsd, restricted: restricted, raw: raw))
+            if restricted { refused.append(ident) }
+        }
+
+        // One batched helper call per sample, only for the processes whose task info was refused, with a hard deadline
+        // inside the session; nil (locked, off, slow) leaves the app's own values.
+        let filled = refused.isEmpty ? nil : helper?.rusage(for: refused)
+
+        // Rate pass.
+        for row in rows {
+            let ident = row.ident, pid = ident.pid, bsd = row.bsd, restricted = row.restricted
+            let (m, source) = Self.merge(app: row.raw, taskRefused: restricted, helper: filled?[ident])
+            let ruOK = m.ruOK
+            let cpuNs = m.cpuNs
+            let cur = Prev(cpuNs: cpuNs, r: m.r, w: m.w, energy: m.energy, wake: m.wake, source: source)
             next[ident] = cur
 
             var cpu = 0.0, rb = 0.0, wb = 0.0, wk = 0.0
@@ -205,7 +278,7 @@ public final class ProcessSampler {
             // Rates need the same identity in the previous sample; a recycled PID starts fresh. The counters are
             // monotonic for a live process, but if one ever goes backwards (or a source switched between rusage and
             // task info) the delta is clamped to 0 instead of producing a huge unsigned wrap-around value.
-            if let dt, let p = prev[ident] {
+            if let dt, let p = Self.rateBasis(prev[ident], source: source) {
                 func d(_ a: UInt64, _ b: UInt64) -> Double { a >= b ? Double(a - b) : 0 }   // never a wrap-around spike
                 cpu = d(cur.cpuNs, p.cpuNs) / 1e9 / dt * 100
                 rb = d(cur.r, p.r) / dt
@@ -229,17 +302,16 @@ public final class ProcessSampler {
             let (name, path) = names(pid: pid, ident: ident, comm: comm)
             // The Rosetta flag can't change during a process's life, so it is queried once per identity.
             if translatedCache[ident] == nil, let t = Self.isTranslated(pid) { translatedCache[ident] = t }
-            // Memory is the physical footprint (what Activity Monitor's Memory column shows), falling back to resident
-            // size from task info. Threads are only available from task info, so restricted processes report 0.
             out.append(ProcessSample(
                 identity: ident, ppid: Int32(bsd.pbi_ppid), name: name, path: path,
                 user: userName(bsd.pbi_uid), uid: bsd.pbi_uid,
                 cpu: max(cpu, 0), cpuTime: Double(cpuNs) / 1e9,
-                memory: ruOK ? ru.ri_phys_footprint : (restricted ? 0 : all.ptinfo.pti_resident_size),
-                threads: restricted ? 0 : Int(all.ptinfo.pti_threadnum),
+                memory: m.footprint, threads: m.threads,
                 diskReadBps: rb, diskWriteBps: wb, diskRead: cur.r, diskWritten: cur.w,
-                energyWatts: energy, wakeups: wk, restricted: restricted && !ruOK))
+                // Still "the app couldn't read this itself": a helper-filled row is restricted with source .helper.
+                energyWatts: energy, wakeups: wk, restricted: restricted && !row.raw.ruOK))
             out[out.count - 1].translated = translatedCache[ident]
+            if source == .helper { out[out.count - 1].source = .helper }
             if ruOK { out[out.count - 1].energyTotal = Double(cur.energy) / 1e9 }   // nJ -> J
         }
         // Replace (not merge) the previous counters, which also forgets exited processes; prune caches the same way.

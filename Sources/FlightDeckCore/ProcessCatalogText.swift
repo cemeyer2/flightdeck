@@ -45,7 +45,7 @@ public enum ProcessCatalogText {
     /// A Processes row's tooltip. Known: "title — summary" (plus "(matched by name only)"), then today's path line, then
     /// the managed label for managed entries. A lookalike or unknown process gets today's text exactly.
     public static func rowTooltip(_ m: ProcessMatch, _ s: ProcessSample) -> String {
-        let base = s.restricted ? restricted : s.path
+        let base = s.source == .helper ? "\(s.path) · via helper" : (s.restricted ? restricted : s.path)
         guard case .known(let e, _, let verified) = m else { return base }
         var t = "\(e.title) — \(e.summary)" + (verified ? "" : " " + nameOnly) + "\n" + base
         if e.managed { t += "\n" + managedLabel }

@@ -107,6 +107,10 @@ public struct Inventory: Codable, Sendable {
     public var limits: [String] = []
     /// When the Mac last booted (a macOS update's install time is close to it).
     public var boot: Date?
+    /// Whether the items include what only the root helper can read: Mac-wide profiles, and Login Items background
+    /// records (read this time, or carried over while locked). nil = not included. Optional so older files decode.
+    public var helperProfiles: Bool?
+    public var helperBackgroundItems: Bool?
     public init(time: Date, items: [InventoryItem], unavailable: [ChangeCategory: String] = [:], limits: [String] = [], boot: Date? = nil) {
         self.time = time; self.items = items; self.unavailable = unavailable; self.limits = limits; self.boot = boot
     }

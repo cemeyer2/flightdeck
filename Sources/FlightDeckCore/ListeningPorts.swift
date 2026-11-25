@@ -63,6 +63,8 @@ public struct ListeningScan: Sendable {
     }
     public var sockets: [ListeningSocket]
     public var coverage: Coverage
+    /// Read by the root helper (see `scan(helper:)`).
+    public var viaHelper: Bool = false
 }
 
 public enum ListeningPorts {

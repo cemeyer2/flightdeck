@@ -98,6 +98,7 @@ extension MCPTools {
 
     func checkup() async throws -> JSON {
         let r = await source.checkup()
+        let helper = await source.helperAccess()
         let attention = r.filter { $0.status == .attention }, unknown = r.filter { $0.status == .unknown }
         func row(_ c: CheckResult) -> JSON {
             ["group": .str(c.group), "title": .str(c.title), "value": .str(c.value), "detail": c.detail.isEmpty ? nil : .str(c.detail)]
@@ -108,7 +109,7 @@ extension MCPTools {
             ("unknown", unknown.isEmpty ? nil : .array(unknown.map(row))),
             // Passing checks in one line each: the model rarely needs their detail.
             ("ok", .strings(r.filter { $0.status == .pass }.map { "\($0.title): \($0.value)" })),
-        ])
+        ] + helperPairs(helper))
     }
 
     // MARK: trends
