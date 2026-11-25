@@ -319,16 +319,20 @@ struct WebDashboardSection: View {
         }
         .onAppear { endpoint.refreshContext() }
         .task { await readUniFiNetworks() }
-        .onChange(of: enabled) { endpoint.apply() }
+        .onChange(of: enabled) {
+            endpoint.apply()
+            if enabled { Task { await readUniFiNetworks() } }
+        }
         .onChange(of: port) { endpoint.apply() }
         .onChange(of: allow) { endpoint.settingsChanged() }
         .onChange(of: advanced) { endpoint.settingsChanged() }
     }
 
-    /// The UniFi console's networks, read once each time the section is shown (no polling), if UniFi is set up.
+    /// The UniFi console's networks, read once each time the section is shown with the dashboard on, or when it is
+    /// turned on (no polling), if UniFi is set up.
     private func readUniFiNetworks() async {
         let model = UniFiModel.shared
-        guard !Demo.isEnabled, let c = model.config, let creds = model.credentials(for: c) else { return }
+        guard enabled, !Demo.isEnabled, let c = model.config, let creds = model.credentials(for: c) else { return }
         do {
             unifiNetworks = try await UniFiAPIClient(config: c, credentials: creds).networks()
             unifiError = nil
