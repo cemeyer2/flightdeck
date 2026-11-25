@@ -81,9 +81,10 @@ final class ChromeTabsTests: XCTestCase {
         XCTAssertEqual(pipe(&fds), 0)
         // Written one byte at a time from another thread, so every underlying read returns a short count.
         let all = payloads.map(ChromeFraming.encode).reduce(Data(), +)
+        let writeEnd = fds[1]
         let writer = Thread {
-            for b in all { var b = b; _ = write(fds[1], &b, 1) }
-            close(fds[1])
+            for b in all { var b = b; _ = write(writeEnd, &b, 1) }
+            close(writeEnd)
         }
         writer.start()
         var got: [Data] = []

@@ -130,10 +130,11 @@ final class ProcessCatalogContentTests: XCTestCase {
         }
         mix += (0..<200).map { ("unknown\($0)", "/opt/tool/bin/unknown\($0)") }
         var hits = 0
-        let t = Date()
+        // This thread's CPU time, not the wall clock: time spent waiting for a core on a loaded runner isn't counted.
+        let t = clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)
         for i in 0..<10_000 { let (n, p) = mix[i % mix.count]; if catalog.lookup(name: n, path: p, signature: nil).known != nil { hits += 1 } }
-        let ms = Date().timeIntervalSince(t) * 1000
-        print("COST catalog 10k lookups", String(format: "%.1f ms", ms), "(\(hits) known)")
+        let ms = Double(clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID) - t) / 1_000_000
+        print("COST catalog 10k lookups", String(format: "%.1f ms CPU", ms), "(\(hits) known)")
         XCTAssertGreaterThan(hits, 0)
         XCTAssertLessThan(ms, 1000)
     }

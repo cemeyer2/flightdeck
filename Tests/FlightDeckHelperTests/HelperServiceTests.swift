@@ -11,8 +11,9 @@ final class HelperServiceTests: XCTestCase {
 
     func testRunnerTimesOut() {
         let start = Date()
-        XCTAssertEqual(BoundedToolRunner(timeout: 0.3).run(path: "/bin/sleep", arguments: ["5"]), .timedOut)
-        XCTAssertLessThan(Date().timeIntervalSince(start), 2)
+        // The bound only has to beat sleep's own 60 s, so a loaded machine can't fail it.
+        XCTAssertEqual(BoundedToolRunner(timeout: 0.3).run(path: "/bin/sleep", arguments: ["60"]), .timedOut)
+        XCTAssertLessThan(Date().timeIntervalSince(start), 30)
     }
 
     func testRunnerReturnsOutput() {

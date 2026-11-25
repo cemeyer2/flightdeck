@@ -103,9 +103,14 @@ final class HelperClientTests: XCTestCase {
         let s = HelperSession.unlockedForTests(fake)
         fake.echoRusage(usage)
         fake.delay = 0.5
-        let start = Date()
+        let before = fake.deadlines.count
         XCTAssertNil(s.rusage(for: ids(3)))
-        XCTAssertLessThan(Date().timeIntervalSince(start), 0.2)
+        // The helper is never given longer than the tick's deadline, so a slow helper can't hold up a sample. Checked
+        // on the deadlines handed over, not the wall clock, so a loaded machine can't fail it.
+        let given = fake.deadlines.dropFirst(before)
+        XCTAssertFalse(given.isEmpty)
+        for d in given { XCTAssertLessThanOrEqual(d, HelperSession.perTickDeadline + 0.001) }   // Date arithmetic rounds
+        XCTAssertLessThan(HelperSession.perTickDeadline, fake.delay)
     }
 
     func testBackoffAfterThreeFailures() {
