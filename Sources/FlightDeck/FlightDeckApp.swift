@@ -272,13 +272,15 @@ struct SettingsView: View {
                 Text("FlightDeck sends no data off this Mac. It only uses the network when you ask: latency pings (if on above), "
                      + "device discovery while the Network or UPnP page is open, scans and traceroutes you start there, and your "
                      + "UniFi console once you've set it up, and speed tests you run or schedule (against Apple's test servers). The metrics and MCP servers listen on this Mac only. "
-                     + "Fleet (if you share this Mac or pair with one) talks only to your paired Macs on the local network.")
+                     + "Fleet (if you share this Mac or pair with one) talks only to your paired Macs on the local network."
+                     + " The web dashboard (off by default) serves this Mac's readings to browsers on your local network, and only there unless you allow more.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             .tabItem { Label("Network", systemImage: "network") }
             tab {
                 MetricsExportSection()
                 MCPSection()
+                WebDashboardSection()
             }
             .tabItem { Label("Integrations", systemImage: "puzzlepiece.extension") }
         }
