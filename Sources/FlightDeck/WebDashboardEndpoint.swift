@@ -39,13 +39,8 @@ final class WebDashboardEndpoint: ObservableObject {
     /// Called once by the (non-headless) Engine at launch.
     func configure(engine: Engine) { self.engine = engine; apply() }
 
-    /// What the dashboard must never serve because only the privileged helper could see it: processes whose counters
-    /// came from the helper, and findings about only such processes.
-    static func privilegedFilter(_ snapshot: Snapshot?) -> (excludeProcess: (ProcessSample) -> Bool, excludeFinding: (Finding) -> Bool) {
-        let helperPIDs = Set((snapshot?.processes ?? []).filter { !$0.isAppMeasured }.map(\.pid))
-        return ({ !$0.isAppMeasured },
-                { f in guard let pids = f.pids, !pids.isEmpty else { return false }; return pids.allSatisfy(helperPIDs.contains) })
-    }
+    /// Whether the server is set up; the Engine then computes the dashboard's helper-free findings (WebDashboardFeed).
+    var isOn: Bool { server != nil }
 
     private var allowlist: WebAllowlist { .parse(UserDefaults.standard.string(forKey: Self.allowlistKey) ?? "") }
 
@@ -168,28 +163,28 @@ final class WebDashboardEndpoint: ObservableObject {
 
     // MARK: - Documents
 
-    private func inputs(snapshot: Snapshot?) -> WebDashboardInputs {
-        let e = engine
-        let findings = e.map { $0.liveFindings + $0.reportFindings + $0.sleepFindings } ?? []   // live, never a replay
+    /// Everything comes from the Engine's helper-free `webDashboard` (nil until the first sample after turning on).
+    /// Diagnostic-report and sleep findings are added here: they never involve helper values.
+    private func inputs() -> WebDashboardInputs {
+        let e = engine, d = e?.webDashboard
+        let findings = (d?.findings ?? []) + (e.map { $0.reportFindings + $0.sleepFindings } ?? [])   // live, never a replay
         let muted = Set(findings.filter { Alerts.shared.isMuted($0) }.map(\.id))
         let os = ProcessInfo.processInfo.operatingSystemVersion
-        let filter = Self.privilegedFilter(snapshot)
         return WebDashboardInputs(
-            snapshot: snapshot, findings: findings, incidents: e.map { Array($0.incidents.suffix(50)) } ?? [],
+            snapshot: d?.snapshot, findings: findings, incidents: d?.incidents ?? [],
             displayName: UserDefaults.standard.string(forKey: Self.nameKey) ?? "", modelName: modelName,
             hardwareModel: Sysctl.string("hw.model") ?? "",
             macOS: "\(os.majorVersion).\(os.minorVersion)" + (os.patchVersion > 0 ? ".\(os.patchVersion)" : ""),
             appVersion: MCPEndpoint.version, uptime: Sysctl.timeval("kern.boottime").map { Date().timeIntervalSince($0) },
             paused: e?.paused ?? false,
             intervalS: e.map { WebDashboardState.interval(visible: $0.uiVisible, interval: $0.interval, background: $0.backgroundInterval) } ?? 5,
-            redaction: redaction, isMuted: { muted.contains($0.id) },
-            excludeProcess: filter.excludeProcess, excludeFinding: filter.excludeFinding)
+            redaction: redaction, isMuted: { muted.contains($0.id) })
     }
 
     /// The state document; a stream's first one also carries 30 minutes of history from the black box (read on its
     /// own queue). Without an Engine or a sample yet, the document still comes back, with every reading "No sample yet".
     private func document(withHistory: Bool, reply: @escaping @Sendable (Data?) -> Void) {
-        let i = inputs(snapshot: engine?.liveSnapshot)
+        let i = inputs()
         guard withHistory else { reply(WebDashboardState.encode(WebDashboardState.build(i))); return }
         guard let e = engine, e.blackBoxEnabled else {
             var j = i; j.history = .unavailable("The black box is turned off in Settings.")
@@ -199,7 +194,7 @@ final class WebDashboardEndpoint: ObservableObject {
         Task { @MainActor in
             let now = Date()
             let trace = await e.readBlackBox(.coarse, from: now.addingTimeInterval(-WebDashboardState.historyStep * Double(WebDashboardState.historyPoints)))
-            var j = self.inputs(snapshot: e.liveSnapshot)
+            var j = self.inputs()
             j.history = trace.map { .points(WebDashboardState.history(frames: $0.frames, now: now)) }
                 ?? .unavailable("The black box has no data for the last 30 minutes yet.")
             reply(WebDashboardState.encode(WebDashboardState.build(j)))
@@ -217,8 +212,8 @@ final class WebDashboardEndpoint: ObservableObject {
 
     private func publish(_ s: Snapshot) {
         guard let server else { return }
-        var i = inputs(snapshot: s)
-        i.point = WebPoint(s)
+        var i = inputs()
+        i.point = WebPoint(s)   // machine-wide readings only
         server.publish(WebDashboardState.encode(WebDashboardState.build(i)))
     }
 }

@@ -125,6 +125,8 @@ public enum WebHistory: Sendable {
 }
 
 public struct WebDashboardInputs {
+    /// The snapshot, findings and incidents come from WebDashboardFeed and carry no helper values. There is
+    /// deliberately no input for browser tabs or process contents.
     public var snapshot: Snapshot?
     /// Live findings (never replayed ones).
     public var findings: [Finding]
@@ -145,21 +147,15 @@ public struct WebDashboardInputs {
     public var demo: Bool
     public var redaction: FleetRedaction
     public var isMuted: (Finding) -> Bool
-    /// Seams for data the app must not serve (see WebDashboardEndpoint.privilegedFilter). There is deliberately no
-    /// input for browser tabs or process contents.
-    public var excludeProcess: (ProcessSample) -> Bool
-    public var excludeFinding: (Finding) -> Bool
 
     public init(snapshot: Snapshot?, findings: [Finding], incidents: [Incident], history: WebHistory = .none, point: WebPoint? = nil,
                 displayName: String, modelName: String, hardwareModel: String, macOS: String, appVersion: String, uptime: TimeInterval?,
                 paused: Bool, intervalS: Double, demo: Bool = false, redaction: FleetRedaction,
-                isMuted: @escaping (Finding) -> Bool = { _ in false },
-                excludeProcess: @escaping (ProcessSample) -> Bool = { _ in false },
-                excludeFinding: @escaping (Finding) -> Bool = { _ in false }) {
+                isMuted: @escaping (Finding) -> Bool = { _ in false }) {
         self.snapshot = snapshot; self.findings = findings; self.incidents = incidents; self.history = history; self.point = point
         self.displayName = displayName; self.modelName = modelName; self.hardwareModel = hardwareModel; self.macOS = macOS
         self.appVersion = appVersion; self.uptime = uptime; self.paused = paused; self.intervalS = intervalS; self.demo = demo
-        self.redaction = redaction; self.isMuted = isMuted; self.excludeProcess = excludeProcess; self.excludeFinding = excludeFinding
+        self.redaction = redaction; self.isMuted = isMuted
     }
 }
 
@@ -174,18 +170,18 @@ public enum WebDashboardState {
 
     public static func build(_ i: WebDashboardInputs) -> WebDashboardDocument {
         let r = i.redaction
-        let shown = i.findings.filter { !i.isMuted($0) && !i.excludeFinding($0) }
+        let shown = i.findings.filter { !i.isMuted($0) }
         let lights = Annunciator.lights.map { l in
             WebDashboardDocument.Light(key: l.key, label: l.label, level: Annunciator.level(l, in: shown).map(severity) ?? "ok")
         }
         let findings = shown.compactMap(r.finding)
             .sorted { ($1.severity, $1.since, $0.kind, $0.title) < ($0.severity, $0.since, $1.kind, $1.title) }
             .map { WebDashboardDocument.Item(kind: $0.kind, severity: severity($0.severity), title: $0.title, detail: $0.detail, since: $0.since) }
-        let incidents = i.incidents.filter { !i.excludeFinding(Self.finding(of: $0)) }.compactMap(r.incident)
+        let incidents = i.incidents.compactMap(r.incident)
             .sorted { ($1.since, $0.kind) < ($0.since, $1.kind) }
             .map { WebDashboardDocument.IncidentItem(kind: $0.kind, severity: severity($0.severity), title: $0.title, start: $0.since, end: $0.end) }
         // Only the ten shown are scrubbed, each from a bounded prefix (scrubbing is regex work, and this runs per sample).
-        let apps = AppUsage.aggregate((i.snapshot?.processes ?? []).filter { !i.excludeProcess($0) })
+        let apps = AppUsage.aggregate(i.snapshot?.processes ?? [])
             .sorted { ($1.cpu, $0.name, $1.memory) < ($0.cpu, $1.name, $0.memory) }
             .prefix(topAppCount)
             .map { a in WebDashboardDocument.App(name: String(r.scrub(String(a.name.prefix(256))).prefix(64)), cpuPercent: a.cpu,
@@ -203,11 +199,6 @@ public enum WebDashboardState {
                                     demo: i.demo ? true : nil, annunciator: lights, findings: findings, incidents: incidents,
                                     readings: i.snapshot.map(readings) ?? .missing("No sample yet"), topApps: apps,
                                     history: history, historyUnavailable: unavailable, point: i.point)
-    }
-
-    /// An incident as the finding it came from, for `excludeFinding` (which looks at the id).
-    static func finding(of x: Incident) -> Finding {
-        Finding(id: x.key, severity: x.severity, icon: x.icon, title: x.title, detail: x.detail, since: x.start, destination: x.destination)
     }
 
     static func readings(_ s: Snapshot) -> WebDashboardDocument.Readings {

@@ -118,25 +118,6 @@ final class WebDashboardStateTests: XCTestCase {
         for bad in [#""pid""#, #""path""#, #""user""#, "/"] { XCTAssertFalse(appsJSON.contains(bad), bad) }
     }
 
-    func testHelperSeamExcludes() {
-        var p = snapshot()
-        p.processes = [proc(1, "Safari", path: "/Applications/Safari.app/Contents/MacOS/Safari", cpu: 5)]
-        var a = p
-        let extra = [proc(9, "secret", path: "/usr/libexec/secret", cpu: 90), proc(8, "Safari", path: "/Applications/Safari.app/Contents/MacOS/Safari", cpu: 50)]
-        a.processes += extra
-        let f = finding("hang:99-1", .warning, title: "Something root is hung")
-        let keep = finding("cpu:x", .caution)
-        let extraIDs = Set(extra.map(\.identity))
-        let docA = WebDashboardState.build(WebDashboardInputs(
-            snapshot: a, findings: [keep, f], incidents: [], displayName: "", modelName: "Mac", hardwareModel: "", macOS: "26",
-            appVersion: "1", uptime: nil, paused: false, intervalS: 1, redaction: FleetRedaction(names: []),
-            excludeProcess: { extraIDs.contains($0.identity) }, excludeFinding: { $0.id == f.id }))
-        let docB = WebDashboardState.build(WebDashboardInputs(
-            snapshot: p, findings: [keep], incidents: [], displayName: "", modelName: "Mac", hardwareModel: "", macOS: "26",
-            appVersion: "1", uptime: nil, paused: false, intervalS: 1, redaction: FleetRedaction(names: [])))
-        XCTAssertEqual(WebDashboardState.encode(docA), WebDashboardState.encode(docB))
-    }
-
     func testCapTruncatesInOrder() throws {
         let long = String(repeating: "incident words ", count: 20)
         let incidents = (0..<300).map { i in

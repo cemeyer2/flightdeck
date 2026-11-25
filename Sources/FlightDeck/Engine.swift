@@ -31,7 +31,7 @@ final class Engine: ObservableObject {
     @Published private(set) var frames: [Snapshot?] = Array(repeating: nil, count: Engine.historyLength)
     /// Pausing closes every open incident (we can't tell how long they lasted while unobserved); resuming pushes a
     /// gap so graphs show the unobserved stretch as a break.
-    @Published var paused = false { didSet { if !paused { pushGap() } else { queue.async { [incidentLog] in incidentLog.closeAll(at: Date()) } } } }
+    @Published var paused = false { didSet { if !paused { pushGap() } else { queue.async { [incidentLog, webFeed] in let now = Date(); incidentLog.closeAll(at: now); webFeed.closeAll(at: now) } } } }
     /// Sample interval in seconds while a window is visible.
     @AppStorage("interval") var interval: Double = 1.0 { didSet { restartTimer() } }
     /// Whether FlightDeck's own process is included in the process list.
@@ -77,6 +77,9 @@ final class Engine: ObservableObject {
     var unmutedLiveFindings: [Finding] { (liveFindings + reportFindings + sleepFindings).filter { !Alerts.shared.isMuted($0) } }
     /// Findings about the last sleep (many dark wakes, battery drain), from the power log after each wake.
     @Published private(set) var sleepFindings: [Finding] = []
+    /// The latest sample as the web dashboard may serve it; nil while the dashboard is off. Not @Published: only the
+    /// dashboard reads it, when its stream sink fires on `liveSnapshot`.
+    private(set) var webDashboard: WebDashboardData?
 
     /// Reads the power log off the main thread and refreshes `sleepFindings`.
     private func refreshSleepFindings() {
@@ -137,6 +140,8 @@ final class Engine: ObservableObject {
     /// Last `incidentLog.revision` published to `incidents`, so the log is only copied to the main actor when it changed.
     nonisolated(unsafe) private var incidentRevision = -1
     nonisolated(unsafe) private var lastIncidentSave = Date()
+    /// The web dashboard's own findings and incidents, which carry no helper values (see WebDashboardFeed).
+    nonisolated private let webFeed = WebDashboardFeed()
     // Evidence capture (confined to `queue`): one capture at a time, at most one per finding every 10 minutes.
     nonisolated(unsafe) private var evidenceBusy = false
     nonisolated(unsafe) private var lastEvidence: [String: Date] = [:]
@@ -402,7 +407,7 @@ final class Engine: ObservableObject {
 
     private func applyThresholds() {
         let cpu = appCPUThreshold
-        queue.async { [analyzer] in analyzer.thresholds.appCPU = cpu }
+        queue.async { [analyzer, webFeed] in analyzer.thresholds.appCPU = cpu; webFeed.thresholds.appCPU = cpu }
     }
 
     /// Maps a CPU index to performance/efficiency core kind (for per-core graphs).
@@ -436,8 +441,9 @@ final class Engine: ObservableObject {
         let includeSelf = self.includeSelf
         let visible = uiVisible
         let front = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        let web = WebDashboardEndpoint.shared.isOn
         resumeSuspended()
-        queue.async { [sampler, analyzer, incidentLog, ruleEngine, dailyLog, chromeStore, chromeResolver] in
+        queue.async { [sampler, analyzer, incidentLog, ruleEngine, dailyLog, chromeStore, chromeResolver, webFeed] in
             sampler.processes.includeSelf = includeSelf
             sampler.networkInterval = visible ? 0 : 5   // per-process network every 5 s while no window is visible
             sampler.background = !visible
@@ -451,7 +457,9 @@ final class Engine: ObservableObject {
             self.launchLog.ingest(s.processes, at: s.time)
             // Respawn loops and baseline findings ("3× its usual memory") join the Analyzer's, so they reach the banner,
             // alerts and the Flight Log the same way.
-            let found = analyzer.ingest(s) + dailyLog.ingest(s) + self.launchLog.findings(now: s.time) + self.thermal.ingest(s)
+            // `helperFree` are the sources that never read per-process counters, so the web dashboard can reuse them.
+            let analyzed = analyzer.ingest(s), baselines = dailyLog.ingest(s)
+            let helperFree = self.launchLog.findings(now: s.time) + self.thermal.ingest(s)
                 + CameraMicService.findings(now: s.time)   // opt-in camera & mic alerts
                 + DestinationService.findings(now: s.time)   // opt-in "new destination" alerts
                 + RestartWatch.shared.findings(now: s.time)   // one-shot: unexpected shutdown or panic since last launch
@@ -459,6 +467,7 @@ final class Engine: ObservableObject {
                 + BackupWatch.shared.findings()   // no successful Time Machine backup for days (refreshed every 15 min)
                 + FleetWatch.shared.findings()   // a paired Mac in trouble (set by the Fleet poll)
                 + PeripheralsService.findings(now: s.time)   // once per plug-in: slow drive; once per discharge: low accessory
+            let found = analyzed + baselines + helperFree
             self.chargeCurve.ingest(s)
             ruleEngine.frontmostPID = front
             let firings = ruleEngine.evaluate(s)
@@ -469,6 +478,7 @@ final class Engine: ObservableObject {
             if s.time.timeIntervalSince(self.lastIncidentSave) > 60 { incidentLog.save(); self.lastIncidentSave = s.time }
             let log: [Incident]? = incidentLog.revision != self.incidentRevision ? incidentLog.incidents : nil
             self.incidentRevision = incidentLog.revision
+            let webData = webFeed.ingest(s, enabled: web, main: found, helperFree: helperFree)
             Task { @MainActor in
                 // publish only real changes (each publish re-evaluates every observing view)
                 if found.map(\.signature) != self.liveFindings.map(\.signature) { self.liveFindings = found }
@@ -477,6 +487,7 @@ final class Engine: ObservableObject {
                 firings.forEach { self.execute($0) }
                 if let log { self.incidents = log }
                 if tabs != self.chromeTabs { self.chromeTabs = tabs }
+                self.webDashboard = webData   // before `ingest`, whose liveSnapshot update feeds dashboard streams
                 self.ingest(s)
             }
         }
@@ -678,7 +689,7 @@ final class Engine: ObservableObject {
     }
 
     /// Clears the persisted incident log on the queue and the published copy immediately.
-    func clearIncidents() { queue.async { [incidentLog] in incidentLog.clear() } ; incidents = [] }
+    func clearIncidents() { queue.async { [incidentLog, webFeed] in incidentLog.clear(); webFeed.clearIncidents() } ; incidents = [] }
 
     func clearBlackBox() { blackBoxQueue.async { [blackBox] in blackBox.clear() } }
 
