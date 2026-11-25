@@ -36,6 +36,8 @@ public protocol MCPDataSource: AnyObject, Sendable {
     func batteryHistory() async -> (days: [BatteryDay], lifetime: BatteryLifetime?)?
     /// Destinations: the last 30 days (stored days plus the open one) and the known-destination list, or nil.
     func destinations() async -> (days: [DestinationDay], known: KnownDestinations)?
+    /// Chrome tabs per renderer PID, hosts only (MCPChromeTabsOutput.swift), or nil when the feature is off or unavailable.
+    func chromeTabs() async -> ChromeTabsView?
 }
 
 extension MCPDataSource {
@@ -55,6 +57,8 @@ extension MCPDataSource {
     }
     /// Sources without the app's tracker (tests) have no destinations.
     public func destinations() async -> (days: [DestinationDay], known: KnownDestinations)? { nil }
+    /// Only the app has Chrome tabs; the standalone CLI and tests have none.
+    public func chromeTabs() async -> ChromeTabsView? { nil }
     /// Checkup with the swap trend taken from the black box's coarse tier, as the Checkup view does.
     public func runCheckup() async -> [CheckResult] {
         let trace = await blackBox(.coarse, from: Date().addingTimeInterval(-86_400), to: Date())

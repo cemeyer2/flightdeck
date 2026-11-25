@@ -171,10 +171,10 @@ public struct MCPTools: MCPToolProvider {
     public var specs: [MCPToolSpec] {
         [
             MCPToolSpec(name: "get_status", title: "System status",
-                        description: "One-call overview of this Mac right now: plain-English findings (what's wrong), CPU, memory, swap, disk, network, power, thermal and GPU numbers, the top apps by CPU, memory and energy, and the Stress Map's top causes of 'misery' per subsystem. Call this first.",
+                        description: "One-call overview of this Mac right now: plain-English findings (what's wrong), CPU, memory, swap, disk, network, power, thermal and GPU numbers, the top apps by CPU, memory and energy, and the Stress Map's top causes of 'misery' per subsystem. Call this first." + ChromeTabsView.note,
                         inputSchema: Self.schema([])),
             MCPToolSpec(name: "list_processes", title: "List processes",
-                        description: "Running processes (or apps, with helpers rolled into their app) as a compact table, sorted and filtered. CPU % is of one core (can exceed 100). null = not measurable (e.g. another user's process).",
+                        description: "Running processes (or apps, with helpers rolled into their app) as a compact table, sorted and filtered. CPU % is of one core (can exceed 100). null = not measurable (e.g. another user's process)." + ChromeTabsView.note,
                         inputSchema: Self.schema([
                             ("sort", Self.enumeration("Column to sort by, largest first (name and pid ascending).", Self.processSorts, "cpu")),
                             ("limit", Self.int("Rows to return.", 1, 100, 20)),
@@ -182,7 +182,7 @@ public struct MCPTools: MCPToolProvider {
                             ("by_app", ["type": "boolean", "description": "Group processes into apps.", "default": false]),
                         ])),
             MCPToolSpec(name: "get_process", title: "Process details",
-                        description: "Details of one process by PID: identity, path, user, parent chain, start time, CPU, memory, energy, disk and network, listening ports, open-file and socket counts, code signature. Optional sections add more; other users' processes show 'unavailable' where macOS refuses.",
+                        description: "Details of one process by PID: identity, path, user, parent chain, start time, CPU, memory, energy, disk and network, listening ports, open-file and socket counts, code signature. Optional sections add more; other users' processes show 'unavailable' where macOS refuses." + ChromeTabsView.note,
                         inputSchema: Self.schema([
                             ("pid", ["type": "integer", "description": "Process ID."]),
                             ("include", ["type": "array", "description": "Extra sections: arguments (command line), files (open file descriptors), sockets, threads.",

@@ -23,9 +23,10 @@ extension MCPTools {
     static func cpu(_ p: ProcessSample) -> Double? { unreadable(p) ? nil : p.cpu }
     static func memory(_ p: ProcessSample) -> Double? { p.restricted && p.memory == 0 ? nil : Double(p.memory) }
 
-    static func finding(_ f: Finding) -> JSON {
+    static func finding(_ f: Finding, tabs: ChromeTabsView? = nil) -> JSON {
         ["severity": F.severity(f.severity), "title": .str(f.title), "detail": f.detail.map(JSON.str), "since": F.time(f.since),
-         "pids": f.pids.map { .array($0.prefix(5).map { .int(Int($0)) }) }]
+         "pids": f.pids.map { .array($0.prefix(5).map { .int(Int($0)) }) },
+         "chrome_tabs": f.pids.flatMap { tabs?.json(pids: $0) }]   // hosts only
     }
 
     // MARK: get_status
@@ -33,6 +34,7 @@ extension MCPTools {
     func getStatus() async throws -> JSON {
         guard let s = await source.snapshot() else { throw noSample() }
         let findings = await source.findings().sorted { $0.severity != $1.severity ? $0.severity > $1.severity : $0.since < $1.since }
+        let tabs = await source.chromeTabs()
         let summary: String
         if let worst = findings.first {
             summary = "\(findings.count) finding\(findings.count == 1 ? "" : "s"); worst: \(worst.title)"
@@ -86,7 +88,7 @@ extension MCPTools {
         }
         return object([
             ("time", F.time(s.time)), ("summary", .str(summary)),
-            ("findings", .array(findings.prefix(15).map(Self.finding))),
+            ("findings", .array(findings.prefix(15).map { Self.finding($0, tabs: tabs) })),
             ("system", system), ("top_apps", top),
             ("stress_map", ["about": "Stress 0-1 per subsystem; misery = an app's share of a resource x how strained it is (top causes of the Mac's misery).",
                             "subsystems": hubs, "top_causes": causes.isEmpty ? "none: nothing is strained" : .array(causes)]),
@@ -154,10 +156,13 @@ extension MCPTools {
                     Self.unreadable(p) ? .null : .int(p.threads),
                     flags.isEmpty ? .null : .strings(flags)]
         }
+        // Chrome tabs (MCPChromeTabsOutput.swift): a last column of hosts when available, else one top-level note.
+        let tabs = await source.chromeTabs()
+        let tabRows: [JSON] = tabs.map { t in zip(sorted.prefix(limit), rows).map { p, r in .array((r.array ?? []) + [t.hostsCell(pid: p.pid)]) } } ?? rows
         return object([("time", F.time(s.time)), ("processes", .int(s.processes.count)), ("matched", .int(procs.count)),
                        ("shown", .int(rows.count)), ("sort", .str(sort)),
-                       ("columns", ["pid", "name", "user", "cpu_percent", "memory", "energy_w", "gpu_percent", "disk", "network", "wakeups_per_s", "threads", "flags"]),
-                       ("rows", .array(rows))])
+                       ("columns", .strings(["pid", "name", "user", "cpu_percent", "memory", "energy_w", "gpu_percent", "disk", "network", "wakeups_per_s", "threads", "flags"] + (tabs == nil ? [] : ["chrome_tabs"]))),
+                       ("rows", .array(tabRows)), ("chrome_tabs", tabs == nil ? ChromeTabsView.unavailable : nil)])
     }
 
     // MARK: get_process
@@ -204,6 +209,7 @@ extension MCPTools {
             ("listening_ports", d.files.isAvailable ? .strings(listening) : nil),
             ("cwd", measured(d.cwd, JSON.str)),
             ("code_signature", sig ?? F.unavailable("executable not readable")),
+            ("chrome_tabs", await source.chromeTabs()?.json(pid: pid)),   // hosts only, for a Chrome renderer
         ]
         if include.contains("arguments") {
             pairs.append(("arguments", measured(d.arguments) { .strings($0.prefix(64).map { String($0.prefix(500)) }) }))

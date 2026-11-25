@@ -138,6 +138,10 @@ final class EngineMCPSource: MCPDataSource, @unchecked Sendable {
             return (saved.filter { $0.start != today.start } + [today], t.known())
         }.value
     }
+    /// Live Chrome tabs reduced to hosts (none in demo mode or with the feature off).
+    func chromeTabs() async -> ChromeTabsView? {
+        await MainActor.run { Demo.isEnabled || !ChromeTabsService.shared.enabled ? nil : ChromeTabsView(engine?.chromeTabs ?? [:]) }
+    }
 }
 
 /// Settings section for the MCP server, kept here so SettingsView only gains one line.

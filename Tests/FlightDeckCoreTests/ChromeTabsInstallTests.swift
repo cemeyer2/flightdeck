@@ -168,4 +168,87 @@ final class ChromeTabsInstallTests: XCTestCase {
         XCTAssertEqual(ChromeTabsStatus.waiting.text, "Waiting for the extension")
         XCTAssertEqual(ChromeTabsStatus.needsUpdating.text, "Extension needs updating")
     }
+
+    // MARK: MCP
+
+    /// FakeSource (MCPToolTests) plus Chrome tabs.
+    final class TabsSource: MCPDataSource, @unchecked Sendable {
+        let base: FakeSource; let tabs: ChromeTabsView?
+        init(_ base: FakeSource, tabs: ChromeTabsView?) { self.base = base; self.tabs = tabs }
+        var standalone: Bool { base.standalone }
+        var blackBoxConfig: BlackBox.Config { base.blackBoxConfig }
+        func snapshot() async -> Snapshot? { await base.snapshot() }
+        func findings() async -> [Finding] { await base.findings() }
+        func incidents() async -> [Incident] { await base.incidents() }
+        func reports(since: Date) async -> [DiagnosticReport] { await base.reports(since: since) }
+        func blackBox(_ tier: BlackBox.Tier, from: Date, to: Date) async -> Trace? { await base.blackBox(tier, from: from, to: to) }
+        func dailyHistory() async -> DailyLog.History? { await base.dailyHistory() }
+        func checkup() async -> [CheckResult] { await base.checkup() }
+        func chromeTabs() async -> ChromeTabsView? { tabs }
+    }
+
+    func mcpTools(_ src: MCPDataSource) -> MCPTools {
+        var t = MCPTools(source: src)
+        t.inspector = { pid, _ in
+            ProcessDetails(arguments: .value(["/x", "--type=renderer"]), environment: .unavailable("hidden"), cwd: .value("/"), files: .value([]),
+                           sockets: [], threads: .unavailable("not permitted"), signature: nil, nice: 0, ancestry: [(pid, "r")], counters: nil)
+        }
+        return t
+    }
+
+    func text(_ t: MCPTools, _ name: String, _ args: JSON = [:]) async -> String {
+        let r = await t.call(name, arguments: args)
+        XCTAssertFalse(r.isError, r.text)
+        return r.text
+    }
+
+    func testMCPHostsOnly() async throws {
+        let helper = MCPToolTests()
+        let base = FakeSource(); base.snap = helper.snapshot()
+        base.findingList = [Finding(id: "cpu:x", severity: .caution, icon: "cpu", title: "Google Chrome is using 190% CPU", detail: nil,
+                                    since: Date(), destination: nil, pids: [20, 21])]
+        func e(_ host: String, _ title: String, _ url: String) -> ChromeTabEntry {
+            ChromeTabEntry(kind: .tab, host: host, title: title, url: url, active: true, audible: false, lastAccessed: 1)
+        }
+        let attribution: [ProcessIdentity: ChromeTabAttribution] = [
+            ProcessIdentity(pid: 20, startTime: 1): ChromeTabAttribution(entries: [e("mail.example.com", "Inbox (3) — secret", "https://mail.example.com/u/0?q=secret")], isExtensionProcess: false),
+            ProcessIdentity(pid: 21, startTime: 1): ChromeTabAttribution(entries: [e("10.0.0.5", "Router", "http://10.0.0.5/admin"),
+                                                                                    e("wiki", "Payroll", "http://wiki/payroll")], isExtensionProcess: false),
+        ]
+        let t = mcpTools(TabsSource(base, tabs: ChromeTabsView(attribution)))
+        let list = await text(t, "list_processes")
+        let process = await text(t, "get_process", ["pid": 21])
+        let status = await text(t, "get_status")
+        let all = list + process + status
+        for want in ["mail.example.com", "IP address", "local network host"] { XCTAssertTrue(all.contains(want), want) }
+        for banned in ["/u/0", "?q", "secret", "Inbox", "10.0.0.5", "\"wiki\"", "Payroll", "admin"] { XCTAssertFalse(all.contains(banned), banned) }
+        let j = try JSON.parse(Data(list.utf8))
+        XCTAssertEqual(j["columns"]?.array?.last?.string, "chrome_tabs")
+        XCTAssertNil(j["chrome_tabs"])
+        let row = try XCTUnwrap(j["rows"]?.array?.first { $0.array?.first?.int == 20 })
+        XCTAssertEqual(row.array?.last, .strings(["mail.example.com"]))
+        XCTAssertEqual(try JSON.parse(Data(process.utf8))["chrome_tabs"]?.array?.count, 2)
+        XCTAssertEqual(try JSON.parse(Data(status.utf8))["findings"]?.array?.first?["chrome_tabs"]?.array?.count, 3)
+    }
+
+    func testMCPNilSourceOneTopLevelUnavailable() async throws {
+        let base = FakeSource(); base.snap = MCPToolTests().snapshot()
+        let j = try JSON.parse(Data(await text(mcpTools(base), "list_processes").utf8))
+        XCTAssertEqual(j["chrome_tabs"]?.string, "unavailable (Chrome tabs are off, not connected, or this is the standalone server)")
+        XCTAssertFalse(j["columns"]?.array?.contains("chrome_tabs") ?? true)
+        let process = try JSON.parse(Data(await text(mcpTools(base), "get_process", ["pid": 20]).utf8))
+        XCTAssertNil(process["chrome_tabs"])
+        let byApp = try JSON.parse(Data(await text(mcpTools(base), "list_processes", ["by_app": true]).utf8))
+        XCTAssertNil(byApp["chrome_tabs"], "the app-grouped table is unchanged")
+    }
+
+    func testMCPExistingColumnsOrderUnchanged() async throws {
+        let base = FakeSource(); base.snap = MCPToolTests().snapshot()
+        let j = try JSON.parse(Data(await text(mcpTools(TabsSource(base, tabs: ChromeTabsView([:]))), "list_processes").utf8))
+        let cols = j["columns"]?.array?.compactMap(\.string) ?? []
+        XCTAssertEqual(Array(cols.prefix(12)), ["pid", "name", "user", "cpu_percent", "memory", "energy_w", "gpu_percent", "disk", "network",
+                                                 "wakeups_per_s", "threads", "flags"])
+        XCTAssertEqual(cols.count, 13)
+        XCTAssertTrue(j["rows"]?.array?.allSatisfy { $0.array?.count == 13 } ?? false)
+    }
 }
