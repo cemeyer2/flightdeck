@@ -274,7 +274,8 @@ struct SettingsView: View {
                      + "device discovery while the Network or UPnP page is open, scans and traceroutes you start there, and your "
                      + "UniFi console once you've set it up, and speed tests you run or schedule (against Apple's test servers). The metrics and MCP servers listen on this Mac only. "
                      + "Fleet (if you share this Mac or pair with one) talks only to your paired Macs on the local network."
-                     + " Update checks, if on in Settings › About, ask GitHub once a day for the latest release; Check Now there asks once when clicked, even with them off.")
+                     + " Update checks, if on in Settings › About, ask GitHub once a day for the latest release; Check Now there asks once when clicked, even with them off."
+                     + " The web dashboard (off by default) serves this Mac's readings to browsers on your local network, and only there unless you allow more.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             .tabItem { Label("Network", systemImage: "network") }
@@ -282,6 +283,7 @@ struct SettingsView: View {
                 MetricsExportSection()
                 MCPSection()
                 ChromeTabsSettingsSection()
+                WebDashboardSection()
             }
             .tabItem { Label("Integrations", systemImage: "puzzlepiece.extension") }
             tab { AboutSettingsSection() }

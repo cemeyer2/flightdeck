@@ -110,36 +110,18 @@ struct DiagnosisBanner: View {
     }
 }
 
-/// Cockpit annunciator: one labelled light per subsystem, lit by the worst finding in it.
-/// Each light matches findings by id prefix (the ids are assigned by the Analyzer and DiagnosticReports, e.g.
-/// "cpu:<app>", "leak:<app>", "report:Crash…"). A finding can light more than one lamp (e.g. "cpu-throttled" lights
-/// CPU and THERM). Caution/warning lights fill with their colour; info only tints. Clicking goes to the first matching
-/// finding's destination, or the light's default page.
+/// Cockpit annunciator: one labelled light per subsystem, lit by the worst finding in it (the table and matching are
+/// `Annunciator` in FlightDeckCore, shared with the web dashboard). Caution/warning lights fill with their colour;
+/// info only tints. Clicking goes to the first matching finding's destination, or the light's default page.
 struct AnnunciatorPanel: View {
     @EnvironmentObject var e: Engine
     @Environment(\.palette) var p
 
-    // (label, finding-id prefixes, default navigation target as a Destination raw value or "Performance:<tab>")
-    static let lights: [(label: String, match: [String], dest: String)] = [
-        ("CPU", ["cpu:", "cpu-saturated", "unusual-cpu", "cpu-throttled", "wakeups:"], "Performance:CPU"),
-        ("MEM", ["mem-pressure", "leak:"], "Performance:Memory"),
-        ("SWAP", ["swap-", "swapping"], "Performance:Memory"),
-        ("THERM", ["thermal", "gpu-thermal", "cpu-throttled"], "Performance:Thermals"),
-        ("DISK", ["disk-busy", "drive:"], "Performance:Disk"),
-        ("STORAGE", ["disk-low", "disk-full"], "Disk Space"),
-        ("NET", ["net-", "wifi-weak"], "Performance:Network"),
-        ("GPU", ["gpu:", "gpu-recovery", "gpu-memory"], "Performance:GPU"),
-        ("POWER", ["unusual-power", "battery-health", "sleep-"], "Performance:Energy"),
-        ("HANG", ["hang:", "report:Hang"], "Processes"),
-        ("CRASH", ["report:Crash", "restart:"], "Flight Log"),   // restart: unexpected shutdowns and panics (RestartFindings)
-        ("AWAKE", ["awake:"], "Processes"),
-    ]
-
     var body: some View {
         let f = e.findings.filter { !Alerts.shared.isMuted($0) }   // muted findings don't light the annunciator
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 6), spacing: 6) {
-            ForEach(Self.lights, id: \.label) { light in
-                let hits = f.filter { x in light.match.contains { x.id.hasPrefix($0) } }.sorted { $0.severity > $1.severity }
+            ForEach(Annunciator.lights, id: \.label) { light in
+                let hits = Annunciator.hits(light, in: f)
                 let sev = hits.map(\.severity).max()
                 Button { e.navigationRequest = hits.first?.destination ?? light.dest } label: {
                     Text(light.label)
