@@ -138,6 +138,10 @@ final class ChromeTabsResolverTests: XCTestCase {
         store.setTable(t, for: key(old))
         store.prune(liveBrowsers: [new.identity])
         XCTAssertTrue(store.tables().isEmpty)
+        XCTAssertEqual(store.hellos().count, 1, "the hello stays until the connection closes")
+        store.setTable(t, for: key(old))
+        XCTAssertEqual(store.tables().count, 1, "a sample that missed the browser doesn't silence the connection")
+        store.remove(key(old))
         XCTAssertTrue(store.isEmpty)
     }
 

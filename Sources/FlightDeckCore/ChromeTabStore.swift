@@ -47,12 +47,11 @@ public final class ChromeTabStore: @unchecked Sendable {
 
     public func removeAll() { locked { tablesByKey.removeAll(); hellosByKey.removeAll() } }
 
-    /// Drops everything from browser processes that are no longer running (or whose pid now belongs to a new process).
+    /// Drops the tables of browser processes that are no longer running (or whose pid now belongs to a new process).
+    /// Hellos stay until their connection closes: the extension says hello only on connect, so dropping one after a
+    /// sample that happened to miss the browser would make that connection's later tables be ignored for good.
     public func prune(liveBrowsers: Set<ProcessIdentity>) {
-        locked {
-            tablesByKey = tablesByKey.filter { liveBrowsers.contains($0.key.browser) }
-            hellosByKey = hellosByKey.filter { liveBrowsers.contains($0.key.browser) }
-        }
+        locked { tablesByKey = tablesByKey.filter { liveBrowsers.contains($0.key.browser) } }
     }
 
     public func tables() -> [Key: ChromeTabTable] { locked { tablesByKey } }
