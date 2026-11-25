@@ -1154,9 +1154,7 @@ Six themes: Light, Dark, Green, Amber, Blue, Mono.
 - **Light in the background.** With no FlightDeck window on screen, view updates stop (graphs catch up instantly when you return) and sampling drops to every 2 s (Settings); the black box, findings and alerts keep running. Background cost is about 2.5% of one core.
 - **Self-monitoring.** FlightDeck appears in its own process list by default (Settings → toggle).
 - **Identity-safe actions.** Signals are sent only if the PID still has the same start time (`ProcessIdentity`).
-- **Private by design.** FlightDeck sends no data anywhere. By default it makes no network requests at all; the only exception is the opt-in latency probe (Settings › Network › Network quality), which pings your router and one host you choose. The opt-in Prometheus and MCP servers only accept connections from this Mac.
-
-- **Private by design.** FlightDeck sends no data anywhere. By default it makes no network requests at all; the exceptions are the opt-in latency probe (Settings › Network › Network quality), which pings your router and one host you choose, and the UniFi view, which talks only to the console you configure (and, while nothing is configured, checks whether your router looks like one). The Camera & Mic history records only that a device was in use, never audio
+- **Private by design.** FlightDeck sends no data anywhere. By default it makes no network requests at all; the exceptions are the opt-in latency probe (Settings › Network › Network quality), which pings your router and one host you choose, and the UniFi view, which talks only to the console you configure (and, while nothing is configured, checks whether your router looks like one). The opt-in Prometheus and MCP servers only accept connections from this Mac. The opt-in web dashboard serves this Mac's readings unencrypted and without a password to allowed addresses — the local network unless you allow your tailnet or, under Advanced, other addresses. The Camera & Mic history records only that a device was in use, never audio
 or video, and never leaves this Mac.
 
 ## Known limits
