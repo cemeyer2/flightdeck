@@ -54,10 +54,10 @@ public final class ChangeStore: @unchecked Sendable {
     }
 
     /// Reads this Mac, compares and saves. Returns nil if a check is already running. Blocking; call off the main thread.
-    public func check(now: Date = Date()) -> [ChangeEvent]? {
+    public func check(now: Date = Date(), helper: HelperSession? = nil) -> [ChangeEvent]? {
         guard checking.try() else { return nil }
         defer { checking.unlock() }
-        let events = ingest(ChangeReaders.read(previous: latest, now: now))
+        let events = ingest(ChangeReaders.read(previous: latest, now: now, helper: helper))
         save()
         return events
     }

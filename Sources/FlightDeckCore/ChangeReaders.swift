@@ -9,25 +9,32 @@ import Foundation
 public enum ChangeReaders {
     /// Reads every category. `previous` supplies app signatures already checked, so an unchanged app isn't checked
     /// again. Blocking; call off the main thread.
-    public static func read(previous: Inventory?, now: Date = Date()) -> Inventory {
+    /// `helper`: the root helper's session; while it is unlocked, Mac-wide profiles and background items are read too.
+    public static func read(previous: Inventory?, now: Date = Date(), helper: HelperSession? = nil) -> Inventory {
         var inv = Inventory(time: now, items: [], boot: Sysctl.timeval("kern.boottime"))
+        let viaHelper = helper.map { helperItems($0) }
         if let os = macOS() { inv.items.append(os) } else { inv.unavailable[.macOS] = "SystemVersion.plist couldn't be read." }
         // Login items need System Events (an Automation prompt), so only launchd plists are tracked here.
         inv.items += Launchd.startupItems(includeLoginItems: false).map(launchItem)
+        if viaHelper?.itemsOK != true {
         inv.limits.append("Login items and apps' background items (System Settings › Login Items) aren't listed: reading them needs Automation permission or root. Launch agents and daemons are.")
+        }
         if let out = Shell.run("/usr/bin/systemextensionsctl", ["list"]) { inv.items += systemExtensions(out) }
         else { inv.unavailable[.systemExtension] = "systemextensionsctl could not be run." }
         if let out = Shell.run("/usr/bin/kmutil", ["showloaded", "--list-only"], timeout: 20), out.contains("com.apple.") { inv.items += kernelExtensions(out) }
         else { inv.unavailable[.kernelExtension] = "kmutil showloaded gave no usable output." }
         inv.items += profiles(user: Shell.run("/usr/bin/profiles", ["list"]), enrollment: Shell.run("/usr/bin/profiles", ["status", "-type", "enrollment"]))
         inv.items += managedPreferences()
+        if viaHelper?.profilesOK != true {
         inv.limits.append("Configuration profiles installed for the whole Mac can only be listed with root; FlightDeck shows your user's profiles, MDM enrollment and the managed-settings domains they create in /Library/Managed Preferences.")
+        }
         if let out = Shell.run("/bin/launchctl", ["print-disabled", "system"], timeout: 5) {
             inv.items += sharing(overrides: Launchd.parseDisabled(out), plistDisabled: sharingDefaults())
         } else { inv.unavailable[.sharing] = "launchctl print-disabled system could not be run." }
         inv.items += apps(InstalledApps.scan(), previous: previous)
         if let root = brewRoot() { inv.items += homebrew(root: root) }
         else { inv.unavailable[.homebrew] = "Homebrew isn't installed (no /opt/homebrew or /usr/local Cellar)." }
+        addHelperItems(viaHelper, to: &inv, previous: previous)
         return inv
     }
 
