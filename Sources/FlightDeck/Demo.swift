@@ -27,6 +27,7 @@ enum Demo {
         App(name: "Notes", path: "/System/Applications/Notes.app/Contents/MacOS/Notes", cpu: 2, memGB: 0.3, procs: 1),
         App(name: "Messages", path: "/System/Applications/Messages.app/Contents/MacOS/Messages", cpu: 3, memGB: 0.4, procs: 2, netKB: 40),
         App(name: "kernel_task", path: "", cpu: 14, memGB: 0.1, procs: 1),
+        App(name: "Google Chrome", path: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", cpu: 38, memGB: 2.4, procs: 5, gpu: 4, watts: 1.8, netKB: 600),   // tabs: DemoChromeTabs
     ]
 
     /// Frames for the last minute, 1 s apart, with gentle variation so graphs look alive.
@@ -148,6 +149,7 @@ enum Demo {
         let now = Date()
         e.thermal.note(limits: thermalLimits, at: now)
         for f in frames(template: template, count: 120) { e.feed(f, findings: analyzer.ingest(f)) }
+        e.chromeTabs = DemoChromeTabs.attribution(for: e.current?.processes ?? [])   // invented; demo never opens the tab socket
         e.demoInject(incidents: incidents(now), reports: reports(now), rules: demoRules, ruleLog: demoRuleLog(now))
         e.demoTimeline = timeline(template: template, now: now)
         e.demoMarks = marks(now: now)

@@ -22,6 +22,9 @@ final class Engine: ObservableObject {
     @Published private(set) var current: Snapshot?
     /// Always the latest live sample, even while replaying (menu bar, Dock, alerts).
     @Published private(set) var liveSnapshot: Snapshot?
+    /// Chrome tabs per renderer, beside the live sample (never inside it: tab data stays in memory). Demo mode sets it.
+    @Published var chromeTabs: [ProcessIdentity: ChromeTabAttribution] = [:]
+    private let chromeStore = ChromeTabsService.sharedStore, chromeResolver = ChromeTabsResolver()
     /// Graph history, oldest first, always `historyLength` long. `nil` entries are gaps (sampling was paused, or a hole
     /// in a replayed recording); graphs draw them as breaks rather than interpolating across. Processes are trimmed to the top 12
     /// by CPU to keep the array light; use `current` for the full list.
@@ -427,11 +430,16 @@ final class Engine: ObservableObject {
         let visible = uiVisible
         let front = NSWorkspace.shared.frontmostApplication?.processIdentifier
         resumeSuspended()
-        queue.async { [sampler, analyzer, incidentLog, ruleEngine, dailyLog] in
+        queue.async { [sampler, analyzer, incidentLog, ruleEngine, dailyLog, chromeStore, chromeResolver] in
             sampler.processes.includeSelf = includeSelf
             sampler.networkInterval = visible ? 0 : 5   // per-process network every 5 s while no window is visible
             sampler.background = !visible
             let s = sampler.sample()
+            var tabs: [ProcessIdentity: ChromeTabAttribution] = [:]
+            if !chromeStore.isEmpty {   // feature off or nothing connected: zero added work
+                chromeStore.prune(liveBrowsers: Set(s.processes.map(\.identity)))
+                tabs = chromeResolver.resolve(processes: s.processes, tables: chromeStore.tables())
+            }
             self.processHistory.record(s.processes)
             self.launchLog.ingest(s.processes, at: s.time)
             // Respawn loops and baseline findings ("3× its usual memory") join the Analyzer's, so they reach the banner,
@@ -461,6 +469,7 @@ final class Engine: ObservableObject {
                 Alerts.shared.evaluate(found + self.reportFindings + self.sleepFindings, now: s.time)
                 firings.forEach { self.execute($0) }
                 if let log { self.incidents = log }
+                if tabs != self.chromeTabs { self.chromeTabs = tabs }
                 self.ingest(s)
             }
         }
