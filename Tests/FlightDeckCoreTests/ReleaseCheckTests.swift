@@ -121,4 +121,93 @@ final class ReleaseCheckTests: XCTestCase {
         XCTAssertEqual(ReleaseInfo.releaseURL(htmlURL: nil, tag: "v1.7.0+build5").absoluteString,
                        "https://github.com/cemeyer2/flightdeck/releases/tag/v1.7.0%2Bbuild5")
     }
+
+    // MARK: Rules
+
+    let now = Date(timeIntervalSince1970: 1_800_000_000)
+
+    func due(lastCheckedAt: Date?, retryNotBefore: Date? = nil, enabled: Bool = true, demo: Bool = false, versionKnown: Bool = true) -> Bool {
+        ReleaseCheck.shouldCheck(now: now, lastCheckedAt: lastCheckedAt, retryNotBefore: retryNotBefore, enabled: enabled,
+                                 demo: demo, versionKnown: versionKnown)
+    }
+
+    func testScheduleRule() {
+        XCTAssertTrue(due(lastCheckedAt: nil))
+        XCTAssertFalse(due(lastCheckedAt: now - 23 * 3600))
+        XCTAssertTrue(due(lastCheckedAt: now - 25 * 3600))
+        // The scheduled path never checks with the toggle off.
+        for last in [nil, now - 23 * 3600, now - 25 * 3600, now + 86_400 * 3] { XCTAssertFalse(due(lastCheckedAt: last, enabled: false)) }
+        XCTAssertFalse(due(lastCheckedAt: nil, demo: true))
+        XCTAssertFalse(due(lastCheckedAt: nil, versionKnown: false))
+        XCTAssertFalse(due(lastCheckedAt: nil, retryNotBefore: now + 600))
+    }
+
+    func testFutureLastCheckedIsDue() {
+        XCTAssertTrue(due(lastCheckedAt: now + 3 * 86_400))
+    }
+
+    func testFarFutureRetryIsDiscardedNotReclamped() {
+        XCTAssertNil(ReleaseCheck.effectiveRetry(now + 30 * 86_400, now: now))
+        XCTAssertEqual(ReleaseCheck.effectiveRetry(now + 3600, now: now), now + 3600)
+        XCTAssertTrue(due(lastCheckedAt: nil, retryNotBefore: now + 30 * 86_400))
+        XCTAssertEqual(ReleaseCheck.checkNowAvailability(demo: false, versionKnown: true, inFlight: false, now: now,
+                                                         retryNotBefore: now + 30 * 86_400), .available)
+    }
+
+    func testCheckNowAvailability() {
+        func a(demo: Bool = false, versionKnown: Bool = true, inFlight: Bool = false, at: Date? = nil, retry: Date? = nil) -> CheckNowAvailability {
+            ReleaseCheck.checkNowAvailability(demo: demo, versionKnown: versionKnown, inFlight: inFlight, now: at ?? now, retryNotBefore: retry)
+        }
+        // No `enabled` parameter: Check Now works with automatic checks off (user decision U1).
+        XCTAssertEqual(a(), .available)
+        XCTAssertEqual(a(demo: true), .demo)
+        XCTAssertEqual(a(versionKnown: false), .unknownVersion)
+        XCTAssertEqual(a(inFlight: true), .inFlight)
+        XCTAssertEqual(a(retry: now + 600), .rateLimited(until: now + 600))
+        XCTAssertEqual(a(at: now + 601, retry: now + 600), .available)
+    }
+
+    func testRateLimitHeaderForms() {
+        func r(_ status: Int, _ h: [String: String] = [:]) -> Date? { ReleaseCheck.rateLimitRetry(status: status, headers: h, now: now) }
+        XCTAssertEqual(r(429), now + 3600)
+        XCTAssertEqual(r(403, ["X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "\(Int(now.timeIntervalSince1970) + 900)"]), now + 900)
+        XCTAssertEqual(r(403, ["retry-after": "120"]), now + 120)
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX"); f.timeZone = TimeZone(identifier: "GMT"); f.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
+        XCTAssertEqual(r(429, ["Retry-After": f.string(from: now + 1800)]), now + 1800)
+        XCTAssertNil(r(403, ["X-RateLimit-Remaining": "12"]))
+        XCTAssertNil(r(200))
+        XCTAssertEqual(r(429, ["Retry-After": "999999"]), now + 86_400)
+        XCTAssertEqual(r(429, ["Retry-After": "soon"]), now + 3600)
+        XCTAssertEqual(r(429, ["X-RateLimit-Reset": "\(Int(now.timeIntervalSince1970) - 60)"]), now + 3600)
+    }
+
+    func release(_ s: String) -> ReleaseInfo {
+        ReleaseInfo(tag: "v" + s, version: v(s), url: ReleaseInfo.releaseURL(htmlURL: nil, tag: "v" + s))
+    }
+
+    func testNotifyDecision() {
+        func n(latest: String = "1.7.0", installed: String = "1.6.0", lastNotified: String? = nil, alerts: Bool = true) -> ReleaseNotice? {
+            ReleaseCheck.notice(latest: release(latest), installed: v(installed), lastNotified: lastNotified, alertsEnabled: alerts)
+        }
+        let first = n()
+        XCTAssertEqual(first?.identifier, "update-1.7.0")
+        XCTAssertEqual(first?.title, "FlightDeck 1.7.0 is available")
+        XCTAssertEqual(first?.body, "You have 1.6.0. Click to see what's new.")
+        XCTAssertEqual(first?.url, release("1.7.0").url)
+        XCTAssertNil(n(lastNotified: "1.7.0"))
+        XCTAssertNil(n(lastNotified: "1.7"))
+        XCTAssertNil(n(alerts: false))
+        XCTAssertNil(n(latest: "1.6.0"))
+        XCTAssertNil(n(installed: "1.8.0"))
+        XCTAssertNotNil(n(lastNotified: "1.6.5"))
+        XCTAssertNotNil(n(lastNotified: "garbage"))
+        XCTAssertNil(ReleaseCheck.notice(latest: nil, installed: v("1.6.0"), lastNotified: nil, alertsEnabled: true))
+    }
+
+    func testPermissionDecision() {
+        for t in [false, true] { for a in [false, true] { for r in [false, true] {
+            XCTAssertEqual(ReleaseCheck.shouldRequestPermission(toggledOn: t, alertsEnabled: a, alreadyRequested: r), t && a && !r)
+        } } }
+    }
 }
