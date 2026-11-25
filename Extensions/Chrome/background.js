@@ -20,6 +20,8 @@ let reconnectTimer = null;
 let sendTimer = null;
 let lastSent = 0;
 let seq = 0;
+let sending = false;
+let sendAgain = false;
 
 function connect() {
   reconnectTimer = null;
@@ -69,7 +71,18 @@ async function framesOf(tab) {
     .map((f) => ({ frameId: f.frameId, parentFrameId: f.parentFrameId, processId: f.processId, origin: originOf(f.url) }));
 }
 
+// One table at a time: a request that arrives while one is being built (the app's refresh right after connect, say)
+// runs once more afterwards, so an older table is never posted after a newer one.
 async function sendTable() {
+  if (sending) { sendAgain = true; return; }
+  sending = true;
+  try { await buildAndPost(); } finally {
+    sending = false;
+    if (sendAgain) { sendAgain = false; scheduleSend(true); }
+  }
+}
+
+async function buildAndPost() {
   if (port === null) return;
   lastSent = Date.now();
   let tabs;
@@ -99,5 +112,7 @@ chrome.tabs.onUpdated.addListener((tabId, info) => {
 });
 chrome.webNavigation.onCommitted.addListener(changed);
 chrome.webNavigation.onCompleted.addListener(changed);
+// Wakes the worker when Chrome starts, so the top-level connect() below runs without waiting for a tab event.
+chrome.runtime.onStartup.addListener(() => {});
 
 connect();
