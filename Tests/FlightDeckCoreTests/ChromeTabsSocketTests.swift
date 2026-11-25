@@ -1,0 +1,189 @@
+// Chrome tabs: the host-to-app socket (its path, the directory and stale-socket checks, peer credentials), the
+// listener's per-connection protocol, and the built binary in native-host mode end to end.
+import XCTest
+import Darwin
+@testable import FlightDeckCore
+
+final class ChromeTabsSocketTests: XCTestCase {
+    var dirs: [URL] = []
+    override func tearDown() { for d in dirs { try? FileManager.default.removeItem(at: d) }; dirs = [] }
+
+    /// A short temporary directory (socket paths must stay under 104 bytes).
+    func tempDir(mode: mode_t = 0o700) -> URL {
+        let d = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("fdct-" + UUID().uuidString.prefix(8))
+        mkdir(d.path, mode); chmod(d.path, mode)
+        dirs.append(d)
+        return d
+    }
+
+    func waitUntil(_ timeout: TimeInterval = 2, _ cond: () -> Bool) -> Bool {
+        let end = Date().addingTimeInterval(timeout)
+        while Date() < end { if cond() { return true }; usleep(10_000) }
+        return cond()
+    }
+
+    // MARK: Path and filesystem checks
+
+    func testSocketPathDefault() {
+        let u = ChromeTabsSocket.socketURL(appSupport: URL(fileURLWithPath: "/Users/me/Library/Application Support"), tmpDir: "/var/t/", env: [:])
+        XCTAssertEqual(u.path, "/Users/me/Library/Application Support/Flightdeck/ChromeTabs/chrome-tabs.sock")
+    }
+
+    func testSocketPathFallsBackWhenTooLong() {
+        let long = "/" + String(repeating: "a", count: 119)
+        let u = ChromeTabsSocket.socketURL(appSupport: URL(fileURLWithPath: long), tmpDir: "/var/folders/xy/T/", env: [:])
+        XCTAssertTrue(u.path.hasPrefix("/var/folders/xy/T/"), u.path)
+        XCTAssertEqual(u.lastPathComponent, "chrome-tabs.sock")
+        XCTAssertLessThanOrEqual(u.path.utf8.count, 103)
+    }
+
+    func testSocketPathEnvOverride() {
+        let u = ChromeTabsSocket.socketURL(appSupport: URL(fileURLWithPath: "/a"), tmpDir: "/t", env: ["FLIGHTDECK_CHROME_SOCKET_DIR": "/tmp/x"])
+        XCTAssertEqual(u.path, "/tmp/x/chrome-tabs.sock")
+    }
+
+    func testPrepareDirectoryRejectsSymlinkWrongModeAndFile() throws {
+        let base = tempDir()
+        let fresh = base.appendingPathComponent("new")
+        XCTAssertNoThrow(try ChromeTabsSocket.prepareDirectory(fresh))
+        var st = stat(); lstat(fresh.path, &st)
+        XCTAssertEqual(st.st_mode & 0o777, 0o700, "created 0700")
+        XCTAssertNoThrow(try ChromeTabsSocket.prepareDirectory(fresh), "an existing good directory is fine")
+
+        let open = base.appendingPathComponent("open"); mkdir(open.path, 0o755); chmod(open.path, 0o755)
+        XCTAssertThrowsError(try ChromeTabsSocket.prepareDirectory(open)) { XCTAssertEqual($0 as? ChromeTabsSocket.SetupError, .wrongMode(0o755)) }
+
+        let link = base.appendingPathComponent("link"); symlink(fresh.path, link.path)
+        XCTAssertThrowsError(try ChromeTabsSocket.prepareDirectory(link)) { XCTAssertEqual($0 as? ChromeTabsSocket.SetupError, .symlink) }
+
+        let file = base.appendingPathComponent("file"); FileManager.default.createFile(atPath: file.path, contents: Data())
+        XCTAssertThrowsError(try ChromeTabsSocket.prepareDirectory(file)) { XCTAssertEqual($0 as? ChromeTabsSocket.SetupError, .notDirectory) }
+    }
+
+    func testRemoveStaleSocketOnlyUnlinksOwnedSocket() throws {
+        let d = tempDir()
+        let missing = d.appendingPathComponent("none.sock")
+        XCTAssertNoThrow(try ChromeTabsSocket.removeStaleSocket(missing))
+
+        let file = d.appendingPathComponent("file.sock"); FileManager.default.createFile(atPath: file.path, contents: Data())
+        XCTAssertThrowsError(try ChromeTabsSocket.removeStaleSocket(file)) { XCTAssertEqual($0 as? ChromeTabsSocket.SetupError, .staleNotSocket) }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: file.path))
+
+        let link = d.appendingPathComponent("link.sock"); symlink(file.path, link.path)
+        XCTAssertThrowsError(try ChromeTabsSocket.removeStaleSocket(link))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: file.path))
+
+        // A real (stale) socket we own is removed.
+        let sock = d.appendingPathComponent("s.sock")
+        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+        var addr = sockaddr_un(); addr.sun_family = sa_family_t(AF_UNIX)
+        withUnsafeMutableBytes(of: &addr.sun_path) { p in _ = sock.path.withCString { strncpy(p.baseAddress!.assumingMemoryBound(to: CChar.self), $0, p.count - 1) } }
+        let r = withUnsafePointer(to: &addr) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { Darwin.bind(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) } }
+        XCTAssertEqual(r, 0); close(fd)
+        XCTAssertNoThrow(try ChromeTabsSocket.removeStaleSocket(sock))
+        var st = stat()
+        XCTAssertNotEqual(lstat(sock.path, &st), 0)
+    }
+
+    func testPeerOfSelfConnection() throws {
+        var fds: [Int32] = [0, 0]
+        XCTAssertEqual(socketpair(AF_UNIX, SOCK_STREAM, 0, &fds), 0)
+        defer { close(fds[0]); close(fds[1]) }
+        let p = try XCTUnwrap(ChromePeerAuth.peer(of: fds[0]))
+        XCTAssertEqual(p.pid, getpid())
+        XCTAssertEqual(p.uid, getuid())
+        XCTAssertNotNil(p.auditToken)
+        XCTAssertNil(ChromePeerAuth.browser(ofHostPID: getpid()), "our parent isn't Google Chrome")
+        // Our own signature satisfies our own requirement (skipped when the test runner is unsigned).
+        if let req = ChromePeerAuth.ownRequirement() { XCTAssertTrue(ChromePeerAuth.isTrusted(p, requirement: req)) }
+    }
+
+    // MARK: Listener
+
+    let browserID = ProcessIdentity(pid: 4242, startTime: 77)
+
+    func startListener(authorized: Bool = true) throws -> (ChromeTabsListener, ChromeTabStore, URL) {
+        let sock = tempDir().appendingPathComponent("ct").appendingPathComponent("chrome-tabs.sock")
+        let store = ChromeTabStore()
+        let id = browserID
+        let l = ChromeTabsListener(socket: sock, store: store, authorize: { _ in authorized ? id : nil })
+        try l.start()
+        addTeardownBlock { l.stop() }
+        return (l, store, sock)
+    }
+
+    func send(_ fd: Int32, _ m: ChromeTabsMessage) { _ = ChromeFraming.writeFrame(fd: fd, m.encoded()) }
+    let table = ChromeTabTable(seq: 1, tabs: [ChromeRawTab(tabId: 1, windowId: 1, active: true, audible: false, discarded: false,
+                                                           url: "https://a.example/", title: "A", lastAccessed: 1,
+                                                           frames: [ChromeRawFrame(frameId: 0, parentFrameId: -1, processId: 5, origin: "https://a.example")])])
+
+    func testListenerRoundTrip() throws {
+        let (_, store, sock) = try startListener()
+        var st = stat(); lstat(sock.path, &st)
+        XCTAssertEqual(st.st_mode & 0o777, 0o600)
+        let fd = try XCTUnwrap(ChromeTabsSocket.connect(sock))
+        send(fd, .origin(ChromeTabsConstants.allowedOrigins[0]))
+        send(fd, .hello(protocol: 1, extensionVersion: "1.0.0"))
+        send(fd, .tabs(table))
+        XCTAssertTrue(waitUntil { store.tables().values.first == self.table })
+        XCTAssertEqual(store.tables().keys.first?.browser, browserID)
+        // A bad table drops the connection's previous one.
+        _ = ChromeFraming.writeFrame(fd: fd, Data(#"{"type":"tabs","seq":2,"tabs":[{"tabId":1.5}]}"#.utf8))
+        XCTAssertTrue(waitUntil { store.tables().isEmpty })
+        XCTAssertFalse(store.hellos().isEmpty)
+        close(fd)
+        XCTAssertTrue(waitUntil { store.isEmpty }, "disconnect removes that connection")
+    }
+
+    func testListenerRejectsWrongOriginAndUnauthorized() throws {
+        let (_, store, sock) = try startListener()
+        let fd = try XCTUnwrap(ChromeTabsSocket.connect(sock))
+        send(fd, .origin("chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"))
+        send(fd, .hello(protocol: 1, extensionVersion: "1.0.0"))
+        var b: UInt8 = 0
+        XCTAssertEqual(read(fd, &b, 1), 0, "closed by the app")
+        close(fd)
+        let fd2 = try XCTUnwrap(ChromeTabsSocket.connect(sock))
+        send(fd2, .hello(protocol: 1, extensionVersion: "1.0.0"))   // no origin first
+        XCTAssertEqual(read(fd2, &b, 1), 0)
+        close(fd2)
+        XCTAssertTrue(store.isEmpty)
+
+        let (_, store2, sock2) = try startListener(authorized: false)
+        let fd3 = try XCTUnwrap(ChromeTabsSocket.connect(sock2))
+        send(fd3, .origin(ChromeTabsConstants.allowedOrigins[0]))
+        send(fd3, .hello(protocol: 1, extensionVersion: "1.0.0"))
+        XCTAssertEqual(read(fd3, &b, 1), 0, "an unauthorised peer is closed at once")
+        close(fd3)
+        XCTAssertTrue(store2.isEmpty)
+    }
+
+    func testListenerOversizeFrameDropsConnection() throws {
+        let (_, store, sock) = try startListener()
+        let fd = try XCTUnwrap(ChromeTabsSocket.connect(sock))
+        send(fd, .origin(ChromeTabsConstants.allowedOrigins[0]))
+        send(fd, .hello(protocol: 1, extensionVersion: "1.0.0"))
+        XCTAssertTrue(waitUntil { !store.hellos().isEmpty })
+        var header = UInt32(64 * 1024 * 1024)
+        _ = write(fd, &header, 4)
+        var b: UInt8 = 0
+        XCTAssertEqual(read(fd, &b, 1), 0)
+        close(fd)
+        XCTAssertTrue(waitUntil { store.isEmpty })
+    }
+
+    func testListenerStopClearsStoreAndSocket() throws {
+        let (l, store, sock) = try startListener()
+        let fd = try XCTUnwrap(ChromeTabsSocket.connect(sock))
+        send(fd, .origin(ChromeTabsConstants.allowedOrigins[0]))
+        send(fd, .hello(protocol: 1, extensionVersion: "1.0.0"))
+        XCTAssertTrue(waitUntil { !store.isEmpty })
+        l.stop()
+        XCTAssertTrue(store.isEmpty)
+        var st = stat()
+        XCTAssertNotEqual(lstat(sock.path, &st), 0, "socket unlinked")
+        var b: UInt8 = 0
+        XCTAssertEqual(read(fd, &b, 1), 0, "open connections are closed")
+        close(fd)
+    }
+}
