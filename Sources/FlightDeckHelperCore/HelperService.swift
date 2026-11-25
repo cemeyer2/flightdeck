@@ -127,7 +127,9 @@ public final class HelperService {
     private func data(_ r: HelperRequest) -> HelperResponse {
         switch r {
         case .setAgentContents(let on):
-            settings.agentContents = on
+            do { try settings.setAgentContents(on) } catch {
+                return refuse(.toolFailed, "The helper couldn't save the agent setting: \(error.localizedDescription)")
+            }
             return .ok
         case .processRusage(let ids):
             // A recycled identity is left out silently; the rest of the batch is still answered.

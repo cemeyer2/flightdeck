@@ -62,6 +62,8 @@ final class HelperModel: ObservableObject {
     @Published private(set) var agentContents = false
     /// An unregister() failure after turning the helper off (the status itself then reads Off).
     @Published private(set) var unregisterError: String?
+    /// Why the last change to the agent setting didn't take (the toggle shows the stored value either way).
+    @Published private(set) var agentContentsError: String?
     @Published private(set) var busy = false
 
     /// The session for the current state: nil unless the toggle is on, the build is eligible, the daemon is
@@ -273,9 +275,12 @@ final class HelperModel: ObservableObject {
     func setAgentContents(_ on: Bool) {
         guard let s = session, s.state == .unlocked else { return }
         Task.detached(priority: .userInitiated) {
-            _ = s.request(.setAgentContents(on), deadline: HelperSession.controlDeadline)
+            var error: String?
+            if case .failure(let e) = s.request(.setAgentContents(on), deadline: HelperSession.controlDeadline) {
+                error = e.description
+            }
             s.refreshStatus()
-            await MainActor.run { self.refresh() }
+            await MainActor.run { [error] in self.agentContentsError = error; self.refresh() }
         }
     }
 }
@@ -314,6 +319,7 @@ struct HelperSettingsSection: View {
                 Toggle("Let AI agents read other processes' details (arguments, environment, open files, stacks)",
                        isOn: Binding(get: { model.agentContents }, set: { model.setAgentContents($0) }))
                     .disabled(model.status != .unlocked)
+                if let e = model.agentContentsError { note("Couldn't change the agent setting: \(e)").foregroundStyle(.orange) }
             }
             if Demo.isEnabled { note("Not available in demo mode.") }
         }

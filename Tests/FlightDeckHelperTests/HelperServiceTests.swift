@@ -216,6 +216,37 @@ final class HelperServiceTests: XCTestCase {
         XCTAssertTrue(settings.agentContents)
     }
 
+    func testSetAgentContentsReportsAFailedWrite() {
+        let s = greeted()
+        settings.failWrite = true
+        let r = send(s, .setAgentContents(true), auth: form)
+        XCTAssertEqual(code(r), .toolFailed)
+        if case .refused(let x) = r { XCTAssertTrue(x.message.contains("couldn't save")) }
+        XCTAssertFalse(settings.agentContents)
+        XCTAssertEqual(send(s, .status, auth: form), .status(HelperServiceStatus(unlocked: true, holderAlive: true, agentContents: false)))
+    }
+
+    func testSettingsFileRoundTripsWithOwnerOnlyMode() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = FileHelperSettingsStore(url: dir.appendingPathComponent("sub/settings.json"))
+        XCTAssertFalse(store.agentContents)
+        try store.setAgentContents(true)
+        XCTAssertTrue(store.agentContents)
+        let mode = try FileManager.default.attributesOfItem(atPath: store.url.path)[.posixPermissions] as? Int
+        XCTAssertEqual(mode, 0o600)
+    }
+
+    func testSettingsFileWriteFailureThrows() throws {
+        // The parent "folder" is a regular file, so neither the folder nor the file can be made.
+        let blocker = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try Data().write(to: blocker)
+        defer { try? FileManager.default.removeItem(at: blocker) }
+        let store = FileHelperSettingsStore(url: blocker.appendingPathComponent("settings.json"))
+        XCTAssertThrowsError(try store.setAgentContents(true))
+        XCTAssertFalse(store.agentContents)
+    }
+
     func testRemoveRightAndSettings() {
         let s = greeted()
         settings.agentContents = true

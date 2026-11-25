@@ -56,7 +56,13 @@ final class FakeRunner: ToolRunning {
 }
 
 final class MemorySettings: HelperSettingsStoring {
+    struct WriteFailed: Error {}
     var agentContents = false
     var removed = false
+    var failWrite = false
+    func setAgentContents(_ on: Bool) throws {
+        if failWrite { throw WriteFailed() }
+        agentContents = on
+    }
     func removeAll() { agentContents = false; removed = true }
 }
