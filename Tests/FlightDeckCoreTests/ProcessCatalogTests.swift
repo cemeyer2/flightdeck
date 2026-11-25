@@ -161,4 +161,94 @@ final class ProcessCatalogTests: XCTestCase {
         XCTAssertEqual(c.entry(id: "chrome")?.makerName, "Google")
         XCTAssertEqual(c.entry(id: "logd")?.makerName, "Apple")
     }
+
+    // MARK: wording
+
+    func known(_ e: ProcessExplanation, verified: Bool = true) -> ProcessMatch { .known(e, by: .name, pathVerified: verified) }
+
+    /// A match adds a note but never takes the finding's action line away, and a managed agent is never told to quit.
+    func testFindingDetailKeepsActionForEveryQuitCase() {
+        let action = "Quit it or let it finish if you don't need it right now."
+        for q in ProcessExplanation.QuitSafety.allCases {
+            let e = Self.entry("e-\(q.rawValue)", quit: q)
+            let d = ProcessCatalogText.findingDetail(known(e), defaultAction: action)
+            XCTAssertTrue(d.hasPrefix(e.findingNote), d); XCTAssertGreaterThan(d.count, e.findingNote.count + 1, d)
+            switch q {
+            case .relaunches, .never: XCTAssertTrue(d.contains("won't help"), d)
+            case .safe, .avoid: XCTAssertTrue(d.hasSuffix(action), d)
+            }
+        }
+        let m = Self.fixture().entry(id: "crowdstrike")!
+        let d = ProcessCatalogText.findingDetail(known(m), defaultAction: action)
+        XCTAssertTrue(d.hasPrefix(m.findingNote)); XCTAssertTrue(d.hasSuffix(ProcessCatalogText.managedAction))
+        XCTAssertEqual(ProcessCatalogText.findingDetail(.unknown, defaultAction: action), action)
+        XCTAssertEqual(ProcessCatalogText.findingDetail(.lookalike(m), defaultAction: action), action)
+        XCTAssertNil(ProcessCatalogText.findingNote(.lookalike(m)))
+        XCTAssertEqual(ProcessCatalogText.findingNote(known(m)), m.findingNote)
+    }
+
+    func testManagedNeverSuggestsQuitting() {
+        let m = Self.fixture().entry(id: "crowdstrike")!
+        let texts = [ProcessCatalogText.findingDetail(known(m), defaultAction: "Quit it or let it finish.")]
+            + ProcessCatalogText.inspectorRows(m).flatMap { [$0.label, $0.value] }
+        for t in texts { XCTAssertNil(t.range(of: "quit", options: .caseInsensitive), t) }
+        XCTAssertTrue(ProcessCatalogText.inspectorRows(m).contains { $0.value.contains(ProcessCatalogText.managedLabel) })
+    }
+
+    func testQuitSentences() {
+        XCTAssertEqual(ProcessExplanation.QuitSafety.safe.sentence, "Safe to quit. It starts again when it's needed.")
+        XCTAssertEqual(ProcessExplanation.QuitSafety.relaunches.sentence, "macOS starts it again within seconds, so quitting it doesn't help.")
+        XCTAssertEqual(ProcessExplanation.QuitSafety.avoid.sentence, "Quitting it interrupts something you'll notice, such as sound, sync or your display.")
+        XCTAssertEqual(ProcessExplanation.QuitSafety.never.sentence, "Don't. It's part of macOS, and quitting it can log you out, freeze or restart the Mac.")
+        let rows = ProcessCatalogText.inspectorRows(Self.entry("x", quit: .relaunches, whatToDo: "Restart the Mac."))
+        XCTAssertEqual(rows.map(\.label), ["Maker", "Usually busy when", "Quitting it", "If it misbehaves"])
+        let bare = ProcessExplanation(id: "y", title: "Y", summary: "Y.", maker: .apple, quit: .safe, findingNote: "Y.", names: ["y"], groundedIn: "x-man-page://1/y")
+        XCTAssertEqual(ProcessCatalogText.inspectorRows(bare).map(\.label), ["Maker", "Quitting it"], "rows without a value are left out")
+    }
+
+    func testTooltip() {
+        let c = Self.fixture()
+        var s = AnalyzerTests().proc("mdworker_shared", path: Self.mdworkerPath, pid: 5)
+        let m = c.lookup(name: s.name, path: s.path, signature: nil)
+        XCTAssertEqual(ProcessCatalogText.rowTooltip(m, s).components(separatedBy: "\n"), ["Title mdworker — Summary of mdworker.", Self.mdworkerPath])
+        s.path = "/Users/x/Downloads/mdworker_shared"
+        XCTAssertEqual(ProcessCatalogText.rowTooltip(c.lookup(name: s.name, path: s.path, signature: nil), s), s.path, "a lookalike gets today's path-only text")
+        var r = AnalyzerTests().proc("secret", path: "", pid: 6); r.restricted = true
+        XCTAssertEqual(ProcessCatalogText.rowTooltip(c.lookup(name: r.name, path: r.path, signature: nil), r), ProcessCatalogText.restricted)
+        let f = AnalyzerTests().proc("falcond", path: "/Library/CS/falcond", pid: 7)
+        XCTAssertTrue(ProcessCatalogText.rowTooltip(c.lookup(name: f.name, path: f.path, signature: nil), f).hasSuffix("\n" + ProcessCatalogText.managedLabel))
+    }
+
+    func testTooltipNameOnlySuffix() {
+        var s = AnalyzerTests().proc("coreaudiod", path: "", pid: 8); s.restricted = true
+        let t = ProcessCatalogText.rowTooltip(Self.fixture().lookup(name: s.name, path: s.path, signature: nil), s)
+        XCTAssertEqual(t, "Title coreaudiod — Summary of coreaudiod. (matched by name only)\n" + ProcessCatalogText.restricted)
+    }
+
+    func testLookalikeSentence() {
+        let e = Self.fixture().entry(id: "mdworker")!
+        XCTAssertEqual(ProcessCatalogText.lookalikeSentence(e, path: NSHomeDirectory() + "/Downloads/mdworker"),
+                       "Named like macOS's mdworker_shared (Title mdworker), but it isn't where macOS keeps it: ~/Downloads/mdworker.")
+        XCTAssertTrue(ProcessCatalogText.lookalikeSentence(e, path: "/usr/local/bin/mdworker").hasSuffix(": /usr/local/bin/mdworker."))
+    }
+
+    func testKnownFactsLaunchedByStartupItem() {
+        let s = AnalyzerTests().proc("agent", path: "/Library/Vendor/agent", pid: 9)
+        let job = StartupItem(label: "com.vendor.agent", path: "/Library/LaunchAgents/com.vendor.agent.plist", program: "/Library/Vendor/agent",
+                              kind: "Launch Agent (All Users)", runAtLoad: true, keepAlive: true, disabled: false, loaded: true, vendor: "Vendor")
+        let l = ProcessFacts.lines(s, signature: Self.sig(team: "ABCDE12345"), ancestry: [(9, "agent"), (1, "launchd")], startupItems: [job])
+        XCTAssertEqual(l.map(\.label), ["Signer", "Team", "Launched by", "Parent", "Description"])
+        XCTAssertEqual(l[2].value, "com.vendor.agent (Launch Agent (All Users))")
+        XCTAssertEqual(l[3].value, "launchd (1)")
+        XCTAssertEqual(l.last?.value, ProcessCatalogText.noDescription)
+    }
+
+    /// With no launchd job for its path, the launcher is the parent from the ancestry.
+    func testKnownFactsFallBackToParent() {
+        let a = AnalyzerTests().proc("Thing", path: "/Applications/Thing.app/Contents/MacOS/Thing", pid: 10)
+        let l = ProcessFacts.lines(a, signature: nil, ancestry: [(10, "Thing"), (1, "launchd")], startupItems: [])
+        XCTAssertEqual(l.map(\.label), ["App", "Launched by", "Description"])
+        XCTAssertEqual(l[0].value, "Thing"); XCTAssertEqual(l[1].value, "parent launchd (1)")
+        XCTAssertEqual(l.last?.value, ProcessCatalogText.noDescription)
+    }
 }
