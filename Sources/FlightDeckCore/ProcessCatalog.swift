@@ -162,7 +162,7 @@ public struct ProcessCatalog: Sendable {
         if let e = byName[name] { return judge(e, .name, path: path, signature: signature) }
         if let e = namePrefixes.first(where: { name.hasPrefix($0.0) })?.1 { return judge(e, .namePrefix, path: path, signature: signature) }
         if let s = signature, let id = s.identifier, let e = byBundleID[id] {
-            let ok = e.isApple ? (s.isApple && s.valid) : (s.valid && s.teamID.map(e.teamIDs.contains) == true)
+            let ok = e.isApple ? (s.isApple && s.valid) : (s.valid && s.teamAnchored && s.teamID.map(e.teamIDs.contains) == true)
             return ok ? .known(e, by: .bundleID, pathVerified: true) : .lookalike(e, .signer)
         }
         return .unknown
@@ -196,7 +196,8 @@ public struct ProcessCatalog: Sendable {
     /// The lookalike guard. Apple entries are vouched for only in macOS's own folders, with an unreadable path, or with
     /// a valid Apple signature. Vendor entries matched by path fail only on a signing-team mismatch; matched by name, a
     /// valid signature from the entry's team vouches for any location, and without one the path must be unreadable or
-    /// inside one of the entry's own locations.
+    /// inside one of the entry's own locations. Only a team ID on an Apple-issued certificate vouches (`teamAnchored`): a
+    /// self-signed certificate can claim any team.
     private func judge(_ e: ProcessExplanation, _ key: MatchKey, path: String, signature: ProcessDetails.Signature?) -> ProcessMatch {
         if e.isApple {
             if path.isEmpty { return .known(e, by: key, pathVerified: false) }
@@ -204,7 +205,7 @@ public struct ProcessCatalog: Sendable {
             return .lookalike(e, .location)
         }
         if let s = signature, !e.teamIDs.isEmpty, !(s.teamID.map(e.teamIDs.contains) ?? false) { return .lookalike(e, .signer) }
-        let signedByTeam = signature?.valid == true && !e.teamIDs.isEmpty
+        let signedByTeam = signature.map { $0.valid && $0.teamAnchored } == true && !e.teamIDs.isEmpty
         switch key {
         case .path, .pathPrefix: return .known(e, by: key, pathVerified: true)
         case _ where signedByTeam: return .known(e, by: key, pathVerified: true)

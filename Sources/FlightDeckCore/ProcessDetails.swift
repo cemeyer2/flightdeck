@@ -43,6 +43,9 @@ public struct ProcessDetails: Sendable {
         public var isApple: Bool
         public var valid: Bool
         public var hardenedRuntime: Bool
+        /// The signature satisfies `anchor apple generic` with `teamID` as the leaf certificate's OU, so the team ID is
+        /// Apple-issued. A self-signed certificate can carry any OU, so only this lets a team ID vouch for a process.
+        public var teamAnchored: Bool
         /// One-line description for the inspector. With no certificate chain and no team ID the signature is ad-hoc.
         public var summary: String {
             if !valid { return "Not signed or signature invalid" }
@@ -258,9 +261,29 @@ public enum ProcessInspector {
         var req: SecRequirement?
         SecRequirementCreateWithString("anchor apple" as CFString, [], &req)
         let isApple = req.map { SecStaticCodeCheckValidity(code, quick, $0) == errSecSuccess } ?? false
-        return .init(identifier: d[kSecCodeInfoIdentifier as String] as? String, teamID: d[kSecCodeInfoTeamIdentifier as String] as? String,
+        let teamID = d[kSecCodeInfoTeamIdentifier as String] as? String
+        return .init(identifier: d[kSecCodeInfoIdentifier as String] as? String, teamID: teamID,
                      // 0x10000 is kSecCodeSignatureRuntime (hardened runtime) in the code-signing flags.
-                     authority: names, isApple: isApple, valid: valid, hardenedRuntime: flags & 0x10000 != 0)
+                     authority: names, isApple: isApple, valid: valid, hardenedRuntime: flags & 0x10000 != 0,
+                     teamAnchored: teamID.map { anchored(code, team: $0, flags: quick) } ?? false)
+    }
+
+    /// Whether the code at `path` (or its .app bundle) is signed with an Apple-issued certificate for `team`.
+    static func isAnchored(_ path: String, team: String) -> Bool {
+        var code: SecStaticCode?
+        let target = AppUsage.bundle(of: path) ?? path
+        guard SecStaticCodeCreateWithPath(URL(fileURLWithPath: target) as CFURL, [], &code) == errSecSuccess, let code else { return false }
+        return anchored(code, team: team, flags: SecCSFlags(rawValue: kSecCSDoNotValidateExecutable | kSecCSDoNotValidateResources))
+    }
+
+    /// `anchor apple generic` covers Developer ID and App Store certificates; the leaf's OU is the team the certificate
+    /// was issued to. A team ID is 10 letters and digits, so anything else is refused rather than put in the requirement.
+    private static func anchored(_ code: SecStaticCode, team: String, flags: SecCSFlags) -> Bool {
+        guard !team.isEmpty, team.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber) }) else { return false }
+        var req: SecRequirement?
+        guard SecRequirementCreateWithString("anchor apple generic and certificate leaf[subject.OU] = \"\(team)\"" as CFString, [], &req) == errSecSuccess,
+              let req else { return false }
+        return SecStaticCodeCheckValidity(code, flags, req) == errSecSuccess
     }
 
     /// The parent chain from `pid` up to launchd (PID 1) or kernel_task, starting with the process itself. Capped at 64
