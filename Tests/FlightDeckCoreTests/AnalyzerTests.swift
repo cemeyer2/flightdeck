@@ -287,6 +287,10 @@ final class RuleEngineTests: XCTestCase {
         XCTAssertFalse(RuleEngine().allowed(safari, for: .quit))
         XCTAssertTrue(Platform.prefixes.contains("/System/Volumes/Preboot/Cryptexes/"))
         XCTAssertFalse(Platform.isPlatformPath("/usr/local/bin/x"))
+        // the Data volume is user-writable, so a path through it is not macOS's own, even though it starts "/System/"
+        XCTAssertFalse(Platform.isPlatformPath("/System/Volumes/Data/Users/x/mdworker_shared"))
+        XCTAssertTrue(Platform.isPlatformPath("/System/Library/Frameworks/x"))
+        XCTAssertTrue(RuleEngine().allowed(AnalyzerTests().proc("x", path: "/System/Volumes/Data/Users/x/x", pid: 72), for: .quit))
         XCTAssertTrue(RuleEngine().allowed(AnalyzerTests().proc("x", path: "/usr/local/bin/x", pid: 71), for: .quit))
     }
 
