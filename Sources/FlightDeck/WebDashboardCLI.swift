@@ -12,9 +12,9 @@ enum WebDashboardCLI {
     static func document(history: Bool, latest: Bool) -> Data {
         let now = Date(), snap = frames.last
         var i = WebDashboardInputs(snapshot: snap, findings: findings, incidents: Demo.incidents(now),
-                                   displayName: "MacBook Pro", modelName: "MacBook Pro", hardwareModel: Sysctl.string("hw.model") ?? "",
-                                   macOS: FleetService.identity(id: "", hasBattery: false).macOS, appVersion: MCPEndpoint.version,
-                                   uptime: Sysctl.timeval("kern.boottime").map { now.timeIntervalSince($0) },
+                                   // Invented identity too, so nothing on the page describes this Mac.
+                                   displayName: "MacBook Pro", modelName: "MacBook Pro", hardwareModel: "Mac16,7",
+                                   macOS: "26.1", appVersion: MCPEndpoint.version, uptime: 3 * 86400 + 4 * 3600,
                                    paused: false, intervalS: 2, demo: true, redaction: .current)
         if history { i.history = .points(WebDashboardState.history(frames: frames, now: now)) }
         if latest, let snap { i.point = WebPoint(snap) }
