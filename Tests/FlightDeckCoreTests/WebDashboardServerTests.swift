@@ -199,6 +199,21 @@ final class WebDashboardServerTests: XCTestCase {
         XCTAssertTrue(raw(port, request("/")).hasPrefix("HTTP/1.1 200"))
     }
 
+    /// Review focus: a client that dribbles header bytes is cut off at the same deadline, counted from admission.
+    func testDribblingClientIsDroppedAtDeadline() throws {
+        let s = try start(headDeadline: 0.5), port = try XCTUnwrap(s.port)
+        let c = try XCTUnwrap(RawClient(port: port))
+        let started = Date()
+        var dropped = false
+        for ch in "GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nX-Pad: aaaaaaaaaaaaaaaaaaaa" {
+            c.send(String(ch))
+            if c.waitEOF(0.1) { dropped = true; break }
+        }
+        XCTAssertTrue(dropped, "dribbling never finishes a head, so the deadline ends it")
+        XCTAssertLessThan(Date().timeIntervalSince(started), 1.2)
+        withExtendedLifetime(s) {}
+    }
+
     func testSampleNeverPrecedesSnapshot() throws {
         let s = try start(provider: { withHistory, reply in
             if withHistory { DispatchQueue.global().asyncAfter(deadline: .now() + 0.3) { reply(Data(#"{"history":[],"v":1}"#.utf8)) } }
