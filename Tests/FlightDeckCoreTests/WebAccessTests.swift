@@ -97,6 +97,23 @@ final class WebAccessTests: XCTestCase {
         XCTAssertEqual(WebAccess.label(WebPrefix("203.0.113.0/24")!, context: adv), .notLocal)
     }
 
+    /// A broad entry that covers local ranges admits local devices with Advanced off, and the label says so.
+    func testBroadEntryLabelMatchesAdmission() {
+        for entry in ["0.0.0.0/0", "10.0.0.0/7", "192.0.0.0/2", "::/0"] {
+            let p = WebPrefix(entry)!
+            XCTAssertEqual(WebAccess.label(p, context: Self.context()), .localOnly, entry)
+            XCTAssertFalse(WebAccess.label(p, context: Self.context()).isIgnored, entry)
+            XCTAssertEqual(WebAccess.label(p, context: Self.context(advanced: true)), .notLocal, entry)
+        }
+        XCTAssertEqual(admit("192.168.1.40", via: Self.en0, allow: "0.0.0.0/0"), .admit)
+        XCTAssertEqual(admit("10.1.2.3", via: Self.en0, allow: "10.0.0.0/7"), .admit)
+        XCTAssertEqual(admit("11.1.2.3", via: Self.en0, allow: "10.0.0.0/7"), .drop)
+        XCTAssertEqual(WebAccess.EntryLabel.localOnly.text, "Allows local devices only (turn on Advanced to allow the rest)")
+        // covering only this Mac's own global IPv6 subnet counts too
+        XCTAssertEqual(WebAccess.label(WebPrefix("2001:db8::/32")!, context: Self.context()), .localOnly)
+        XCTAssertEqual(WebAccess.label(WebPrefix("203.0.113.0/24")!, context: Self.context()), .notLocalIgnored)
+    }
+
     func testUnknownArrivalDropped() {
         XCTAssertEqual(admit("192.168.1.40", via: WebIP("192.168.77.1")), .drop)
         XCTAssertEqual(admit("192.168.1.40", via: nil), .drop)
