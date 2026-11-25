@@ -51,6 +51,41 @@ final class WebHTTPTests: XCTestCase {
         XCTAssertFalse(WebHTTP.acceptsHost("[2001:db8:1:2::99]:9466", context: ctx))
     }
 
+    /// Review focus: a link-local Host, as Safari on the same link sends it.
+    func testLinkLocalHost() {
+        var c = ctx
+        c.interfaces[0].addresses.append(.init(ip: WebIP("fe80::1")!, length: 64))
+        XCTAssertTrue(WebHTTP.acceptsHost("[fe80::1]:9466", context: c))
+        XCTAssertTrue(WebHTTP.acceptsHost("[fe80::1]", context: c))
+        XCTAssertFalse(WebHTTP.acceptsHost("[fe80::2]:9466", context: c))
+        XCTAssertFalse(WebHTTP.acceptsHost("[fe80::1]:9466", context: ctx), "not an address of this Mac")
+    }
+
+    /// The kernel embeds the interface index in bytes 2–3 of a link-local sockaddr_in6; reading it back must clear them,
+    /// or the address never equals the one in a Host header.
+    func testSockaddrLinkLocalScopeCleared() {
+        var sa = sockaddr_in6()
+        sa.sin6_len = UInt8(MemoryLayout<sockaddr_in6>.size)
+        sa.sin6_family = sa_family_t(AF_INET6)
+        var b = [UInt8](repeating: 0, count: 16)
+        b[0] = 0xfe; b[1] = 0x80; b[2] = 0x00; b[3] = 0x0e; b[15] = 0x01
+        withUnsafeMutableBytes(of: &sa.sin6_addr) { $0.copyBytes(from: b) }
+        let ip = withUnsafeMutablePointer(to: &sa) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { WebNetworkContext.ip($0, family: sa_family_t(AF_INET6)) }
+        }
+        XCTAssertEqual(ip, WebIP("fe80::1"))
+        // A global address keeps bytes 2–3.
+        var g = sockaddr_in6()
+        g.sin6_len = UInt8(MemoryLayout<sockaddr_in6>.size)
+        g.sin6_family = sa_family_t(AF_INET6)
+        let gb: [UInt8] = [0x20, 0x01, 0x0d, 0xb8, 0, 1, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0x23]
+        withUnsafeMutableBytes(of: &g.sin6_addr) { $0.copyBytes(from: gb) }
+        let gip = withUnsafeMutablePointer(to: &g) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { WebNetworkContext.ip($0, family: sa_family_t(AF_INET6)) }
+        }
+        XCTAssertEqual(gip, WebIP("2001:db8:1:2::23"))
+    }
+
     func testLoopbackNeedsLoopbackHost() {
         XCTAssertEqual(gate(head("GET", "/", ["host": "127.0.0.1"]), .admitIfLoopbackHost), .success(.page))
         XCTAssertEqual(gate(head("GET", "/", ["host": "localhost:9466"]), .admitIfLoopbackHost), .success(.page))
