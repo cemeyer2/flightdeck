@@ -72,7 +72,7 @@ final class ProcessCatalogContentTests: XCTestCase {
         for b in ProcessCatalogParts.batches { XCTAssertLessThanOrEqual(b.entries.count, 100, b.area) }
     }
 
-    /// Every name the old 13-row KnownProcess table explained still gets an explanation, except
+    /// Every name the old 13-row explanation table (before the catalog) explained still gets an explanation, except
     /// softwareupdate_download_service, which no longer exists on current macOS and so can't be grounded.
     func testLegacyKnownNamesResolve() {
         let apple = ["mds", "mds_stores", "mdworker", "mdworker_shared", "mdsync", "backupd", "backupd-helper", "photoanalysisd",

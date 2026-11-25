@@ -319,3 +319,64 @@ final class RuleEngineTests: XCTestCase {
         XCTAssertEqual(RuleEngine.load(RuleEngine.save(RuleEngine.examples)).count, 3)
     }
 }
+
+/// Findings explain catalogued processes by adding the entry's note, and always keep an action line: a match never
+/// replaces the advice, changes the severity, or tells anyone to quit a managed security agent.
+final class CatalogFindingTests: XCTestCase {
+    let t = AnalyzerTests()
+    let t0 = Date(timeIntervalSince1970: 14_000_000)
+    let cpuAction = "Quit it or let it finish if you don't need it right now."
+
+    /// The CPU finding for one busy process, after two minutes at `cpu`.
+    func cpuFinding(_ name: String, path: String, catalog: ProcessCatalog? = ProcessCatalogTests.fixture(), cpu: Double = 150) -> Finding? {
+        let a = Analyzer(); if let catalog { a.catalog = catalog }
+        let p = t.proc(name, path: path, pid: 40, cpu: cpu)
+        for i in 0..<120 { a.ingest(t.snap(t0.addingTimeInterval(Double(i)), procs: [p])) }
+        return a.findings.first { $0.id.hasPrefix("cpu:") }
+    }
+
+    func testKnownAppCPUFindingHasNoteAndAction() {
+        let f = cpuFinding("Google Chrome", path: ProcessCatalogTests.chromeMain)
+        XCTAssertEqual(f?.detail, "Note for chrome. " + cpuAction)
+    }
+
+    func testRelaunchesFindingSaysQuittingWontHelp() {
+        let d = cpuFinding("mdworker_shared", path: ProcessCatalogTests.mdworkerPath)?.detail ?? ""
+        XCTAssertTrue(d.hasPrefix("Note for mdworker."), d)
+        XCTAssertTrue(d.contains("won't help"), d)
+    }
+
+    func testLookalikeFindingHasNoNote() {
+        XCTAssertEqual(cpuFinding("mdworker_shared", path: NSHomeDirectory() + "/Downloads/mdworker_shared")?.detail, cpuAction)
+    }
+
+    func testManagedCPUFindingHasITActionAndNoQuit() {
+        let d = cpuFinding("falcond", path: "/Library/CS/falcond")?.detail ?? ""
+        XCTAssertTrue(d.hasSuffix(ProcessCatalogText.managedAction), d)
+        XCTAssertNil(d.range(of: "quit", options: .caseInsensitive), d)
+    }
+
+    func testChromeFindingUsesAppEntry() {
+        let helper = "/Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/131.0.6778.86/Helpers/Google Chrome Helper (Renderer).app/Contents/MacOS/Google Chrome Helper (Renderer)"
+        let d = cpuFinding("Google Chrome Helper (Renderer)", path: helper, catalog: nil)?.detail ?? ""
+        let e = ProcessCatalog.shared.entry(id: "browser-chrome")
+        XCTAssertNotNil(e)
+        XCTAssertTrue(d.hasPrefix(e?.findingNote ?? "-"), d)
+    }
+
+    func testThermalFindingExplainsKernelTask() {
+        let a = Analyzer()
+        var s = t.snap(t0, procs: [t.proc("kernel_task", path: "", pid: 0, cpu: 60)]); s.power.thermalState = 2
+        a.ingest(s)
+        let d = a.findings.first { $0.id == "thermal" }?.detail ?? ""
+        XCTAssertNotNil(ProcessCatalog.shared.entry(id: "kernel-task"))
+        XCTAssertTrue(d.contains(ProcessCatalog.shared.entry(id: "kernel-task")?.findingNote ?? "-"), d)
+    }
+
+    func testSeverityUnchangedByMatch() {
+        let known = cpuFinding("Google Chrome", path: ProcessCatalogTests.chromeMain)
+        let unknown = cpuFinding("Busy", path: "/Applications/Busy.app/Contents/MacOS/Busy")
+        XCTAssertNotNil(known); XCTAssertEqual(known?.severity, unknown?.severity)
+        XCTAssertEqual(unknown?.detail, cpuAction)
+    }
+}

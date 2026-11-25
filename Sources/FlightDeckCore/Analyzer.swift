@@ -102,6 +102,8 @@ func linearFit(_ pts: [(x: Double, y: Double)]) -> (slope: Double, r2: Double)? 
 /// doesn't raise anything. `ingest` rebuilds the whole finding list each time; anything not re-added has ended.
 public final class Analyzer {
     public var thresholds = Thresholds()
+    /// Explanations added to findings about catalogued processes (tests swap in a fixture).
+    public var catalog: ProcessCatalog = .shared
     /// "Normal for this Mac", built from the black box's last 24 h at launch (`seed`). nil until enough history exists.
     public private(set) var baseline: Baseline?
     public private(set) var findings: [Finding] = []
@@ -212,6 +214,11 @@ public final class Analyzer {
         // `add` collects one finding; `pids` are sorted busiest-CPU first so "Inspect"/"Quit" pick the main culprit.
         // `since` is set to now here and replaced with the remembered start at the end of `ingest`.
         let cpuOf = Dictionary(s.processes.map { ($0.pid, $0.cpu) }, uniquingKeysWith: max)
+        // Catalog match for an app. A "proc:" group is checked against a member's path so a lookalike gets no note.
+        let pathOf = Dictionary(s.processes.map { ($0.pid, $0.path) }, uniquingKeysWith: { a, _ in a })
+        func match(_ a: AppUsage) -> ProcessMatch {
+            catalog.lookup(groupKey: a.id, name: a.name, memberPath: a.id.hasPrefix("proc:") ? (a.pids.first.flatMap { pathOf[$0] } ?? "") : "")
+        }
         func add(_ id: String, _ sev: Finding.Severity, _ icon: String, _ title: String, _ detail: String? = nil, _ dest: String? = nil, pids: [Int32]? = nil) {
             active.append(Finding(id: id, severity: sev, icon: icon, title: title, detail: detail, since: t, destination: dest,
                                   pids: pids?.sorted { (cpuOf[$0] ?? 0) > (cpuOf[$1] ?? 0) }))
@@ -227,7 +234,7 @@ public final class Analyzer {
         for (k, v) in hogs {
             guard let a = byKey[k] else { continue }
             add("cpu:\(k)", .caution, "cpu", String(format: "%@ is using %.0f%% CPU", describe(a), v),
-                KnownProcess.explain(a.name) ?? "Quit it or let it finish if you don't need it right now.", "Processes", pids: a.pids)
+                ProcessCatalogText.findingDetail(match(a), defaultAction: "Quit it or let it finish if you don't need it right now."), "Processes", pids: a.pids)
         }
         if hogs.isEmpty, let c = cpuEMA.value, c > 90 {
             add("cpu-saturated", .caution, "cpu", String(format: "CPU is %.0f%% busy", c),
@@ -259,7 +266,7 @@ public final class Analyzer {
         }
         for (k, e) in appGPU { if let v = e.value, v > 80, let a = byKey[k] {
             add("gpu:\(k)", .caution, "cube.transparent", String(format: "%@ is using %.0f%% of the GPU", describe(a), v),
-                KnownProcess.explain(a.name) ?? "Graphics or compute work from this app is keeping the GPU busy.", "Performance:GPU", pids: a.pids)
+                ProcessCatalogText.findingDetail(match(a), defaultAction: "Graphics or compute work from this app is keeping the GPU busy."), "Performance:GPU", pids: a.pids)
         } }
 
         // Apps keeping the Mac awake (system daemons that do this routinely are left out: uid < 500 outside an .app)
@@ -330,7 +337,7 @@ public final class Analyzer {
         // macOS's own thermal throttling, so it's explained rather than blamed.
         if s.power.thermalState >= 2 {
             var d = s.power.hottest.value.map { "Hottest sensor \(Fmt.temp($0)). " } ?? ""
-            if let kt = byKey["proc:kernel_task"], kt.cpu > 50 { d += KnownProcess.explain("kernel_task")! }
+            if let kt = byKey["proc:kernel_task"], kt.cpu > 50, let e = catalog.entry(id: "kernel-task") { d += e.findingNote }
             else if let top = topCPU { d += "Biggest CPU user: \(describe(top))." }
             add("thermal", .warning, "thermometer.high",
                 "Thermal pressure is \(["Nominal", "Fair", "Serious", "Critical"][min(s.power.thermalState, 3)]): the Mac is slowing itself down to cool off",
@@ -350,12 +357,12 @@ public final class Analyzer {
         if let d = diskEMA.value, d > thresholds.diskBps {
             let top = apps.max { $0.diskBps < $1.diskBps }
             add("disk-busy", .info, "internaldrive", "Heavy disk activity (\(Fmt.rate(d)))" + (top.map { ", mostly \(describe($0))" } ?? ""),
-                top.flatMap { KnownProcess.explain($0.name) }, "Performance:Disk")
+                top.flatMap { ProcessCatalogText.findingNote(match($0)) }, "Performance:Disk")
         }
         if let n = netEMA.value, n > thresholds.netBps {
             let top = apps.max { $0.netBps < $1.netBps }
             add("net-busy", .info, "network", "Heavy network traffic (\(Fmt.rate(n)))" + (top.flatMap { $0.netBps > 0 ? ", mostly \(describe($0))" : nil } ?? ""),
-                top.flatMap { KnownProcess.explain($0.name) }, "Performance:Network")
+                top.flatMap { ProcessCatalogText.findingNote(match($0)) }, "Performance:Network")
         }
         if let w = apps.max(by: { $0.wakeups < $1.wakeups }), w.wakeups > thresholds.wakeups {
             add("wakeups:\(w.id)", .info, "alarm", String(format: "%@ wakes the CPU %.0f times a second", describe(w), w.wakeups),
