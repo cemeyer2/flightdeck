@@ -22,5 +22,32 @@ enum ProcessCatalogBrowsers {
             findingNote: "A Safari (or WebKit) tab or web view is busy.",
             namePrefixes: ["com.apple.WebKit."],
             groundedIn: "https://webkit.org/; https://trac.webkit.org/wiki/WebKit2; file:///System/Library/Frameworks/WebKit.framework/Versions/A/XPCServices; x-man-page://8/launchd"),
+        ProcessExplanation(
+            id: "browser-safari", title: "Safari",
+            summary: "Apple's web browser. Like other apps that use WebKit, it shows each page's content through separate WebKit processes.",
+            maker: .apple,
+            busyWhen: nil,
+            quit: .avoid, whatToDo: nil,
+            findingNote: "Safari itself is busy. Busy pages usually show up as separate WebKit processes.",
+            names: ["Safari"], pathPrefixes: ["/System/Volumes/Preboot/Cryptexes/App/System/Applications/Safari.app/", "/System/Cryptexes/App/System/Applications/Safari.app/"],
+            groundedIn: "https://support.apple.com/guide/safari/welcome/mac; https://webkit.org/; https://trac.webkit.org/wiki/WebKit2; file:///System/Cryptexes/App/System/Applications/Safari.app"),
+        ProcessExplanation(
+            id: "browser-arc", title: "Arc browser",
+            summary: "Arc, a web browser made by The Browser Company of New York.",
+            maker: .vendor("The Browser Company"),
+            busyWhen: nil,
+            quit: .avoid, whatToDo: nil,
+            findingNote: "Arc or one of its pages is busy.",
+            pathPrefixes: ["/Applications/Arc.app/"], bundleIDs: ["company.thebrowser.Browser"], teamIDs: ["S6N382Y83G"],
+            groundedIn: "https://arc.net/; file:///Applications/Arc.app"),
+        ProcessExplanation(
+            id: "browser-firefox", title: "Firefox and its helpers",
+            summary: "Mozilla's Firefox web browser and the helper processes that ship inside it.",
+            maker: .vendor("Mozilla"),
+            busyWhen: nil,
+            quit: .avoid, whatToDo: nil,
+            findingNote: "Firefox or one of its pages is busy.",
+            pathPrefixes: ["/Applications/Firefox.app/"], bundleIDs: ["org.mozilla.firefox"], teamIDs: ["43AQ936H96"],
+            groundedIn: "https://www.firefox.com/en-US/; file:///Applications/Firefox.app"),
     ]
 }
