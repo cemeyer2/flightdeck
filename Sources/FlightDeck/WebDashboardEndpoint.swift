@@ -39,11 +39,12 @@ final class WebDashboardEndpoint: ObservableObject {
     /// Called once by the (non-headless) Engine at launch.
     func configure(engine: Engine) { self.engine = engine; apply() }
 
-    /// What the dashboard must never serve because only the privileged helper could see it. Nothing today.
-    /// Merge note: when the privileged-helper branch lands, set `excludeProcess = { $0.source == .helper }` and make
-    /// `excludeFinding` drop findings whose `pids` are all helper-sourced.
-    static func privilegedFilter() -> (excludeProcess: (ProcessSample) -> Bool, excludeFinding: (Finding) -> Bool) {
-        ({ _ in false }, { _ in false })
+    /// What the dashboard must never serve because only the privileged helper could see it: processes whose counters
+    /// came from the helper, and findings about only such processes.
+    static func privilegedFilter(_ snapshot: Snapshot?) -> (excludeProcess: (ProcessSample) -> Bool, excludeFinding: (Finding) -> Bool) {
+        let helperPIDs = Set((snapshot?.processes ?? []).filter { !$0.isAppMeasured }.map(\.pid))
+        return ({ !$0.isAppMeasured },
+                { f in guard let pids = f.pids, !pids.isEmpty else { return false }; return pids.allSatisfy(helperPIDs.contains) })
     }
 
     private var allowlist: WebAllowlist { .parse(UserDefaults.standard.string(forKey: Self.allowlistKey) ?? "") }
@@ -172,7 +173,7 @@ final class WebDashboardEndpoint: ObservableObject {
         let findings = e.map { $0.liveFindings + $0.reportFindings + $0.sleepFindings } ?? []   // live, never a replay
         let muted = Set(findings.filter { Alerts.shared.isMuted($0) }.map(\.id))
         let os = ProcessInfo.processInfo.operatingSystemVersion
-        let filter = Self.privilegedFilter()
+        let filter = Self.privilegedFilter(snapshot)
         return WebDashboardInputs(
             snapshot: snapshot, findings: findings, incidents: e.map { Array($0.incidents.suffix(50)) } ?? [],
             displayName: UserDefaults.standard.string(forKey: Self.nameKey) ?? "", modelName: modelName,
