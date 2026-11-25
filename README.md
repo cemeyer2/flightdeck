@@ -1123,6 +1123,44 @@ flightdeck --bench-ui [N]           # render every main view off-screen N times 
 
 Six themes: Light, Dark, Green, Amber, Blue, Mono.
 
+### Chrome tabs
+
+Chrome runs each tab in a helper process, so the Processes page normally shows a dozen rows all called
+`Google Chrome Helper (Renderer)`. With **Chrome tabs** on (Settings › Integrations, off by default) and the small
+**FlightDeck Tabs** extension loaded in Google Chrome, those rows name the tab instead:
+`youtube.com — Lofi beats to study to (Chrome tab)`. A process that hosts several tabs shows the first one plus
+"+2 more tabs" (the tooltip lists them all), a frame from another site shows as `ads.example.net — frame in youtube.com
+tab`, and extension processes as `Chrome extension process`. The process inspector lists every tab in the process with
+its address, the quit confirmation says which tabs would close, the Processes filter matches tab sites and titles, and a
+Chrome CPU finding gains a line such as "Mostly: youtube.com — Lofi (120%)". A process shared by several tabs is shown
+with its whole CPU figure, marked shared, never split between them.
+
+Setting it up (Load unpacked):
+
+1. Turn on Chrome tabs in Settings › Integrations and click **Set up…**. FlightDeck copies the extension to
+   `~/Library/Application Support/Flightdeck/ChromeExtension`, shows that folder in Finder and opens
+   `chrome://extensions`.
+2. In `chrome://extensions`, turn on **Developer mode**, click **Load unpacked** and choose the `ChromeExtension` folder.
+   Chrome shows warnings about developer-mode extensions; that is expected for an extension loaded this way.
+3. The status line moves from "Waiting for the extension" to "Connected, N tabs". If it never connects, your
+   organisation may block developer mode or unpacked extensions (`chrome://policy`).
+
+When FlightDeck is updated with a newer extension, Settings says "Extension updated — click Reload for FlightDeck Tabs
+in chrome://extensions". Turning Chrome tabs off removes everything FlightDeck installed (the native-messaging manifest
+and the copied folder); remove FlightDeck Tabs in `chrome://extensions` yourself.
+
+**About Chrome's "Read your browsing history" warning.** Chrome shows it for any extension with the `tabs` and
+`webNavigation` permissions, which FlightDeck Tabs needs to see which tab runs in which process. Those, plus
+`nativeMessaging` to talk to FlightDeck, are its only permissions: it has no access to page content and accepts no
+messages from websites or other extensions. It sends the tab list only to FlightDeck on this Mac. FlightDeck keeps tab
+titles and addresses in memory while it runs; they are never saved (not in the black box, recordings, the Flight Log,
+notifications or Fleet) and never leave the Mac. AI assistants (MCP) see only site names, with IP addresses and
+single-label intranet names generalised. **Copy Summary** in the inspector includes each tab's site and title, never
+its address.
+
+Google Chrome stable only; FlightDeck must run from a bundled `FlightDeck.app` (not a `swift build` binary) and not from
+a disk image.
+
 ## Measurement principles
 
 - **No invented zeros.** Every value is `Measured<T>`, either `.value` or `.unavailable(reason)`. Unmeasured
@@ -1133,6 +1171,7 @@ Six themes: Light, Dark, Green, Amber, Blue, Mono.
 - **Self-monitoring.** FlightDeck appears in its own process list by default (Settings → toggle).
 - **Identity-safe actions.** Signals are sent only if the PID still has the same start time (`ProcessIdentity`).
 - **Private by design.** FlightDeck sends no data anywhere. By default it makes no network requests at all; the only exception is the opt-in latency probe (Settings › Network › Network quality), which pings your router and one host you choose. The opt-in Prometheus and MCP servers only accept connections from this Mac.
+- **Chrome tabs stay in memory.** Tab titles and URLs are never saved or shared; AI assistants see sites, not pages, and IP addresses and intranet names are generalised.
 
 - **Private by design.** FlightDeck sends no data anywhere. By default it makes no network requests at all; the exceptions are the opt-in latency probe (Settings › Network › Network quality), which pings your router and one host you choose, and the UniFi view, which talks only to the console you configure (and, while nothing is configured, checks whether your router looks like one). The Camera & Mic history records only that a device was in use, never audio
 or video, and never leaves this Mac.
@@ -1162,6 +1201,9 @@ or video, and never leaves this Mac.
 - The CPU speed limit comes from `pmset -g therm`, which runs only while Performance › Thermals is open, so throttling
   by the power manager is only seen (and only counted toward "time throttled") then; thermal pressure and the GPU
   heat cap are tracked all the time.
+- Chrome tabs: work in Chrome's shared processes (the GPU process, which decodes video, and the network service) isn't
+  attributed to tabs. Google Chrome stable only. A renderer shared by several tabs isn't split between them, and a
+  label can lag a navigation within the same process by about a second.
 
 ## Layout
 
