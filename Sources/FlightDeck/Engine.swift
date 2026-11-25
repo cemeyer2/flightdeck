@@ -194,6 +194,7 @@ final class Engine: ObservableObject {
         refreshSleepFindings()
         RestartsModel.launchCheck()   // once, ~30 s after launch: unexpected shutdowns and panics since the last check
         ChangeService.start()   // What Changed: an inventory ~90 s after launch, then every 15 minutes (nothing in demo mode)
+        ReleaseCheckModel.shared.start()   // update checks: hourly wake, checks only if on in Settings › About (nothing in demo mode)
         BackupService.start()   // Time Machine check every 15 min (log every 6 h); nothing in demo mode
         if !Demo.isEnabled { DisplayHistory.shared.start() }   // display connects and mode changes this session (callback, no polling)
         NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in

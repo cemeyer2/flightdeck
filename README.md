@@ -905,9 +905,9 @@ elapsed time, and which apps' CPU use changed.
 
 ### Settings and appearance
 
-Settings has five tabs: **General** (theme, Dock icon, sample interval, temperature unit °C/°F, Stress Map animation,
+Settings has six tabs: **General** (theme, Dock icon, sample interval, temperature unit °C/°F, Stress Map animation,
 menu bar), **Alerts** (notifications, thresholds, mutes, temperature and camera/mic alerts), **Recording** (the black
-box), **Network** (latency probe, speed-test schedule, UniFi) and **Integrations** (Prometheus and MCP). Themes: Light,
+box), **Network** (latency probe, speed-test schedule, UniFi), **Integrations** (Prometheus and MCP) and **About** (version, update checks). Themes: Light,
 Dark, **System** (follows macOS's appearance and switches with it), and four single-hue phosphor looks (green, amber,
 blue, mono). FlightDeck › About shows the version.
 
@@ -939,6 +939,13 @@ command (record, save or replay the black box, open a flight log, capture diagno
 10 minutes, a text summary (system, findings, top processes; no serial number or hardware UUID), macOS crash and hang
 reports from the last 24 hours, 2-second stack samples of the busiest and any hung app of yours, and recent unified-log
 errors. It may contain personal paths and names, so review it before sharing.
+
+### Update checks
+
+*Settings › About, off by default.* When on, FlightDeck asks `api.github.com` once a day for the latest stable release;
+the request carries no version or device data, and nothing is downloaded. Check Now asks once, even with it off. The
+result shows in Settings › About with a link to the release page, and a new version posts one notification (only while
+the master Alerts switch is on; the Settings notice shows either way). Never in demo mode or on development builds.
 
 ## Integrations
 
@@ -1132,9 +1139,7 @@ Six themes: Light, Dark, Green, Amber, Blue, Mono.
 - **Light in the background.** With no FlightDeck window on screen, view updates stop (graphs catch up instantly when you return) and sampling drops to every 2 s (Settings); the black box, findings and alerts keep running. Background cost is about 2.5% of one core.
 - **Self-monitoring.** FlightDeck appears in its own process list by default (Settings → toggle).
 - **Identity-safe actions.** Signals are sent only if the PID still has the same start time (`ProcessIdentity`).
-- **Private by design.** FlightDeck sends no data anywhere. By default it makes no network requests at all; the only exception is the opt-in latency probe (Settings › Network › Network quality), which pings your router and one host you choose. The opt-in Prometheus and MCP servers only accept connections from this Mac.
-
-- **Private by design.** FlightDeck sends no data anywhere. By default it makes no network requests at all; the exceptions are the opt-in latency probe (Settings › Network › Network quality), which pings your router and one host you choose, and the UniFi view, which talks only to the console you configure (and, while nothing is configured, checks whether your router looks like one). The Camera & Mic history records only that a device was in use, never audio
+- **Private by design.** FlightDeck sends no data anywhere. By default it makes no network requests at all; the exceptions are the opt-in latency probe (Settings › Network › Network quality), which pings your router and one host you choose, the UniFi view, which talks only to the console you configure (and, while nothing is configured, checks whether your router looks like one), and update checks (Settings › About, off by default), which ask GitHub once a day for the latest release; Check Now there asks once when clicked, even with them off. The opt-in Prometheus and MCP servers only accept connections from this Mac. The Camera & Mic history records only that a device was in use, never audio
 or video, and never leaves this Mac.
 
 ## Known limits

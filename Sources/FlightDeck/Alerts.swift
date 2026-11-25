@@ -1,6 +1,7 @@
 // macOS notifications for findings and rule actions. Engine calls `evaluate` on the main actor after every sample with
 // the live findings plus diagnostic-report findings; rule actions call `post`. Settings live in user defaults.
 import Foundation
+import AppKit
 import UserNotifications
 import FlightDeckCore
 
@@ -105,8 +106,24 @@ final class Alerts: NSObject, UNUserNotificationCenterDelegate {
         center.add(UNNotificationRequest(identifier: UUID().uuidString, content: c, trigger: nil))
     }
 
+    /// A notification that opens a release page when clicked (update checks). Unlike `post(title:body:destination:)`,
+    /// this obeys the master Alerts switch and notification authorisation, and says whether it was actually posted.
+    func post(title: String, body: String, url: URL, identifier: String) async -> Bool {
+        guard enabled, let center else { return false }
+        let status = await center.notificationSettings().authorizationStatus
+        guard status == .authorized || status == .provisional else { return false }
+        let c = UNMutableNotificationContent()
+        c.title = title; c.body = body; c.userInfo = ["url": url.absoluteString]
+        do { try await center.add(UNNotificationRequest(identifier: identifier, content: c, trigger: nil)); return true } catch { return false }
+    }
+
     // Delegate callbacks arrive off the main actor; hop back before navigating.
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
+        // A release page (update checks): re-validated here, so only this repo's releases on github.com ever open.
+        if let s = response.notification.request.content.userInfo["url"] as? String, let u = URL(string: s), ReleaseInfo.isTrustedReleaseURL(u) {
+            await MainActor.run { _ = NSWorkspace.shared.open(u) }
+            return
+        }
         let d = response.notification.request.content.userInfo["destination"] as? String
         await MainActor.run { onOpen?(d?.isEmpty == false ? d : nil) }
     }
