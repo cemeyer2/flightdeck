@@ -149,7 +149,8 @@ public struct ProcessCatalog: Sendable {
     static let selfID = "flightdeck"
     /// This process's executable resolved by realpath, as process paths are reported (keeping /private, which
     /// URL.resolvingSymlinksInPath strips).
-    static let ownExecutable = Bundle.main.executablePath.flatMap(realPath)
+    static let ownExecutable = ownExecutable(Bundle.main.executablePath)
+    static func ownExecutable(_ path: String?) -> String? { path.flatMap(realPath) }
 
     /// realpath(3): symlinks resolved and /private kept. nil if the path does not exist.
     static func realPath(_ p: String) -> String? {

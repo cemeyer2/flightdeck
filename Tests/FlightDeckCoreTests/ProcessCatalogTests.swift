@@ -282,8 +282,7 @@ final class ProcessCatalogTests: XCTestCase {
         XCTAssertTrue(FileManager.default.createFile(atPath: exe, contents: Data()))
         let own = ProcessCatalog.realPath(exe)
         XCTAssertEqual(own, "/private" + exe)
-        XCTAssertEqual(ProcessCatalog.ownExecutable, Bundle.main.executablePath.flatMap(ProcessCatalog.realPath),
-                       "the app's own executable is found with realpath, keeping /private")
+        XCTAssertEqual(ProcessCatalog.ownExecutable(exe), "/private" + exe, "the app's own executable keeps /private, as process paths do")
         let c = ProcessCatalog.shared
         let m = c.lookup(pid: getpid() + 1, name: "FlightDeck", path: "/private" + exe, signature: nil, ownExecutable: own)
         XCTAssertEqual(m.known?.id, "flightdeck"); XCTAssertEqual(verified(m), true)
