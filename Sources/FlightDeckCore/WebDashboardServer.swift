@@ -41,7 +41,7 @@ public final class WebDashboardServer: @unchecked Sendable {
     private var context: WebNetworkContext
     private var allowlist: WebAllowlist
     private let requestedPort: UInt16, loopbackOnly: Bool
-    private let headDeadline: TimeInterval, keepAlive: TimeInterval, maxBacklog: Int
+    private let headDeadline: TimeInterval, keepAlive: TimeInterval, maxBacklog: Int, releaseFallback: TimeInterval
     private let provider: Provider
     private let onStreamCount: @Sendable (Int) -> Void
     private let log: @Sendable (String) -> Void
@@ -51,13 +51,16 @@ public final class WebDashboardServer: @unchecked Sendable {
     public static let invalidAllowlist = "Fix the allowed addresses first"
 
     /// `port` 0 picks a free one (tests). `loopbackOnly` binds 127.0.0.1 (tests and the developer demo).
+    /// `releaseFallback`: how long after `stop()` the port stops being held for a listener that hasn't cancelled.
     public init(port: UInt16, loopbackOnly: Bool = false, context: WebNetworkContext, allowlist: WebAllowlist,
                 headDeadline: TimeInterval = 10, keepAlive: TimeInterval = 25, maxBacklog: Int = 256 << 10,
+                releaseFallback: TimeInterval = WebDashboardServer.releaseFallback,
                 provider: @escaping Provider,
                 onStreamCount: @escaping @Sendable (Int) -> Void = { _ in },
                 log: @escaping @Sendable (String) -> Void = { _ in }) {
         requestedPort = port; self.loopbackOnly = loopbackOnly; self.context = context; self.allowlist = allowlist
         self.headDeadline = headDeadline; self.keepAlive = keepAlive; self.maxBacklog = maxBacklog
+        self.releaseFallback = releaseFallback
         self.provider = provider; self.onStreamCount = onStreamCount; self.log = log
     }
 
@@ -110,8 +113,8 @@ public final class WebDashboardServer: @unchecked Sendable {
         }
     }
     static let releasing = Releasing()
-    /// A cancel that never reports `.cancelled` stops holding up the port after this long.
-    static let releaseFallback: TimeInterval = 5
+    /// A cancel that never reports `.cancelled` stops holding up the port after this long (the default).
+    public static let releaseFallback: TimeInterval = 5
 
     /// The port this server's listener holds (or is binding), its Releasing mark once stopped, and whether the listener
     /// has already cancelled itself. Guarded by `lock`: `stop()` may run on any thread, the state handler on `queue`.
@@ -181,7 +184,7 @@ public final class WebDashboardServer: @unchecked Sendable {
         let t = hold.token
         lock.unlock()
         if let p, let t {
-            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + Self.releaseFallback) {
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + releaseFallback) {
                 Self.releasing.end(p, token: t)
             }
         }

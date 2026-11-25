@@ -67,12 +67,13 @@ final class WebDashboardServerTests: XCTestCase {
     }
 
     func start(allow: String = "", headDeadline: TimeInterval = 10, maxBacklog: Int = 256 << 10, counts: Counts? = nil,
+               releaseFallback: TimeInterval = WebDashboardServer.releaseFallback,
                provider: WebDashboardServer.Provider? = nil) throws -> WebDashboardServer {
         let p: WebDashboardServer.Provider = provider ?? { withHistory, reply in
             reply(withHistory ? Data(#"{"history":[],"v":1}"#.utf8) : Data(#"{"v":1}"#.utf8))
         }
         let s = WebDashboardServer(port: 0, loopbackOnly: true, context: Self.context(), allowlist: .parse(allow),
-                                   headDeadline: headDeadline, maxBacklog: maxBacklog, provider: p,
+                                   headDeadline: headDeadline, maxBacklog: maxBacklog, releaseFallback: releaseFallback, provider: p,
                                    onStreamCount: { counts?.add($0) })
         let ready = expectation(description: "ready")
         let err = Box<String?>(nil)
@@ -287,10 +288,11 @@ final class WebDashboardServerTests: XCTestCase {
 
     /// Turning the dashboard off and on again keeps its port: a new server on it waits until the old listener has
     /// finished cancelling, with no retry here. The old server's queue is held up first, as on a busy Mac where it
-    /// hasn't got to the cancel yet when the new one binds. TIME_WAIT from replies closed on the server side doesn't
-    /// block the bind.
+    /// hasn't got to the cancel yet when the new one binds. The old server's fallback is far longer than the wait, so
+    /// only the `.cancelled` hand-off can let the new one bind in time. TIME_WAIT from replies closed on the server
+    /// side doesn't block the bind.
     func testRestartOnSamePortAfterTraffic() throws {
-        let a = try start(), port = try XCTUnwrap(a.port)
+        let a = try start(releaseFallback: 60), port = try XCTUnwrap(a.port)
         // Replies close from the server side, which leaves its end of each connection in TIME_WAIT.
         for _ in 0..<3 { XCTAssertTrue(raw(port, request("/")).hasPrefix("HTTP/1.1 200")) }
         a.queue.suspend()
