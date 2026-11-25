@@ -9,7 +9,7 @@ public protocol ToolRunning: AnyObject {
 
 /// Every tool the helper may run, as root. Paths and argument arrays are constants; the only interpolated values
 /// are a validated PID and sample length, rendered with String(_:). There is no case that takes a string.
-public enum HelperTool: Sendable, Equatable {
+public enum HelperTool: Sendable, Hashable {
     case netstatTCP, netstatUDP, lsofListening, lsofInternet, tmutilSnapshots, profilesDevice, sfltoolDumpbtm
     case sample(pid: Int32, seconds: Int), footprint(pid: Int32)
 
