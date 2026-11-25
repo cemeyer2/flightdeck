@@ -86,7 +86,10 @@ struct ProcessesView: View {
         .alert("\(confirm?.2 ?? "") “\(confirm?.0.name ?? "")”?", isPresented: Binding(get: { confirm != nil }, set: { if !$0 { confirm = nil } })) {
             Button(confirm?.2 ?? "OK", role: .destructive) { if let c = confirm { send(c.1, c.0) }; confirm = nil }
             Button("Cancel", role: .cancel) { confirm = nil }
-        } message: { Text("PID \(confirm?.0.pid ?? 0). Unsaved work in this process may be lost.") }
+        } message: {   // a renderer's live tabs close with it (never named while replaying)
+            Text("PID \(confirm?.0.pid ?? 0). Unsaved work in this process may be lost."
+                 + ((e.mode == .live ? confirm.flatMap { e.chromeTabs[$0.0.identity] } : nil).flatMap(ChromeTabText.killWarning).map { "\n\($0)" } ?? ""))
+        }
         .alert("\(confirmApp?.1 == true ? "Force Quit" : "Quit") “\(confirmApp?.0.localizedName ?? "")”?",
                isPresented: Binding(get: { confirmApp != nil }, set: { if !$0 { confirmApp = nil } })) {
             Button(confirmApp?.1 == true ? "Force Quit" : "Quit", role: .destructive) {
