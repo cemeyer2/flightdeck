@@ -185,6 +185,11 @@ final class Engine: ObservableObject {
         applyProbe()
         MetricsEndpoint.shared.configure(engine: self)   // Prometheus endpoint, if turned on in Settings
         MCPEndpoint.shared.configure(engine: self)       // MCP server for AI assistants, if turned on in Settings
+        // Optional root helper: its session fills in other users' counters while unlocked (never in demo mode).
+        if !Demo.isEnabled {
+            HelperModel.shared.onSessionChange = { [queue, sampler] s in queue.async { sampler.processes.helper = s } }
+            let s = HelperModel.currentSession(); queue.async { [sampler] in sampler.processes.helper = s }
+        }
         FleetService.shared.configure(engine: self)      // Fleet: share this Mac (if on) and poll paired Macs
         CameraMicService.start()   // camera & microphone listeners (event-driven; nothing in demo mode)
         PeripheralsService.start()   // plug/unplug notifications and accessory battery readings (nothing in demo mode)

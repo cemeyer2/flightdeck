@@ -237,13 +237,14 @@ struct InspectorView: View {
                 row("Energy", s?.energyWatts.map { String(format: "%.2f W", $0) })
                 row("Idle wake-ups", s.map { String(format: "%.0f /s", $0.wakeups) })
                 // Disk counters of restricted (other-user/protected) processes can't be read, so show "—" rather than 0.
-                row("Disk total", s.map { $0.restricted ? nil : "read \(Fmt.bytes($0.diskRead)) · written \(Fmt.bytes($0.diskWritten))" } ?? nil)
+                row("Disk total", s.map { $0.valuesUnreadable ? nil : "read \(Fmt.bytes($0.diskRead)) · written \(Fmt.bytes($0.diskWritten))" } ?? nil)
                 row("Network total", s?.network.map { "↓ \(Fmt.bytes($0.totalIn)) · ↑ \(Fmt.bytes($0.totalOut)) · \($0.connections) connections" })
                 row("Priority (nice)", d?.nice.map { "\($0)" })
                 row("Working directory", d?.cwd.value)
                 row("Arguments", d?.arguments.value?.joined(separator: " "))
             }.font(.system(size: 12, design: .monospaced)).textSelection(.enabled)
         }
+        if let s { HelperInspectorPanel(sample: s) }   // other users' processes only, while the helper is on
         if let c = d?.counters { StatisticsPanel(c: c, prev: model.previousCounters, s: s) }
         if let sig = d?.signature {
             Panel(title: "Code signature") {

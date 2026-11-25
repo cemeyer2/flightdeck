@@ -9,6 +9,7 @@
 import SwiftUI
 import AppKit
 import FlightDeckCore
+import FlightDeckHelperProtocol
 
 @MainActor
 final class MCPEndpoint: ObservableObject {
@@ -128,6 +129,32 @@ final class EngineMCPSource: MCPDataSource, @unchecked Sendable {
     /// The app's live Camera & Mic watch (none in demo mode).
     func cameraMic() async -> (live: CameraMicLive?, store: CameraMicStore)? {
         CameraMicService.watch.map { ($0.live, $0.store) }
+    }
+    /// The root helper, as the app holds it. The status (and so the agent setting) is re-read on every call, and an
+    /// unreachable helper counts as off. Nothing here can show the admin prompt.
+    func helperAccess() async -> HelperMCPAccess {
+        guard let s = HelperModel.currentSession() else { return .off }
+        return await Task.detached(priority: .userInitiated) {
+            s.refreshStatus()
+            return HelperMCPAccess(state: s.state, agentContents: s.agentContents)
+        }.value
+    }
+    func helperContents(_ id: ProcessIdentity, parts: Set<DetailPart>) async -> HelperProcessContents? {
+        guard let s = HelperModel.currentSession(), await helperAccess().contentsAllowed else { return nil }
+        return await Task.detached(priority: .userInitiated) {
+            if case .success(.contents(let c)) = s.request(.processDetails(id: id.helperID, parts: parts), deadline: 10) { return c }
+            return nil
+        }.value
+    }
+    func helperSample(_ id: ProcessIdentity, seconds: Int) async -> Result<String, HelperRefusal>? {
+        guard let s = HelperModel.currentSession(), await helperAccess().contentsAllowed else { return nil }
+        return await Task.detached(priority: .userInitiated) { () -> Result<String, HelperRefusal>? in
+            switch s.request(.sampleStacks(id: id.helperID, seconds: seconds), deadline: Double(seconds) + 20) {
+            case .success(.toolText(let t)): return .success(t)
+            case .failure(.refused(let r)): return .failure(r)
+            default: return nil
+            }
+        }.value
     }
     /// The live tracker's open day plus its saved days (none in demo mode).
     func destinations() async -> (days: [DestinationDay], known: KnownDestinations)? {

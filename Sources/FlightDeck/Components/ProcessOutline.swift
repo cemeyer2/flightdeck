@@ -37,15 +37,15 @@ enum ProcColumn: String, CaseIterable, Equatable {
         switch self {
         case .name: s.notResponding == true ? "\(s.name) (Not Responding)" : s.name
         case .pid: s.pid < 0 ? "" : "\(s.pid)"
-        case .cpu: s.restricted ? "—" : String(format: "%.1f", s.cpu)
-        case .memory: s.restricted ? "—" : Fmt.bytes(s.memory)
-        case .disk: s.restricted ? "—" : (s.diskReadBps + s.diskWriteBps > 0 ? Fmt.rate(s.diskReadBps + s.diskWriteBps) : "0")
+        case .cpu: s.valuesUnreadable ? "—" : String(format: "%.1f", s.cpu)
+        case .memory: s.valuesUnreadable ? "—" : Fmt.bytes(s.memory)
+        case .disk: s.valuesUnreadable ? "—" : (s.diskReadBps + s.diskWriteBps > 0 ? Fmt.rate(s.diskReadBps + s.diskWriteBps) : "0")
         case .netIn: s.network.map { $0.inBps > 0 ? Fmt.rate($0.inBps) : "0" } ?? "—"
         case .netOut: s.network.map { $0.outBps > 0 ? Fmt.rate($0.outBps) : "0" } ?? "—"
         case .energy: s.energyWatts.map { String(format: "%.2f W", $0) } ?? "—"
         case .gpu: s.gpu.map { String(format: "%.1f", $0) } ?? ""
-        case .wakeups: s.restricted ? "—" : String(format: "%.0f", s.wakeups)
-        case .threads: s.restricted ? "—" : "\(s.threads)"
+        case .wakeups: s.valuesUnreadable ? "—" : String(format: "%.0f", s.wakeups)
+        case .threads: s.valuesUnreadable ? "—" : "\(s.threads)"
         case .user: s.user
         case .kind: s.translated == true ? "Intel" : (s.translated == false ? "Apple" : "")
         case .sleep: s.powerAssertions.map { a in a.contains { $0.preventsDisplaySleep } ? "Display" : "Prevents" } ?? ""
@@ -403,7 +403,7 @@ struct ProcessOutline: NSViewRepresentable {
             if c == .name {
                 if it.s.notResponding == true { cell.textField?.textColor = .systemRed }
                 cell.imageView?.image = icon(for: it.s.path)
-                cell.toolTip = it.s.restricted ? "Owned by another user; some values are unavailable without elevated rights" : it.s.path
+                cell.toolTip = it.s.source == .helper ? "\(it.s.path) · via helper" : (it.s.restricted ? "Owned by another user; some values are unavailable without elevated rights" : it.s.path)
             }
             return cell
         }

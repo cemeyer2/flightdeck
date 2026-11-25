@@ -71,6 +71,7 @@ struct ProcessesView: View {
                     .pickerStyle(.segmented).labelsHidden().frame(width: 190)
                     .help("Tree: by parent process · Apps: helpers grouped under their app · Flat: every process")
                 Toggle("My processes", isOn: $mineOnly).toggleStyle(.switch)
+                HelperAccessButton()   // "View all processes…" while the helper is locked, Lock while unlocked
                 Spacer()
                 if let c = e.current {
                     Text("\(c.processes.count) processes · \(c.processes.reduce(0) { $0 + $1.threads }) threads")
@@ -173,7 +174,7 @@ struct ProcessDetailBar: View {
             Readout(label: "PID / PPID", value: "\(s.pid) / \(s.ppid)", size: 13)
             Readout(label: "CPU time", value: Fmt.duration(s.cpuTime), size: 13)
             Readout(label: "Started", value: s.startDate.formatted(date: .omitted, time: .standard), size: 13)
-            Readout(label: "Disk R/W total", value: s.restricted ? nil : "\(Fmt.bytes(s.diskRead)) / \(Fmt.bytes(s.diskWritten))", size: 13)
+            Readout(label: "Disk R/W total", value: s.valuesUnreadable ? nil : "\(Fmt.bytes(s.diskRead)) / \(Fmt.bytes(s.diskWritten))", size: 13)
             Spacer()
             Button("Inspect") { AppActions.openInspector?(s.identity) }.keyboardShortcut("i")
             Menu("Actions") { actions() }.frame(width: 90)

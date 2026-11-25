@@ -127,7 +127,7 @@ struct UsersView: View {
     struct Agg: Identifiable { var id: String { user }; var user: String; var procs: Int; var measured: Int; var cpu: Double; var mem: UInt64; var energy: Double? }
     var body: some View {
         let aggs: [Agg] = Dictionary(grouping: e.current?.processes ?? [], by: \.user).map { u, all in
-            let ps = all.filter { !$0.restricted }
+            let ps = all.filter { !$0.valuesUnreadable }   // helper-filled rows (while unlocked) count as readable
             return Agg(user: u, procs: all.count, measured: ps.count, cpu: ps.reduce(0) { $0 + $1.cpu }, mem: ps.reduce(0) { $0 + $1.memory },
                        // nil (shown "—") when no process of this user reports energy, rather than an invented 0 W
                        energy: ps.contains { $0.energyWatts != nil } ? ps.reduce(0) { $0 + ($1.energyWatts ?? 0) } : nil)
@@ -147,7 +147,7 @@ struct UsersView: View {
                         }.font(.system(size: 12, design: .monospaced))
                     }
                 }
-                Panel(title: "Resource use by user", trailing: "other users' processes need root to measure") {
+                Panel(title: "Resource use by user", trailing: "other users' processes need root to measure" + HelperAccessButton.offNote) {
                     Grid(alignment: .leading, horizontalSpacing: 20, verticalSpacing: 6) {
                         GridRow { ForEach(["User", "Processes", "CPU", "", "Memory", "Energy"], id: \.self) { Text($0).font(.meterLabel).foregroundStyle(p.dim) } }
                         ForEach(aggs) { a in
@@ -212,13 +212,14 @@ struct ServicesView: View {
 /// Connections: sockets of the user's own processes from `lsof -i` (other users' need root), refreshed every 3 s
 /// while "Auto refresh" is on. The timer only lives as long as this view, so a closed page stops polling.
 struct ConnectionsView: View {
-    @StateObject var loader = Loader { Connections.list() }
+    @StateObject var loader = Loader { Connections.list(helper: HelperModel.currentSession()) }
     @State private var filter = ""
     @State private var sortOrder = [KeyPathComparator(\ConnectionItem.process)]
     @State private var auto = true
     let timer = Timer.publish(every: 3, on: .main, in: .common).autoconnect()
     var body: some View {
-        let items = (loader.value ?? []).filter { filter.isEmpty || "\($0.process) \($0.remote) \($0.local) \($0.pid)".localizedCaseInsensitiveContains(filter) }
+        let viaHelper = loader.value?.viaHelper ?? false
+        let items = (loader.value?.items ?? []).filter { filter.isEmpty || "\($0.process) \($0.remote) \($0.local) \($0.pid)".localizedCaseInsensitiveContains(filter) }
         VStack(spacing: 0) {
             HStack {
                 TextField("Filter by process, address or port", text: $filter).textFieldStyle(.roundedBorder).frame(maxWidth: 300)
@@ -226,7 +227,8 @@ struct ConnectionsView: View {
                 Spacer()
                 let est = items.filter { $0.state == "ESTABLISHED" }.count
                 let listen = items.filter { $0.state == "LISTEN" }.count
-                Text("\(items.count) sockets · \(est) established · \(listen) listening (your processes)").font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary)
+                Text("\(items.count) sockets · \(est) established · \(listen) listening (\(viaHelper ? "all processes, via helper" : "your processes"))").font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary)
+                if !viaHelper { HelperAccessButton() }
                 Button("Refresh") { loader.load() }
             }.padding(10)
             ListeningPortsPanel()   // every process's listeners (netstat), above this user's sockets

@@ -279,6 +279,7 @@ struct SettingsView: View {
             tab {
                 MetricsExportSection()
                 MCPSection()
+                HelperSettingsSection()
             }
             .tabItem { Label("Integrations", systemImage: "puzzlepiece.extension") }
         }

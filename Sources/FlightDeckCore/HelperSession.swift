@@ -163,6 +163,13 @@ public final class HelperSession: @unchecked Sendable {
         mutex.lock(); status = nil; mutex.unlock()
     }
 
+    /// Drops the XPC connection (which also ends any unlock record the helper holds for it). The next request
+    /// connects again.
+    public func disconnect() {
+        client.invalidate()
+        mutex.lock(); hello = nil; status = nil; statusTime = nil; mutex.unlock()
+    }
+
     /// Standalone --mcp/--snapshot: a session with no authorization, only when the app's toggle is on, the build is
     /// eligible and demo mode is off (`defaults.bool(forKey: "demo")`, the key the app's Demo.isEnabled reads). nil
     /// otherwise. Nothing is sent until first use.
