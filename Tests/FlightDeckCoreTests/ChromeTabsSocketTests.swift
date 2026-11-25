@@ -186,4 +186,72 @@ final class ChromeTabsSocketTests: XCTestCase {
         XCTAssertEqual(read(fd, &b, 1), 0, "open connections are closed")
         close(fd)
     }
+
+    // MARK: The built binary as the native host
+
+    var binary: URL { Bundle(for: Self.self).bundleURL.deletingLastPathComponent().appendingPathComponent("FlightDeck") }
+
+    /// A raw listening socket in `dir` (no checks: the test plays the app).
+    func listenRaw(_ dir: URL) throws -> Int32 {
+        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+        var addr = try XCTUnwrap(ChromeTabsSocket.address(dir.appendingPathComponent(ChromeTabsSocket.socketName).path))
+        let r = withUnsafePointer(to: &addr) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { Darwin.bind(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) } }
+        XCTAssertEqual(r, 0); XCTAssertEqual(listen(fd, 1), 0)
+        return fd
+    }
+
+    /// Chrome's side of the conversation, run against the built binary: it connects to the app's socket and names its
+    /// origin, asks the extension for a refresh, relays the extension's frames, and exits 0 when stdin closes, with
+    /// nothing on stdout but frames.
+    func testChromeHostCLIEndToEnd() throws {
+        guard FileManager.default.isExecutableFile(atPath: binary.path) else { throw XCTSkip("FlightDeck binary not built at \(binary.path)") }
+        let dir = tempDir()
+        let lfd = try listenRaw(dir)
+        defer { close(lfd) }
+        let p = Process()
+        p.executableURL = binary; p.arguments = [ChromeTabsConstants.allowedOrigins[0]]
+        p.environment = ProcessInfo.processInfo.environment.merging(["FLIGHTDECK_CHROME_SOCKET_DIR": dir.path]) { _, b in b }
+        let input = Pipe(), output = Pipe()
+        p.standardInput = input; p.standardOutput = output; p.standardError = FileHandle.nullDevice
+        try p.run()
+        defer { if p.isRunning { p.terminate() } }
+
+        var pfd = pollfd(fd: lfd, events: Int16(POLLIN), revents: 0)
+        XCTAssertEqual(poll(&pfd, 1, 5000), 1, "the host connects")
+        let conn = accept(lfd, nil, nil)
+        XCTAssertGreaterThanOrEqual(conn, 0)
+        defer { close(conn) }
+        let fromHost: (Int) -> Data? = { ChromeFraming.readExact(fd: conn, count: $0) }
+        XCTAssertEqual(try ChromeFraming.readFrame(fromHost).flatMap(ChromeTabsMessage.parse), .origin(ChromeTabsConstants.allowedOrigins[0]))
+
+        let outFD = output.fileHandleForReading.fileDescriptor
+        let stdoutFrame = try ChromeFraming.readFrame { ChromeFraming.readExact(fd: outFD, count: $0) }
+        XCTAssertEqual(stdoutFrame.flatMap(ChromeTabsMessage.parse), .refresh)
+
+        let hello = ChromeTabsMessage.hello(protocol: 1, extensionVersion: "1.0.0")
+        input.fileHandleForWriting.write(ChromeFraming.encode(hello.encoded()))
+        XCTAssertEqual(try ChromeFraming.readFrame(fromHost).flatMap(ChromeTabsMessage.parse), hello, "relayed to the app")
+
+        try input.fileHandleForWriting.close()
+        p.waitUntilExit()
+        XCTAssertEqual(p.terminationStatus, 0)
+        XCTAssertEqual(output.fileHandleForReading.readDataToEndOfFile(), Data(), "nothing on stdout but frames")
+    }
+
+    func testChromeHostCLIRejectsUnknownOrigin() throws {
+        guard FileManager.default.isExecutableFile(atPath: binary.path) else { throw XCTSkip("FlightDeck binary not built at \(binary.path)") }
+        let p = Process()
+        p.executableURL = binary; p.arguments = ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
+        let output = Pipe()
+        p.standardInput = Pipe(); p.standardOutput = output; p.standardError = FileHandle.nullDevice
+        let started = Date()
+        let exited = expectation(description: "exits")
+        p.terminationHandler = { _ in exited.fulfill() }
+        try p.run()
+        wait(for: [exited], timeout: 2)   // exiting before the GUI starts means no window
+        if p.isRunning { p.terminate() }
+        XCTAssertEqual(p.terminationStatus, 64)
+        XCTAssertLessThan(Date().timeIntervalSince(started), 2)
+        XCTAssertEqual(output.fileHandleForReading.readDataToEndOfFile(), Data())
+    }
 }

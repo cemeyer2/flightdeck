@@ -1,0 +1,70 @@
+// Chrome tabs: the app binary as Chrome's native-messaging host. Chrome launches it with the extension's origin as the
+// only argument (see ChromeHostArgv) and talks framed JSON over stdin/stdout. This mode is a thin relay: frames from
+// the extension go to the running app over the private socket (ChromeTabsSocket), and when the app connects the host
+// asks the extension to send its table again. stdout carries framed messages only; stderr, which Chrome may save to
+// its log, carries event kinds and byte counts, never message content.
+import Foundation
+import FlightDeckCore
+
+enum ChromeHost {
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var socketFD: Int32 = -1
+    // Only the latest of each is kept and re-sent on (re)connect, never a backlog.
+    nonisolated(unsafe) private static var latestHello: Data?
+    nonisolated(unsafe) private static var latestTabs: Data?
+
+    static func run(origin: String?) -> Never {
+        setvbuf(stdout, nil, _IONBF, 0)
+        signal(SIGPIPE, SIG_IGN)
+        let origin = origin ?? ChromeTabsConstants.allowedOrigins[0]
+        let reader = Thread { readExtension() }
+        reader.start()
+        let sock = ChromeTabsSocket.defaultSocketURL()
+        while true {
+            guard let fd = ChromeTabsSocket.connect(sock) else { sleep(5); continue }
+            lock.lock()
+            var ok = ChromeFraming.writeFrame(fd: fd, ChromeTabsMessage.origin(origin).encoded())
+            for m in [latestHello, latestTabs].compactMap({ $0 }) where ok { ok = ChromeFraming.writeFrame(fd: fd, m) }
+            if ok { socketFD = fd }
+            lock.unlock()
+            if ok {
+                log("connected to FlightDeck")
+                _ = ChromeFraming.writeFrame(fd: 1, ChromeTabsMessage.refresh.encoded())
+                // The app never sends anything; this read returns when it closes the connection (or quits).
+                var b: UInt8 = 0
+                while read(fd, &b, 1) > 0 {}
+                log("FlightDeck closed the connection")
+            }
+            lock.lock(); socketFD = -1; lock.unlock()
+            close(fd)
+            sleep(5)
+        }
+    }
+
+    /// Reads the extension's frames from stdin until Chrome closes it, forwarding each one to the app.
+    private static func readExtension() {
+        let read: (Int) -> Data? = { ChromeFraming.readExact(fd: 0, count: $0) }
+        while true {
+            let frame: Data
+            do {
+                guard let f = try ChromeFraming.readFrame(read) else { log("extension disconnected"); exit(0) }
+                frame = f
+            } catch {
+                log("refused an oversized frame"); exit(65)
+            }
+            // The app validates again; this check only decides what to keep for a reconnect.
+            switch ChromeTabsMessage.parse(frame) {
+            case .hello?: lock.lock(); latestHello = frame; lock.unlock()
+            case .tabs?: lock.lock(); latestTabs = frame; lock.unlock()
+            default: log("dropped an invalid message of \(frame.count) bytes"); continue
+            }
+            lock.lock()
+            if socketFD >= 0 && !ChromeFraming.writeFrame(fd: socketFD, frame) {
+                shutdown(socketFD, SHUT_RDWR)   // the connection loop sees the close and retries
+            }
+            lock.unlock()
+        }
+    }
+
+    private static func log(_ s: String) { FileHandle.standardError.write(Data("FlightDeck Chrome host: \(s)\n".utf8)) }
+}
