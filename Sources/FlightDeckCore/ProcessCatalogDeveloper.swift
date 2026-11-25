@@ -22,5 +22,14 @@ enum ProcessCatalogDeveloper {
             findingNote: "FlightDeck itself is busy.",
             names: ["FlightDeck", "Flightdeck"], pathPrefixes: ["/Applications/FlightDeck.app/"],
             groundedIn: "https://github.com/cemeyer2/flightdeck"),
+        ProcessExplanation(
+            id: "dev-docker-desktop", title: "Docker Desktop",
+            summary: "Docker Desktop, Docker's app for building, sharing and running containerised applications on the Mac.",
+            maker: .vendor("Docker"),
+            busyWhen: "While containers are running or images are building.",
+            quit: .avoid, whatToDo: nil,
+            findingNote: "Docker Desktop is busy, usually from containers that are running or images being built.",
+            pathPrefixes: ["/Applications/Docker.app/"], bundleIDs: ["com.docker.docker"], teamIDs: ["9BNSXJN65R"],
+            groundedIn: "https://docs.docker.com/desktop/; file:///Applications/Docker.app"),
     ]
 }
