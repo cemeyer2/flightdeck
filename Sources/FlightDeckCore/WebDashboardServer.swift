@@ -164,16 +164,20 @@ public final class WebDashboardServer: @unchecked Sendable {
         guard requestedPort != 0 else { listen(ready: ready); return }
         Self.releasing.whenFree(requestedPort) { [weak self] in
             guard let self else { return }
-            self.queue.async {
-                self.lock.lock(); let stopped = self.hold.stopped; self.lock.unlock()
-                if !stopped { self.listen(ready: ready) }
-            }
+            self.queue.async { self.listen(ready: ready) }
         }
     }
 
-    /// With `retry`, a bind that finds a fixed port still taken by a listener past its fallback binds once more when
-    /// that listener reports `.cancelled` (retryWhenOverdueEnds).
+    /// Binds unless stopped. The stopped check and taking the port are one step, so a `stop()` that lands while this
+    /// binds always finds the port to mark. With `retry`, a bind that finds a fixed port still taken by a listener
+    /// past its fallback binds once more when that listener reports `.cancelled` (retryWhenOverdueEnds).
     private func listen(retry: Bool = true, ready: @escaping @Sendable (String?) -> Void) {
+        lock.lock()
+        guard !hold.stopped else { lock.unlock(); return }
+        hold.attempt += 1; hold.cancelled = false
+        if requestedPort != 0 { hold.port = requestedPort }
+        let attempt = hold.attempt
+        lock.unlock()
         let params = NWParameters.tcp
         // No address reuse: with it, a bind on every interface succeeds even while another listener holds the port on
         // 127.0.0.1, and Settings would say "Serving" for a port that something else answers on this Mac.
@@ -183,13 +187,13 @@ public final class WebDashboardServer: @unchecked Sendable {
         let port = NWEndpoint.Port(rawValue: requestedPort) ?? .any
         if loopbackOnly { params.requiredLocalEndpoint = .hostPort(host: .ipv4(.loopback), port: port) }
         let l: NWListener
-        do { l = loopbackOnly ? try NWListener(using: params) : try NWListener(using: params, on: port) } catch { ready("\(error)"); return }
+        do { l = loopbackOnly ? try NWListener(using: params) : try NWListener(using: params, on: port) } catch {
+            // Nothing will report `.cancelled`: let go of the port now, and of a mark a `stop()` meanwhile put on it.
+            lock.lock(); hold.cancelled = true; let p = hold.port, t = hold.token; lock.unlock()
+            if let p, let t { Self.releasing.end(p, token: t) }
+            ready("\(error)"); return
+        }
         listener = l
-        lock.lock()
-        hold.attempt += 1; hold.cancelled = false
-        if requestedPort != 0 { hold.port = requestedPort }
-        let attempt = hold.attempt
-        lock.unlock()
         l.newConnectionHandler = { [weak self] c in self?.accept(c) }
         var reported = false   // only touched on `queue`, where state updates are delivered
         let lock = lock, hold = hold
@@ -231,8 +235,7 @@ public final class WebDashboardServer: @unchecked Sendable {
             self.queue.async {
                 guard !settled else { return }
                 settled = true
-                self.lock.lock(); let stopped = self.hold.stopped; self.lock.unlock()
-                if !stopped { self.listen(retry: false, ready: ready) }
+                self.listen(retry: false, ready: ready)
             }
         }
         guard waiting else { return false }
