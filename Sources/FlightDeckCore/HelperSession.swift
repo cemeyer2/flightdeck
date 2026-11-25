@@ -129,8 +129,8 @@ public final class HelperSession: @unchecked Sendable {
     /// per-tick deadline. nil = no helper values this tick (locked, off, slow or backing off).
     public func rusage(for ids: [ProcessIdentity]) -> [ProcessIdentity: HelperRusage]? {
         guard !ids.isEmpty else { return nil }
-        let end = clock().addingTimeInterval(Self.perTickDeadline)
         if standaloneMode { refreshIfStale(maxAge: Self.standaloneStatusAge, deadline: Self.perTickDeadline) }
+        let end = clock().addingTimeInterval(Self.perTickDeadline)
         guard state == .unlocked else { return nil }
         var out: [ProcessIdentity: HelperRusage] = [:]
         var answered = false

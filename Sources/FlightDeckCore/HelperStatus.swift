@@ -36,6 +36,8 @@ public enum HelperStatus: Equatable, Sendable {
         if i.registrationRefused { return .notSupported }
         if let e = i.registrationError { return .failed(e) }
         if i.registration == .requiresApproval { return .waitingForApproval }
+        // The toggle says on but nothing is registered (a failed install, or removed elsewhere): it is off.
+        if i.registration == .notRegistered || i.registration == .notFound { return .off }
         if i.hello == .refused(.bundleMissing) { return .failed("the helper couldn't find FlightDeck") }
         if i.hello == .ok(rightInPlace: false) { return .failed("couldn't set up the administrator check") }
         if i.hello == .mismatch { return i.mismatchSurvivedRelaunch ? .outOfDate : .notResponding }

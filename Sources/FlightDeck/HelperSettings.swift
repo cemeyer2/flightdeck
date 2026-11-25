@@ -136,6 +136,11 @@ final class HelperModel: ObservableObject {
         } else if session != nil {
             drop()
         }
+        // On, but nothing registered and no install error to show (removed elsewhere, or a failed install before a
+        // relaunch): turn the toggle off so the toggle, the status and standalone --mcp agree.
+        if userEnabled && (reg == .notRegistered || reg == .notFound) && registrationError == nil && !registrationRefused && !busy {
+            UserDefaults.standard.set(false, forKey: HelperSession.enabledKey)
+        }
         let inputs = HelperStatusInputs(demo: false, userEnabled: userEnabled, build: build, registration: reg,
                                         registrationError: registrationError, hello: userEnabled && reg == .enabled ? hello : nil,
                                         mismatchSurvivedRelaunch: mismatchSurvivedRelaunch,
@@ -215,7 +220,7 @@ final class HelperModel: ObservableObject {
             // Waiting for approval in Login Items is reported as an error by some macOS versions; it isn't one.
             if daemon.status == .requiresApproval { return }
             let code = (error as NSError).code
-            if code == kSMErrorServiceUnavailable || code == kSMErrorInvalidSignature { registrationRefused = true }
+            if code == kSMErrorServiceUnavailable { registrationRefused = true }
             else { registrationError = error.localizedDescription }
             try? daemon.unregister()   // never leave a half-registered daemon behind
         }

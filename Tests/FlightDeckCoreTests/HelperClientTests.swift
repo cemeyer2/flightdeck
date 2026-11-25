@@ -66,6 +66,13 @@ final class HelperClientTests: XCTestCase {
         XCTAssertEqual(HelperStatus.resolve(inputs { $0.notResponding = true }), .notResponding)
     }
 
+    func testToggleOnButNotRegisteredIsNotLocked() {
+        XCTAssertEqual(HelperStatus.resolve(inputs { $0.registration = .notRegistered; $0.hello = nil }), .off)
+        XCTAssertEqual(HelperStatus.resolve(inputs { $0.registration = .notFound; $0.hello = nil }), .off)
+        // A failed register() is still shown as such.
+        XCTAssertEqual(HelperStatus.resolve(inputs { $0.registration = .notRegistered; $0.registrationError = "x" }), .failed("x"))
+    }
+
     func testLockedAndUnlocked() {
         let locked = HelperStatus.resolve(inputs { _ in })
         XCTAssertEqual(locked, .locked)
