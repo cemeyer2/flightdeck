@@ -114,4 +114,45 @@ final class ProcessCatalogContentTests: XCTestCase {
         print("COST catalog 10k lookups", String(format: "%.1f ms", ms), "(\(hits) known)")
         XCTAssertLessThan(ms, 100)
     }
+
+    /// Writes one Markdown review digest per batch, plus every cited source (one per line, for checking), to
+    /// FLIGHTDECK_CATALOG_REVIEW_DIR. Skipped unless that variable is set.
+    func testWriteReviewDigest() throws {
+        guard let path = ProcessInfo.processInfo.environment["FLIGHTDECK_CATALOG_REVIEW_DIR"] else {
+            throw XCTSkip("set FLIGHTDECK_CATALOG_REVIEW_DIR to write the review digests")
+        }
+        let dir = URL(fileURLWithPath: path)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        func slug(_ s: String) -> String {
+            s.lowercased().map { $0.isLetter || $0.isNumber ? String($0) : "-" }.joined()
+                .split(separator: "-").joined(separator: "-")
+        }
+        var sources = Set<String>()
+        for b in ProcessCatalogParts.batches {
+            var md = "# Batch \(b.number)/12: \(b.area) (PENDING USER REVIEW, \(b.entries.count) entries)\n"
+            for e in b.entries {
+                let keys = [("names", e.names), ("name prefixes", e.namePrefixes), ("paths", e.paths), ("path prefixes", e.pathPrefixes),
+                            ("bundle IDs", e.bundleIDs), ("team IDs", e.teamIDs)]
+                    .filter { !$0.1.isEmpty }.map { "\($0.0): " + $0.1.map { "`\($0)`" }.joined(separator: ", ") }
+                let srcs = e.groundedIn.components(separatedBy: "; ")
+                sources.formUnion(srcs)
+                md += """
+
+                ## \(e.title) (`\(e.id)`)
+
+                - **Summary:** \(e.summary)
+                - **Maker:** \(e.makerName)\(e.managed ? " (managed by your organisation)" : "")
+                - **Usually busy when:** \(e.busyWhen ?? "—")
+                - **Quitting it:** \(e.quit.rawValue): \(e.quit.sentence)
+                - **What to do:** \(e.whatToDo ?? "—")
+                - **Finding note:** \(e.findingNote)
+                - **Match keys:** \(keys.joined(separator: "; "))
+                - **Sources:** \(srcs.map { "[\($0)](\($0))" }.joined(separator: ", "))
+
+                """
+            }
+            try md.write(to: dir.appendingPathComponent(String(format: "batch-%02d-%@.md", b.number, slug(b.area))), atomically: true, encoding: .utf8)
+        }
+        try (sources.sorted().joined(separator: "\n") + "\n").write(to: dir.appendingPathComponent("sources.txt"), atomically: true, encoding: .utf8)
+    }
 }
