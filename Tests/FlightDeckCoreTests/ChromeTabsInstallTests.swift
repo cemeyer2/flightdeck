@@ -102,6 +102,10 @@ final class ChromeTabsInstallTests: XCTestCase {
         XCTAssertFalse(ChromeExtensionInstall.isVersion("1.0.0", newerThan: "1.0"))
         XCTAssertFalse(ChromeExtensionInstall.isVersion("1.0.0", newerThan: "1.0.0"))
         XCTAssertFalse(ChromeExtensionInstall.isVersion("1.0.8", newerThan: "1.0.9"))
+        // ReleaseVersion's strict parsing: a version that isn't dotted digits is never newer, nor older than anything.
+        XCTAssertFalse(ChromeExtensionInstall.isVersion("1.0.9", newerThan: "1.0.x"))
+        XCTAssertFalse(ChromeExtensionInstall.isVersion("2.a", newerThan: "1.9"))
+        XCTAssertFalse(ChromeExtensionInstall.isVersion("", newerThan: "1.0"))
     }
 
     func writeExtension(_ dir: URL, version: String, marker: String = "") throws {

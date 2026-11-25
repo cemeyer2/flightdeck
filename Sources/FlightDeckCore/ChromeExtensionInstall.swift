@@ -52,14 +52,11 @@ public enum ChromeExtensionInstall {
             || j["name"]?.string != ChromeTabsConstants.hostName
     }
 
-    /// Dotted numeric comparison: "1.0.10" is newer than "1.0.9"; missing parts count as 0.
+    /// Compared as `ReleaseVersion`s, so the extension and update checks order versions the same way: "1.0.10" is newer
+    /// than "1.0.9" and missing parts count as 0. A version that isn't dotted digits is never newer.
     public static func isVersion(_ a: String, newerThan b: String) -> Bool {
-        let x = a.split(separator: ".").map { Int($0) ?? 0 }, y = b.split(separator: ".").map { Int($0) ?? 0 }
-        for i in 0..<max(x.count, y.count) {
-            let p = i < x.count ? x[i] : 0, q = i < y.count ? y[i] : 0
-            if p != q { return p > q }
-        }
-        return false
+        guard let x = ReleaseVersion(a), let y = ReleaseVersion(b) else { return false }
+        return x > y
     }
 
     /// The `version` in an extension folder's manifest.json, nil when there's no readable manifest.
