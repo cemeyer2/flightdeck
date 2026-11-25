@@ -212,6 +212,35 @@ final class HelperClientTests: XCTestCase {
         XCTAssertEqual(fake.calls(of: "hello").count, 2)
     }
 
+    /// The helper restarts and the in-tick reconnect times out: the next tick reconnects by itself, and the app's
+    /// unlock is still in effect (no second administrator prompt).
+    func testUnlockSurvivesReconnectThatTimedOut() {
+        let fake = FakeHelperClient()
+        let s = HelperSession.unlockedForTests(fake)
+        var restarted = true
+        fake.handler = { [usage, fake] r in
+            guard case .processRusage(let ids) = r else { return nil }
+            if restarted { restarted = false; fake.unreachable = true; return .refused(HelperRefusal(code: .helloRequired, message: "")) }
+            return .rusage(ids.map { HelperRusageEntry(id: $0, rusage: usage) })
+        }
+        XCTAssertNil(s.rusage(for: ids(1)))
+        XCTAssertEqual(s.lastHello, .unreachable)
+        fake.unreachable = false
+        XCTAssertEqual(s.rusage(for: ids(1))?.count, 1)
+        XCTAssertEqual(s.state, .unlocked)
+    }
+
+    /// After lock (disconnect), the tick never reconnects on its own.
+    func testNoReconnectAfterDisconnect() {
+        let fake = FakeHelperClient()
+        let s = HelperSession.unlockedForTests(fake)
+        fake.echoRusage(usage)
+        s.disconnect()
+        let hellos = fake.calls(of: "hello").count
+        XCTAssertNil(s.rusage(for: ids(1)))
+        XCTAssertEqual(fake.calls(of: "hello").count, hellos)
+    }
+
     func testStandaloneFollowsHolder() {
         var now = Date(timeIntervalSince1970: 1000)
         let fake = FakeHelperClient()

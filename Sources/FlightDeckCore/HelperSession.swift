@@ -59,6 +59,7 @@ public final class HelperSession: @unchecked Sendable {
     }
 
     public var lastHello: HelloOutcome? { mutex.lock(); defer { mutex.unlock() }; return hello }
+    private var hasStatus: Bool { mutex.lock(); defer { mutex.unlock() }; return status != nil }
     public var notResponding: Bool { mutex.lock(); defer { mutex.unlock() }; return gate.notResponding }
 
     /// Sends hello. On a version mismatch the connection is dropped (an old helper may still be running after an
@@ -76,7 +77,12 @@ public final class HelperSession: @unchecked Sendable {
         if outcome == .mismatch { client.invalidate() }
         mutex.lock()
         hello = outcome
-        if case .ok = outcome {} else { status = nil }
+        // A helper that didn't answer in time keeps the last status, so the app's unlock survives a slow reconnect
+        // (the helper re-verifies the authorization on every request anyway). A mismatch or refusal clears it.
+        switch outcome {
+        case .ok, .unreachable: break
+        case .mismatch, .refused: status = nil
+        }
         mutex.unlock()
         return outcome
     }
@@ -131,6 +137,15 @@ public final class HelperSession: @unchecked Sendable {
         guard !ids.isEmpty else { return nil }
         if standaloneMode { refreshIfStale(maxAge: Self.standaloneStatusAge, deadline: Self.perTickDeadline) }
         let end = clock().addingTimeInterval(Self.perTickDeadline)
+        // The app still holds its unlock but the last hello failed (a helper restart whose reconnect ran out of the
+        // tick's time): reconnect here, within this tick, so the unlock isn't lost until something else refreshes.
+        // Only after an unreachable hello: a nil hello means disconnected (lock), which must not re-grant anything.
+        if !standaloneMode, lastHello == .unreachable, authorization() != nil {
+            let left = end.timeIntervalSince(clock())
+            if left > 0, case .ok = connect(deadline: left), !hasStatus {
+                refreshStatus(deadline: max(end.timeIntervalSince(clock()), 0.001))
+            }
+        }
         guard state == .unlocked else { return nil }
         var out: [ProcessIdentity: HelperRusage] = [:]
         var answered = false
