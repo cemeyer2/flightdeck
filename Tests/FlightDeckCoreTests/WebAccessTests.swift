@@ -63,6 +63,20 @@ final class WebAccessTests: XCTestCase {
     func testCGNATOnWiFiDoesNotMatchTailnet() {
         XCTAssertEqual(admit("100.64.0.5", via: Self.en0, allow: "100.64.0.0/10, fd7a:115c:a1e0::/48"), .drop)
         XCTAssertEqual(admit("100.64.0.5", via: Self.utun4, allow: "100.64.0.0/10, fd7a:115c:a1e0::/48"), .admit)
+        // Advanced on does not let a tailnet entry match a not-local arrival.
+        XCTAssertEqual(admit("100.64.0.5", via: Self.en0, Self.context(advanced: true), allow: "100.64.0.0/10"), .drop)
+        XCTAssertEqual(admit("100.64.0.5", via: Self.en0, Self.context(advanced: true), allow: "100.64.0.0/10, 100.0.0.0/8"), .admit,
+                       "a broader non-tailnet entry still counts with Advanced on")
+    }
+
+    func testCGNATOnLinkDoesNotMatchTailnet() {
+        var ctx = Self.context()
+        ctx.interfaces[0].addresses.append(.init(ip: WebIP("100.70.0.2")!, length: 24))
+        XCTAssertEqual(WebAccess.classify(remote: WebIP("100.70.0.9")!, arrival: ctx.interface(owning: Self.en0), context: ctx), .local)
+        XCTAssertEqual(admit("100.70.0.9", via: Self.en0, ctx, allow: "100.64.0.0/10"), .drop)
+        XCTAssertEqual(admit("100.70.0.9", via: Self.en0, ctx, allow: "100.64.0.0/10, 100.70.0.0/24"), .drop,
+                       "an entry inside the tailnet range is a tailnet entry")
+        XCTAssertEqual(admit("100.70.0.9", via: Self.en0, ctx, allow: "100.0.0.0/8"), .admit)
     }
 
     func testProcessSignalAloneHonoursNothing() {

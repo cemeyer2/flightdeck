@@ -41,11 +41,17 @@ public enum WebAccess {
         switch cls {
         case .loopback: return allowlist.contains(remote) ? .admit : .admitIfLoopbackHost
         case _ where allowlist.entries.isEmpty: return cls == .local ? .admit : .drop
-        case .local: return allowlist.contains(remote) ? .admit : .drop
+        // A tailnet entry is honoured only for tailnet arrivals: a CGNAT or other-VPN 100.64/10 peer reaching Wi-Fi
+        // (or a 100.64/10 on-link LAN address) never matches one.
+        case .local: return nonTailnetEntryContains(remote, allowlist) ? .admit : .drop
         // Only a tailnet entry admits a tailnet address: a broad ULA entry (fd00::/8) is meant for LAN devices.
         case .tailnet: return allowlist.entries.contains { isTailnet($0.prefix) && $0.prefix.contains(remote) } ? .admit : .drop
-        case .notLocal: return context.advanced && allowlist.contains(remote) ? .admit : .drop
+        case .notLocal: return context.advanced && nonTailnetEntryContains(remote, allowlist) ? .admit : .drop
         }
+    }
+
+    static func nonTailnetEntryContains(_ remote: WebIP, _ allowlist: WebAllowlist) -> Bool {
+        allowlist.entries.contains { !isTailnet($0.prefix) && $0.prefix.contains(remote) }
     }
 
     /// How Settings labels an entry. The two "ignored" labels mean the entry currently matches nothing.
