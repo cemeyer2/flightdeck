@@ -61,9 +61,81 @@ public final class WebDashboardServer: @unchecked Sendable {
         self.provider = provider; self.onStreamCount = onStreamCount; self.log = log
     }
 
-    /// Starts listening; `ready` is called once with nil when listening, or an error message.
+    /// What a settings change does to the dashboard, from the port the running server was asked for (nil: none) and
+    /// the port wanted (nil: off). Only on/off and a new port start a server; allowlist, Advanced and network changes
+    /// are `update(context:allowlist:)` on the running one, so they never rebind.
+    public enum Change: Equatable, Sendable {
+        /// Stop any running server; nothing to start.
+        case off
+        /// Keep the running server and hand it the current allowlist and network.
+        case update
+        /// Stop any running server and start one on the wanted port (it binds once the old listener has let go).
+        case start
+    }
+
+    public static func change(running: UInt16?, wanted: UInt16?) -> Change {
+        guard let wanted else { return .off }
+        return running == wanted ? .update : .start
+    }
+
+    /// Ports whose listener is still cancelling, process-wide. `stop()` marks its port before it returns and the mark
+    /// is cleared when the listener reaches `.cancelled`; a server starting on a marked port binds only then.
+    final class Releasing: @unchecked Sendable {
+        private let lock = NSLock()
+        private var held: [UInt16: (tokens: Set<Int>, waiting: [@Sendable () -> Void])] = [:]
+        private var next = 0
+
+        func begin(_ port: UInt16) -> Int {
+            lock.lock(); defer { lock.unlock() }
+            next += 1
+            held[port, default: ([], [])].tokens.insert(next)
+            return next
+        }
+
+        /// Clears one mark (again is harmless); the starts waiting run once no mark on the port is left.
+        func end(_ port: UInt16, token: Int) {
+            lock.lock()
+            guard var h = held[port], h.tokens.remove(token) != nil else { lock.unlock(); return }
+            if h.tokens.isEmpty { held[port] = nil } else { held[port] = h; h.waiting = [] }
+            lock.unlock()
+            for w in h.waiting { w() }
+        }
+
+        /// Runs `then` once `port` is free: at once when no listener on it is cancelling.
+        func whenFree(_ port: UInt16, _ then: @escaping @Sendable () -> Void) {
+            lock.lock()
+            if held[port] != nil { held[port]!.waiting.append(then); lock.unlock(); return }
+            lock.unlock()
+            then()
+        }
+    }
+    static let releasing = Releasing()
+    /// A cancel that never reports `.cancelled` stops holding up the port after this long.
+    static let releaseFallback: TimeInterval = 5
+
+    /// The port this server's listener holds (or is binding), its Releasing mark once stopped, and whether the listener
+    /// has already cancelled itself. Guarded by `lock`: `stop()` may run on any thread, the state handler on `queue`.
+    private final class Hold: @unchecked Sendable {
+        var port: UInt16?, token: Int?, cancelled = false, stopped = false
+    }
+    private let lock = NSLock()
+    private let hold = Hold()
+
+    /// Starts listening; `ready` is called once with nil when listening, or an error message. On a fixed port that a
+    /// stopped server's listener is still cancelling, it binds once that listener has let go.
     public func start(ready: @escaping @Sendable (String?) -> Void) {
         guard allowlist.invalid.isEmpty else { ready(Self.invalidAllowlist); return }
+        guard requestedPort != 0 else { listen(ready: ready); return }
+        Self.releasing.whenFree(requestedPort) { [weak self] in
+            guard let self else { return }
+            self.queue.async {
+                self.lock.lock(); let stopped = self.hold.stopped; self.lock.unlock()
+                if !stopped { self.listen(ready: ready) }
+            }
+        }
+    }
+
+    private func listen(ready: @escaping @Sendable (String?) -> Void) {
         let params = NWParameters.tcp
         // No address reuse: with it, a bind on every interface succeeds even while another listener holds the port on
         // 127.0.0.1, and Settings would say "Serving" for a port that something else answers on this Mac.
@@ -75,27 +147,47 @@ public final class WebDashboardServer: @unchecked Sendable {
         let l: NWListener
         do { l = loopbackOnly ? try NWListener(using: params) : try NWListener(using: params, on: port) } catch { ready("\(error)"); return }
         listener = l
+        if requestedPort != 0 { lock.lock(); hold.port = requestedPort; lock.unlock() }
         l.newConnectionHandler = { [weak self] c in self?.accept(c) }
         var reported = false   // only touched on `queue`, where state updates are delivered
+        let lock = lock, hold = hold
         l.stateUpdateHandler = { [weak self] st in
             switch st {
             case .ready:
-                self?.port = l.port?.rawValue
+                let bound = l.port?.rawValue
+                self?.port = bound
+                lock.lock(); hold.port = bound; lock.unlock()
                 if !reported { reported = true; ready(nil) }
             // `.waiting` is how a listener reports e.g. "address already in use"; it won't recover on its own here.
             case .failed(let e), .waiting(let e):
                 if !reported { reported = true; ready("\(e)") }
                 l.cancel()
+            case .cancelled:
+                lock.lock(); hold.cancelled = true; let p = hold.port, t = hold.token; lock.unlock()
+                if let p, let t { Self.releasing.end(p, token: t) }
             default: break
             }
         }
         l.start(queue: queue)
     }
 
-    /// Cancels the listener and every open connection (streams end at once).
+    /// Cancels the listener and every open connection (streams end at once). The port is marked as releasing before
+    /// this returns, so a server started on it right after waits for the listener to reach `.cancelled`.
     public func stop() {
+        lock.lock()
+        hold.stopped = true
+        let p = hold.cancelled ? nil : hold.port
+        if let p, hold.token == nil { hold.token = Self.releasing.begin(p) }
+        let t = hold.token
+        lock.unlock()
+        if let p, let t {
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + Self.releaseFallback) {
+                Self.releasing.end(p, token: t)
+            }
+        }
         queue.async { [self] in
-            listener?.cancel(); listener = nil; port = nil
+            listener?.cancel()   // its `.cancelled` clears the mark
+            listener = nil; port = nil
             for k in conns.values { k.c.cancel() }
         }
     }
