@@ -102,6 +102,12 @@ final class ChromeTabsSocketTests: XCTestCase {
         XCTAssertEqual(p.uid, getuid())
         XCTAssertNotNil(p.auditToken)
         XCTAssertNil(ChromePeerAuth.browser(ofHostPID: getpid()), "our parent isn't Google Chrome")
+        // Both the standard install path and the macOS 15 code-signing-clone path (.app.bundle) must match.
+        XCTAssertTrue("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome".hasSuffix(ChromePeerAuth.chromeSuffix)
+                      && "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome".contains(ChromePeerAuth.chromeAppName))
+        XCTAssertTrue("/private/var/folders/x/y/X/com.google.Chrome.code_sign_clone/z/Google Chrome.app.bundle/Contents/MacOS/Google Chrome".hasSuffix(ChromePeerAuth.chromeSuffix)
+                      && "/private/var/folders/x/y/X/com.google.Chrome.code_sign_clone/z/Google Chrome.app.bundle/Contents/MacOS/Google Chrome".contains(ChromePeerAuth.chromeAppName))
+        XCTAssertFalse("Brave Browser.app/Contents/MacOS/Brave Browser".hasSuffix(ChromePeerAuth.chromeSuffix))
         // Our own signature satisfies our own requirement (skipped when the test runner is unsigned).
         if let req = ChromePeerAuth.ownRequirement() { XCTAssertTrue(ChromePeerAuth.isTrusted(p, requirement: req)) }
     }

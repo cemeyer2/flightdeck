@@ -160,7 +160,11 @@ public enum ChromePeerAuth {
         return SecCodeCheckValidity(code, [], requirement) == errSecSuccess
     }
 
-    static let chromeSuffix = "Google Chrome.app/Contents/MacOS/Google Chrome"
+    // macOS 15+ runs Chrome from a code-signing clone whose path ends in
+    // "Google Chrome.app.bundle/Contents/MacOS/Google Chrome" rather than
+    // "Google Chrome.app/Contents/MacOS/Google Chrome", so both are checked.
+    static let chromeSuffix = "/Contents/MacOS/Google Chrome"
+    static let chromeAppName = "Google Chrome.app"
 
     /// The browser process that launched the host: the host's parent, accepted only when its executable is Google
     /// Chrome (stable). Returns its pid and start time, so a later process reusing the pid never matches.
@@ -170,7 +174,9 @@ public enum ChromePeerAuth {
         let ppid = pid_t(bsd.pbi_ppid)
         guard ppid > 1 else { return nil }
         var buf = [CChar](repeating: 0, count: Int(MAXPATHLEN) * 4)
-        guard proc_pidpath(ppid, &buf, UInt32(buf.count)) > 0, String(cString: buf).hasSuffix(chromeSuffix) else { return nil }
+        guard proc_pidpath(ppid, &buf, UInt32(buf.count)) > 0 else { return nil }
+        let path = String(cString: buf)
+        guard path.hasSuffix(chromeSuffix) && path.contains(chromeAppName) else { return nil }
         return ProcessSampler.identity(of: ppid)
     }
 
