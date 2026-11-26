@@ -38,6 +38,12 @@ final class UniFiSecurityTests: XCTestCase {
         XCTAssertTrue(e.localizedDescription.contains("AA:BB") && e.localizedDescription.contains("CC:DD"))
     }
 
+    func testPresentedFingerprintIsOfferedForUntrustedAndChangedCertificates() {
+        XCTAssertEqual(UniFiError.untrustedCertificate(fingerprint: "AA:BB").presentedFingerprint, "AA:BB")
+        XCTAssertEqual(UniFiError.certificateChanged(pinned: "AA:BB", presented: "CC:DD").presentedFingerprint, "CC:DD")
+        XCTAssertNil(UniFiError.unauthorized("x").presentedFingerprint)
+    }
+
     func testHostnameStripsPort() {
         XCTAssertEqual(UniFiConfig(host: "unifi.local:8443").hostname, "unifi.local")
         XCTAssertEqual(UniFiConfig(host: " 192.168.1.1 ").hostname, "192.168.1.1")

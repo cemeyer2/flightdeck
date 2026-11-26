@@ -42,6 +42,15 @@ public enum UniFiError: Error, LocalizedError, Equatable {
     case siteNotFound(String, available: [String])
     case invalidHost
 
+    /// The certificate fingerprint the user can be asked to trust: the new one, whether none was pinned or the pin changed.
+    public var presentedFingerprint: String? {
+        switch self {
+        case .untrustedCertificate(let fp): return fp
+        case .certificateChanged(_, let presented): return presented
+        default: return nil
+        }
+    }
+
     public var errorDescription: String? {
         switch self {
         case .untrustedCertificate(let fp): return "The console's certificate isn't trusted yet. SHA-256 fingerprint: \(fp)"

@@ -18,7 +18,8 @@ final class UniFiModel: ObservableObject {
     /// The last successful read, kept while the view is closed so reopening shows it at once.
     @Published private(set) var snapshot: UniFiSnapshot?
     @Published private(set) var lastError: String?
-    /// Set when the console presented a certificate that isn't trusted yet; the UI asks the user to trust it.
+    /// Set when the console presented a certificate that isn't trusted yet, or a different one than the pinned one; the
+    /// UI asks the user to trust it. Trusting only replaces the pin, so the saved credentials are kept.
     @Published private(set) var untrustedFingerprint: String?
     @Published private(set) var loading = false
     @Published private(set) var suggestion: UniFiDetection.Suggestion?
@@ -133,7 +134,7 @@ final class UniFiModel: ObservableObject {
     }
 
     private func fail(_ e: UniFiError) {
-        if case .untrustedCertificate(let fp) = e { untrustedFingerprint = fp }
+        if let fp = e.presentedFingerprint { untrustedFingerprint = fp }
         if case .unauthorized = e { client = nil }   // log in afresh next time (credentials may have changed)
         lastError = e.localizedDescription
         append(nil, nil)   // a gap in the WAN graph, not a fake zero
@@ -157,8 +158,7 @@ final class UniFiModel: ObservableObject {
             let client = try UniFiAPIClient(config: c, credentials: creds)
             return (true, try await client.testConnection(), nil)
         } catch let e as UniFiError {
-            if case .untrustedCertificate(let fp) = e { return (false, e.localizedDescription, fp) }
-            return (false, e.localizedDescription, nil)
+            return (false, e.localizedDescription, e.presentedFingerprint)
         } catch { return (false, error.localizedDescription, nil) }
     }
 
