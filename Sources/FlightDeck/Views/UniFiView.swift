@@ -35,8 +35,11 @@ struct UniFiView: View {
             }
             // The cached snapshot stays on screen after a failed poll; the error says why it isn't updating.
             if let e = model.lastError {
-                Text(model.untrustedFingerprint != nil ? "\(e)\nCompare it with your console's certificate, then trust it in Settings › UniFi." : e)
+                Text(model.untrustedFingerprint != nil ? "\(e)\nCompare it with your console's certificate before trusting it." : e)
                     .font(.system(size: 11)).foregroundStyle(p.crit).fixedSize(horizontal: false, vertical: true)
+                if let fp = model.untrustedFingerprint {
+                    Button("Trust This Certificate") { model.trust(fp) }
+                }
             }
         }
     }
