@@ -49,7 +49,9 @@ struct UniFiSettingsSection: View {
                 }
                 if let fp = fingerprint ?? model.untrustedFingerprint {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("The console's certificate isn't trusted by macOS (consoles use self-signed certificates). Compare this SHA-256 fingerprint with the one shown in your console's settings or browser before trusting it:")
+                        Text(model.config?.pinnedFingerprint == nil
+                             ? "The console's certificate isn't trusted by macOS (consoles use self-signed certificates). Compare this SHA-256 fingerprint with the one shown in your console's settings or browser before trusting it:"
+                             : "The console's certificate has changed from the one you pinned. If you renewed or replaced it, compare this SHA-256 fingerprint with the one shown in your console's settings or browser, then trust it. Your saved credentials are kept:")
                             .font(.caption).fixedSize(horizontal: false, vertical: true)
                         Text(fp).font(.system(size: 10, design: .monospaced)).textSelection(.enabled)
                         Button("Trust This Certificate") { trust(fp) }
