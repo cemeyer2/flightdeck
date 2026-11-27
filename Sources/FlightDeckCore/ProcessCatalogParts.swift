@@ -18,6 +18,12 @@ enum ProcessCatalogParts {
         Batch(number: 10, area: "Sync, meetings, productivity apps", entries: ProcessCatalogApps.part),
         Batch(number: 11, area: "Developer tools and terminals", entries: ProcessCatalogDeveloper.part),
         Batch(number: 12, area: "Corporate security and MDM (managed)", entries: ProcessCatalogManaged.part),
+        Batch(number: 13, area: "Apple first-party apps", entries: ProcessCatalogAppleApps.part),
+        Batch(number: 14, area: "Productivity, communication and cloud storage", entries: ProcessCatalogProductivity.part),
+        Batch(number: 15, area: "Creative, media and design apps", entries: ProcessCatalogCreative.part),
+        Batch(number: 16, area: "Developer tools, editors and databases", entries: ProcessCatalogDeveloperExtra.part),
+        Batch(number: 17, area: "Consumer VPN clients", entries: ProcessCatalogVPN.part),
+        Batch(number: 18, area: "macOS utility and productivity tools", entries: ProcessCatalogUtilities.part),
     ]
 
     static let all: [ProcessExplanation] = batches.flatMap(\.entries)
